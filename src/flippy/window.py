@@ -7,15 +7,16 @@ os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 import pygame  # noqa:E402
 from pygame.event import Event  # noqa:E402
 
-# Constants
-WIDTH, HEIGHT = 400, 400
+WIDTH = 400
+HEIGHT = 400
 
 SQUARE_SIZE = WIDTH // COLS
 
-# Colors
 COLOR_WHITE_DISC = (255, 255, 255)
 COLOR_BLACK_DISC = (0, 0, 0)
 COLOR_BACKGROUND = (0, 128, 0)
+
+FRAME_RATE = 60
 
 
 class Window:
@@ -24,6 +25,7 @@ class Window:
         self.board = Board.start()
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.running = False
+        self.clock = pygame.time.Clock()
         pygame.display.set_caption("Flippy")
 
     def run(self) -> None:
@@ -35,63 +37,48 @@ class Window:
 
             self.draw()
 
-            # Check for game over
             if self.board.is_game_end():
                 self.running = False
+
+            self.clock.tick(FRAME_RATE)
 
         pygame.quit()
 
     def draw(self) -> None:
         self.screen.fill(COLOR_BACKGROUND)
-        for row in range(ROWS):
-            for col in range(COLS):
-                pygame.draw.rect(
-                    self.screen,
-                    COLOR_BACKGROUND,
-                    (col * SQUARE_SIZE, row * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE),
-                )
-                if self.board.squares[row][col] == 1:
-                    pygame.draw.circle(
-                        self.screen,
-                        COLOR_WHITE_DISC,
-                        (
-                            col * SQUARE_SIZE + SQUARE_SIZE // 2,
-                            row * SQUARE_SIZE + SQUARE_SIZE // 2,
-                        ),
-                        SQUARE_SIZE // 2 - 5,
-                    )
-                elif self.board.squares[row][col] == -1:
-                    pygame.draw.circle(
-                        self.screen,
-                        COLOR_BLACK_DISC,
-                        (
-                            col * SQUARE_SIZE + SQUARE_SIZE // 2,
-                            row * SQUARE_SIZE + SQUARE_SIZE // 2,
-                        ),
-                        SQUARE_SIZE // 2 - 5,
-                    )
+        for offset in range(ROWS * COLS):
+            col = offset % COLS
+            row = offset // COLS
 
-                if self.board.is_valid_move(row, col):
-                    if self.board.turn == 1:
-                        pygame.draw.circle(
-                            self.screen,
-                            COLOR_WHITE_DISC,
-                            (
-                                col * SQUARE_SIZE + SQUARE_SIZE // 2,
-                                row * SQUARE_SIZE + SQUARE_SIZE // 2,
-                            ),
-                            SQUARE_SIZE // 8,
-                        )
-                    elif self.board.turn == -1:
-                        pygame.draw.circle(
-                            self.screen,
-                            COLOR_BLACK_DISC,
-                            (
-                                col * SQUARE_SIZE + SQUARE_SIZE // 2,
-                                row * SQUARE_SIZE + SQUARE_SIZE // 2,
-                            ),
-                            SQUARE_SIZE // 8,
-                        )
+            pygame.draw.rect(
+                self.screen,
+                COLOR_BACKGROUND,
+                (col * SQUARE_SIZE, row * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE),
+            )
+
+            square_centre = (
+                col * SQUARE_SIZE + SQUARE_SIZE // 2,
+                row * SQUARE_SIZE + SQUARE_SIZE // 2,
+            )
+
+            if self.board.squares[offset] == 1:
+                pygame.draw.circle(
+                    self.screen, COLOR_WHITE_DISC, square_centre, SQUARE_SIZE // 2 - 5
+                )
+            elif self.board.squares[offset] == -1:
+                pygame.draw.circle(
+                    self.screen, COLOR_BLACK_DISC, square_centre, SQUARE_SIZE // 2 - 5
+                )
+
+            if self.board.is_valid_move(offset):
+                if self.board.turn == 1:
+                    pygame.draw.circle(
+                        self.screen, COLOR_WHITE_DISC, square_centre, SQUARE_SIZE // 8
+                    )
+                elif self.board.turn == -1:
+                    pygame.draw.circle(
+                        self.screen, COLOR_BLACK_DISC, square_centre, SQUARE_SIZE // 8
+                    )
 
         pygame.display.flip()
 
@@ -104,7 +91,8 @@ class Window:
             clicked_row = mouseY // SQUARE_SIZE
 
             if 0 <= clicked_row < ROWS and 0 <= clicked_col < COLS:
-                child = self.board.do_move(clicked_row, clicked_col)
+                move = clicked_row * COLS + clicked_col
+                child = self.board.do_move(move)
 
                 if child:
                     self.board = child

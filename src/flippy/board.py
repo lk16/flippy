@@ -4,7 +4,8 @@ from itertools import count
 from typing import Optional
 
 
-ROWS, COLS = 8, 8
+ROWS = 8
+COLS = 8
 
 BLACK = -1
 WHITE = 1
@@ -28,58 +29,63 @@ def opponent(color: int) -> int:
 
 
 class Board:
-    def __init__(self, squares: list[list[int]], turn: int) -> None:
+    def __init__(self, squares: list[int], turn: int) -> None:
         self.squares = squares
         self.turn = turn
 
     @classmethod
     def start(cls) -> Board:
-        squares = [[EMPTY] * COLS for _ in range(ROWS)]
-        squares[3][3] = squares[4][4] = WHITE
-        squares[3][4] = squares[4][3] = BLACK
+        squares = [EMPTY] * ROWS * COLS
+        squares[3 * ROWS + 3] = squares[4 * ROWS + 4] = WHITE
+        squares[3 * ROWS + 4] = squares[4 * ROWS + 3] = BLACK
         turn = BLACK
         return Board(squares, turn)
 
-    def is_valid_move(self, row: int, col: int) -> bool:
-        return self.do_move(row, col) is not None
+    def is_valid_move(self, move: int) -> bool:
+        return self.do_move(move) is not None
 
-    def do_move(self, row: int, col: int) -> Optional[Board]:
-        if self.squares[row][col] != EMPTY:
+    def do_move(self, move: int) -> Optional[Board]:
+        if self.squares[move] != EMPTY:
             return None
 
-        flipped: list[tuple[int, int]] = []
+        move_y = move // COLS
+        move_x = move % COLS
+        flipped: list[int] = []
 
-        for dr, dc in DIRECTIONS:
-            flipped_line: list[tuple[int, int]] = []
+        for dy, dx in DIRECTIONS:
+            flipped_line: list[int] = []
 
             for d in count(1):
-                r = row + dr * d
-                c = col + dc * d
+                y = move_y + dy * d
+                x = move_x + dx * d
 
-                if r not in range(ROWS) or c not in range(COLS):
+                if y not in range(ROWS) or x not in range(COLS):
                     break
 
-                if self.squares[r][c] == EMPTY:
+                s = 8 * y + x
+                square = self.squares[s]
+
+                if square == EMPTY:
                     break
 
-                if self.squares[r][c] == self.turn:
+                if square == self.turn:
                     if d > 1:
                         flipped += flipped_line
                         continue
                     break
 
-                if self.squares[r][c] == opponent(self.turn):
-                    flipped_line.append((r, c))
+                if square == opponent(self.turn):
+                    flipped_line.append(s)
                     continue
-
-        child = Board(deepcopy(self.squares), opponent(self.turn))
-        child.squares[row][col] = self.turn
 
         if not flipped:
             return None
 
-        for flip_row, flip_col in flipped:
-            child.squares[flip_row][flip_col] = self.turn
+        child = Board(deepcopy(self.squares), opponent(self.turn))
+        child.squares[move] = self.turn
+
+        for f in flipped:
+            child.squares[f] = self.turn
 
         return child
 
@@ -87,12 +93,10 @@ class Board:
         return Board(deepcopy(self.squares), opponent(self.turn))
 
     def has_moves(self) -> bool:
-        for row in range(ROWS):
-            for col in range(COLS):
-                if self.is_valid_move(row, col):
-                    return True
+        for move in range(ROWS * COLS):
+            if self.is_valid_move(move):
+                return True
         return False
 
     def is_game_end(self) -> bool:
-        passed = Board(deepcopy(self.squares), opponent(self.turn))
-        return not self.has_moves() and not passed.has_moves()
+        return not (self.has_moves() or self.pass_move().has_moves())
