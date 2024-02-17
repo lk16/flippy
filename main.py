@@ -1,5 +1,4 @@
 import os
-import sys
 
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 
@@ -15,21 +14,9 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 GREEN = (0, 128, 0)
 
-# Initialize Pygame
-pygame.init()
-
-# Create the game window
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Othello")
-
-# Initialize the game board
-board = [[0] * COLS for _ in range(ROWS)]
-board[3][3] = board[4][4] = 1  # Initial black pieces
-board[3][4] = board[4][3] = -1  # Initial white pieces
-
 
 # Functions
-def draw_board() -> None:
+def draw_board(screen: pygame.Surface, board: list[list[int]]) -> None:
     screen.fill(GREEN)
     for row in range(ROWS):
         for col in range(COLS):
@@ -60,7 +47,7 @@ def draw_board() -> None:
                 )
 
 
-def is_valid_move(row: int, col: int, player: int) -> bool:
+def is_valid_move(row: int, col: int, player: int, board: list[list[int]]) -> bool:
     if board[row][col] != 0:
         return False
 
@@ -77,8 +64,8 @@ def is_valid_move(row: int, col: int, player: int) -> bool:
     return False
 
 
-def make_move(row: int, col: int, player: int) -> bool:
-    if not is_valid_move(row, col, player):
+def make_move(row: int, col: int, player: int, board: list[list[int]]) -> bool:
+    if not is_valid_move(row, col, player, board):
         return False
 
     board[row][col] = player
@@ -99,7 +86,7 @@ def make_move(row: int, col: int, player: int) -> bool:
     return True
 
 
-def get_winner() -> str:
+def get_winner(board: list[list[int]]) -> str:
     white_count = sum(row.count(1) for row in board)
     black_count = sum(row.count(-1) for row in board)
     if white_count > black_count:
@@ -110,32 +97,48 @@ def get_winner() -> str:
         return "Draw"
 
 
-# Main game loop
-current_player = -1  # Black starts
-running = True
+def main() -> None:
+    # Initialize Pygame
+    pygame.init()
 
-while running:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
+    # Initialize the game board
+    board = [[0] * COLS for _ in range(ROWS)]
+    board[3][3] = board[4][4] = 1  # Initial black pieces
+    board[3][4] = board[4][3] = -1  # Initial white pieces
+
+    # Create the game window
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("Othello")
+
+    # Main game loop
+    current_player = -1  # Black starts
+    running = True
+
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                mouseX, mouseY = event.pos
+                clicked_col = mouseX // SQUARE_SIZE
+                clicked_row = mouseY // SQUARE_SIZE
+
+                if 0 <= clicked_row < ROWS and 0 <= clicked_col < COLS:
+                    if make_move(clicked_row, clicked_col, current_player, board):
+                        current_player *= -1  # Switch player
+
+        draw_board(screen, board)
+        pygame.display.flip()
+
+        # Check for game over
+        if all(all(cell != 0 for cell in row) for row in board):
+            winner = get_winner(board)
+            print(f"Game over! {winner} wins!")
             running = False
-        elif event.type == pygame.MOUSEBUTTONDOWN:
-            mouseX, mouseY = event.pos
-            clicked_col = mouseX // SQUARE_SIZE
-            clicked_row = mouseY // SQUARE_SIZE
 
-            if 0 <= clicked_row < ROWS and 0 <= clicked_col < COLS:
-                if make_move(clicked_row, clicked_col, current_player):
-                    current_player *= -1  # Switch player
+    # Quit Pygame
+    pygame.quit()
 
-    draw_board()
-    pygame.display.flip()
 
-    # Check for game over
-    if all(all(cell != 0 for cell in row) for row in board):
-        winner = get_winner()
-        print(f"Game over! {winner} wins!")
-        running = False
-
-# Quit Pygame
-pygame.quit()
-sys.exit()
+if __name__ == "__main__":
+    main()
