@@ -22,11 +22,14 @@ FRAME_RATE = 60
 class Window:
     def __init__(self) -> None:
         pygame.init()
-        self.board = Board.start()
+        self.history = [Board.start()]
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.running = False
         self.clock = pygame.time.Clock()
         pygame.display.set_caption("Flippy")
+
+    def get_board(self) -> Board:
+        return self.history[-1]
 
     def run(self) -> None:
         self.running = True
@@ -37,14 +40,13 @@ class Window:
 
             self.draw()
 
-            if self.board.is_game_end():
-                self.running = False
-
             self.clock.tick(FRAME_RATE)
 
         pygame.quit()
 
     def draw(self) -> None:
+        board = self.get_board()
+
         self.screen.fill(COLOR_BACKGROUND)
         for offset in range(ROWS * COLS):
             col = offset % COLS
@@ -61,21 +63,21 @@ class Window:
                 row * SQUARE_SIZE + SQUARE_SIZE // 2,
             )
 
-            if self.board.squares[offset] == 1:
+            if board.squares[offset] == 1:
                 pygame.draw.circle(
                     self.screen, COLOR_WHITE_DISC, square_centre, SQUARE_SIZE // 2 - 5
                 )
-            elif self.board.squares[offset] == -1:
+            elif board.squares[offset] == -1:
                 pygame.draw.circle(
                     self.screen, COLOR_BLACK_DISC, square_centre, SQUARE_SIZE // 2 - 5
                 )
 
-            if self.board.is_valid_move(offset):
-                if self.board.turn == 1:
+            if board.is_valid_move(offset):
+                if board.turn == 1:
                     pygame.draw.circle(
                         self.screen, COLOR_WHITE_DISC, square_centre, SQUARE_SIZE // 8
                     )
-                elif self.board.turn == -1:
+                elif board.turn == -1:
                     pygame.draw.circle(
                         self.screen, COLOR_BLACK_DISC, square_centre, SQUARE_SIZE // 8
                     )
@@ -86,20 +88,39 @@ class Window:
         if event.type == pygame.QUIT:
             self.running = False
         elif event.type == pygame.MOUSEBUTTONDOWN:
-            mouseX, mouseY = event.pos
-            clicked_col = mouseX // SQUARE_SIZE
-            clicked_row = mouseY // SQUARE_SIZE
+            if event.button == 1:
+                self.on_mouse_left_click(event)
+            if event.button == 3:
+                self.on_mouse_right_click(event)
 
-            if 0 <= clicked_row < ROWS and 0 <= clicked_col < COLS:
-                move = clicked_row * COLS + clicked_col
-                child = self.board.do_move(move)
+    def on_mouse_left_click(self, event: Event) -> None:
+        if self.get_board().is_game_end():
+            # Restart game
+            self.history = [Board.start()]
+            return
 
-                if child:
-                    self.board = child
+        mouseX, mouseY = event.pos
+        clicked_col = mouseX // SQUARE_SIZE
+        clicked_row = mouseY // SQUARE_SIZE
 
-                    # Pass if there are no moves
-                    if not self.board.has_moves():
-                        passed = self.board.pass_move()
+        if not (0 <= clicked_row < ROWS and 0 <= clicked_col < COLS):
+            return
 
-                        if passed.has_moves():
-                            self.board = passed
+        move = clicked_row * COLS + clicked_col
+        child = self.get_board().do_move(move)
+
+        if not child:
+            return
+
+        if not child.has_moves():
+            passed = child.pass_move()
+
+            if passed.has_moves():
+                child = passed
+
+        self.history.append(child)
+
+    def on_mouse_right_click(self, event: Event) -> None:
+        # Undo last move.
+        if len(self.history) > 1:
+            self.history.pop()
