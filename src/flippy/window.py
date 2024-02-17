@@ -1,6 +1,6 @@
 import os
-
-from src.flippy.board import Board, ROWS, COLS
+from src.flippy.watch import BoardNotFound, FlyOrDieWatcher
+from src.flippy.board import BLACK, UNKNOWN, WHITE, Board, ROWS, COLS
 
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 
@@ -15,17 +15,23 @@ SQUARE_SIZE = WIDTH // COLS
 COLOR_WHITE_DISC = (255, 255, 255)
 COLOR_BLACK_DISC = (0, 0, 0)
 COLOR_BACKGROUND = (0, 128, 0)
+COLOR_UNKNOWN = (180, 180, 180)
 
 FRAME_RATE = 60
+
+MODE_GAME = 0
+MODE_WATCH = 1
 
 
 class Window:
     def __init__(self) -> None:
         pygame.init()
+        self.mode = MODE_WATCH  # TODO use UI / env var to toggle
         self.history = [Board.start()]
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.running = False
         self.clock = pygame.time.Clock()
+        self.watcher = FlyOrDieWatcher()
         pygame.display.set_caption("Flippy")
 
     def get_board(self) -> Board:
@@ -38,9 +44,13 @@ class Window:
             for event in pygame.event.get():
                 self.on_event(event)
 
+            if self.mode == MODE_WATCH:
+                self.load_board_from_screen()
+
             self.draw()
 
             self.clock.tick(FRAME_RATE)
+            print("fps: ", int(self.clock.get_fps()))
 
         pygame.quit()
 
@@ -63,21 +73,27 @@ class Window:
                 row * SQUARE_SIZE + SQUARE_SIZE // 2,
             )
 
-            if board.squares[offset] == 1:
+            if board.squares[offset] == WHITE:
                 pygame.draw.circle(
                     self.screen, COLOR_WHITE_DISC, square_centre, SQUARE_SIZE // 2 - 5
                 )
-            elif board.squares[offset] == -1:
+            elif board.squares[offset] == BLACK:
                 pygame.draw.circle(
                     self.screen, COLOR_BLACK_DISC, square_centre, SQUARE_SIZE // 2 - 5
                 )
+            elif board.squares[offset] == UNKNOWN:
+                pygame.draw.rect(
+                    self.screen,
+                    COLOR_UNKNOWN,
+                    (col * SQUARE_SIZE, row * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE),
+                )
 
             if board.is_valid_move(offset):
-                if board.turn == 1:
+                if board.turn == WHITE:
                     pygame.draw.circle(
                         self.screen, COLOR_WHITE_DISC, square_centre, SQUARE_SIZE // 8
                     )
-                elif board.turn == -1:
+                elif board.turn == BLACK:
                     pygame.draw.circle(
                         self.screen, COLOR_BLACK_DISC, square_centre, SQUARE_SIZE // 8
                     )
@@ -87,7 +103,11 @@ class Window:
     def on_event(self, event: Event) -> None:
         if event.type == pygame.QUIT:
             self.running = False
-        elif event.type == pygame.MOUSEBUTTONDOWN:
+
+        if self.mode == MODE_WATCH:
+            return
+
+        if event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:
                 self.on_mouse_left_click(event)
             if event.button == 3:
@@ -124,3 +144,11 @@ class Window:
         # Undo last move.
         if len(self.history) > 1:
             self.history.pop()
+
+    def load_board_from_screen(self) -> None:
+        try:
+            board = self.watcher.get_board()
+        except BoardNotFound:
+            return
+
+        self.history = [board]

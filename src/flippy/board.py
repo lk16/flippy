@@ -10,6 +10,7 @@ COLS = 8
 BLACK = -1
 WHITE = 1
 EMPTY = 0
+UNKNOWN = 2  # Used in watch mode
 
 DIRECTIONS = [
     (-1, -1),
@@ -100,3 +101,6 @@ class Board:
 
     def is_game_end(self) -> bool:
         return not (self.has_moves() or self.pass_move().has_moves())
+
+    def count(self, color: int) -> int:
+        return len([s for s in self.squares if s == color])
