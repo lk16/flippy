@@ -13,15 +13,15 @@ WIDTH, HEIGHT = 400, 400
 SQUARE_SIZE = WIDTH // COLS
 
 # Colors
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-GREEN = (0, 128, 0)
+COLOR_WHITE_DISC = (255, 255, 255)
+COLOR_BLACK_DISC = (0, 0, 0)
+COLOR_BACKGROUND = (0, 128, 0)
 
 
 class Window:
     def __init__(self) -> None:
         pygame.init()
-        self.board = Board()
+        self.board = Board.start()
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.running = False
         pygame.display.set_caption("Flippy")
@@ -42,18 +42,18 @@ class Window:
         pygame.quit()
 
     def draw(self) -> None:
-        self.screen.fill(GREEN)
+        self.screen.fill(COLOR_BACKGROUND)
         for row in range(ROWS):
             for col in range(COLS):
                 pygame.draw.rect(
                     self.screen,
-                    GREEN,
+                    COLOR_BACKGROUND,
                     (col * SQUARE_SIZE, row * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE),
                 )
                 if self.board.squares[row][col] == 1:
                     pygame.draw.circle(
                         self.screen,
-                        WHITE,
+                        COLOR_WHITE_DISC,
                         (
                             col * SQUARE_SIZE + SQUARE_SIZE // 2,
                             row * SQUARE_SIZE + SQUARE_SIZE // 2,
@@ -63,13 +63,35 @@ class Window:
                 elif self.board.squares[row][col] == -1:
                     pygame.draw.circle(
                         self.screen,
-                        BLACK,
+                        COLOR_BLACK_DISC,
                         (
                             col * SQUARE_SIZE + SQUARE_SIZE // 2,
                             row * SQUARE_SIZE + SQUARE_SIZE // 2,
                         ),
                         SQUARE_SIZE // 2 - 5,
                     )
+
+                if self.board.is_valid_move(row, col):
+                    if self.board.turn == 1:
+                        pygame.draw.circle(
+                            self.screen,
+                            COLOR_WHITE_DISC,
+                            (
+                                col * SQUARE_SIZE + SQUARE_SIZE // 2,
+                                row * SQUARE_SIZE + SQUARE_SIZE // 2,
+                            ),
+                            SQUARE_SIZE // 8,
+                        )
+                    elif self.board.turn == -1:
+                        pygame.draw.circle(
+                            self.screen,
+                            COLOR_BLACK_DISC,
+                            (
+                                col * SQUARE_SIZE + SQUARE_SIZE // 2,
+                                row * SQUARE_SIZE + SQUARE_SIZE // 2,
+                            ),
+                            SQUARE_SIZE // 8,
+                        )
 
         pygame.display.flip()
 
@@ -82,4 +104,14 @@ class Window:
             clicked_row = mouseY // SQUARE_SIZE
 
             if 0 <= clicked_row < ROWS and 0 <= clicked_col < COLS:
-                self.board.do_move(clicked_row, clicked_col)
+                child = self.board.do_move(clicked_row, clicked_col)
+
+                if child:
+                    self.board = child
+
+                    # Pass if there are no moves
+                    if not self.board.has_moves():
+                        passed = self.board.pass_move()
+
+                        if passed.has_moves():
+                            self.board = passed
