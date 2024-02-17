@@ -1,0 +1,47 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.0.1
+    hooks:
+      - id: check-merge-conflict
+      - id: debug-statements
+      - id: check-yaml
+      - id: check-json
+        exclude: "aaa-vscode-extension/.*"
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: run mypy
+        language: system
+        entry: mypy --strict
+        types: [python]
+
+  - repo: https://github.com/lk16/detect-missing-init
+    rev: v0.1.6
+    hooks:
+      - id: detect-missing-init
+        args: ["--create", "--track", "--python-folders", "aaa,tests"]
+
+  - repo: https://github.com/doublify/pre-commit-rust
+    rev: v1.0
+    hooks:
+      - id: fmt
+        pass_filenames: false
+        args: [--manifest-path, aaa-stdlib/Cargo.toml]
+      - id: cargo-check
+        pass_filenames: false
+        args: [--manifest-path, aaa-stdlib/Cargo.toml]
+      - id: clippy
+        pass_filenames: false
+        args: [--manifest-path, aaa-stdlib/Cargo.toml]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.1.8
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format

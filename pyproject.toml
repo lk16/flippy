@@ -1,0 +1,25 @@
+[project]
+name = "flippy"
+version = "0.1.0"
+description = "Default template for PDM package"
+authors = [
+    {name = "Luuk Verweij",email = "luuk_verweij@msn.com"},
+]
+dependencies = [
+    "pygame>=2.5.2",
+]
+requires-python = "==3.11.*"
+readme = "README.md"
+license = {text = "MIT"}
+
+
+[tool.pdm]
+package-type = "application"
+
+[tool.pdm.dev-dependencies]
+dev = [
+    "mypy>=1.8.0",
+    "pre-commit>=3.6.1",
+    "pdbpp>=0.10.3",
+    "ruff>=0.2.1",
+]
