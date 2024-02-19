@@ -1,0 +1,28 @@
+name: Python package
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.11.3
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.11.3'
+    - uses: pdm-project/setup-pdm@v3
+      name: Setup PDM
+      with:
+        python-version: "3.11.3"         # Version range or exact version of a Python version to use, the same as actions/setup-python
+        architecture: x64                # The target architecture (x86, x64) of the Python interpreter. the same as actions/setup-python
+        version: head
+        prerelease: false                # Allow prerelease versions of PDM to be installed
+        enable-pep582: false             # Enable PEP 582 package loading globally
+        allow-python-prereleases: false  # Allow prerelease versions of Python to be installed. For example if only 3.12-dev is available, 3.12 will fallback to 3.12-dev
+    - name: Install dependencies
+      run: pdm install
+    - name: Run linters
+      run:
+        pdm add pre-commit &&
+        pdm run pre-commit run --all-files
