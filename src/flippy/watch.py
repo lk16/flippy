@@ -2,7 +2,7 @@ from PIL.Image import Image
 from math import sqrt
 from typing import Optional
 
-from src.flippy.board import EMPTY, BLACK, WHITE, UNKNOWN, Board, opponent
+from flippy.board import EMPTY, BLACK, WHITE, UNKNOWN, Board, opponent
 
 import pyautogui
 

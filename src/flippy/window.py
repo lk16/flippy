@@ -1,14 +1,16 @@
 import os
-from src.flippy.watch import BoardNotFound, FlyOrDieWatcher
-from src.flippy.board import BLACK, UNKNOWN, WHITE, Board, ROWS, COLS
+from pathlib import Path
+from flippy.openings_training import OpeningsTraining
+from flippy.watch import BoardNotFound, FlyOrDieWatcher
+from flippy.board import BLACK, UNKNOWN, WHITE, WRONG_MOVE, Board, ROWS, COLS
 
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 
 import pygame  # noqa:E402
 from pygame.event import Event  # noqa:E402
 
-WIDTH = 400
-HEIGHT = 400
+WIDTH = 600
+HEIGHT = 600
 
 SQUARE_SIZE = WIDTH // COLS
 
@@ -16,22 +18,27 @@ COLOR_WHITE_DISC = (255, 255, 255)
 COLOR_BLACK_DISC = (0, 0, 0)
 COLOR_BACKGROUND = (0, 128, 0)
 COLOR_UNKNOWN = (180, 180, 180)
+COLOR_WRONG_MOVE = (255, 0, 0)
 
 FRAME_RATE = 60
 
 MODE_GAME = 0
 MODE_WATCH = 1
+MODE_OPENINGS_TRAINING = 2
 
 
 class Window:
     def __init__(self) -> None:
         pygame.init()
-        self.mode = MODE_WATCH  # TODO use UI / env var to toggle
+        self.mode = MODE_OPENINGS_TRAINING  # TODO #7 use UI / env var to toggle
         self.history = [Board.start()]
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.running = False
         self.clock = pygame.time.Clock()
         self.watcher = FlyOrDieWatcher()
+        self.openings_training = OpeningsTraining(
+            Path(__file__).parent / "../../openings.json"
+        )
         pygame.display.set_caption("Flippy")
 
     def get_board(self) -> Board:
@@ -47,10 +54,12 @@ class Window:
             if self.mode == MODE_WATCH:
                 self.load_board_from_screen()
 
+            if self.mode == MODE_OPENINGS_TRAINING:
+                self.history = [self.openings_training.get_board()]
+
             self.draw()
 
             self.clock.tick(FRAME_RATE)
-            print("fps: ", int(self.clock.get_fps()))
 
         pygame.quit()
 
@@ -87,6 +96,10 @@ class Window:
                     COLOR_UNKNOWN,
                     (col * SQUARE_SIZE, row * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE),
                 )
+            elif board.squares[offset] == WRONG_MOVE:
+                pygame.draw.circle(
+                    self.screen, COLOR_WRONG_MOVE, square_centre, SQUARE_SIZE // 8
+                )
 
             if board.is_valid_move(offset):
                 if board.turn == WHITE:
@@ -111,10 +124,12 @@ class Window:
             if event.button == 1:
                 self.on_mouse_left_click(event)
             if event.button == 3:
+                if self.mode == MODE_OPENINGS_TRAINING:
+                    return
                 self.on_mouse_right_click(event)
 
     def on_mouse_left_click(self, event: Event) -> None:
-        if self.get_board().is_game_end():
+        if self.mode == MODE_GAME and self.get_board().is_game_end():
             # Restart game
             self.history = [Board.start()]
             return
@@ -127,6 +142,11 @@ class Window:
             return
 
         move = clicked_row * COLS + clicked_col
+
+        if self.mode == MODE_OPENINGS_TRAINING:
+            self.openings_training.on_click(move)
+            return
+
         child = self.get_board().do_move(move)
 
         if not child:
@@ -152,3 +172,7 @@ class Window:
             return
 
         self.history = [board]
+
+
+def main() -> None:
+    Window().run()
