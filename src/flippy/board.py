@@ -73,7 +73,6 @@ class Board:
                 if square == self.turn:
                     if d > 1:
                         flipped += flipped_line
-                        continue
                     break
 
                 if square == opponent(self.turn):
