@@ -1,6 +1,6 @@
 from typing import Optional
 from flippy.mode.base import BaseMode
-from flippy.mode.training import TrainingMode
+from flippy.mode.pgn import PGNMode
 from flippy.board import BLACK, UNKNOWN, WHITE, WRONG_MOVE, ROWS, COLS
 
 
@@ -25,7 +25,7 @@ FRAME_RATE = 60
 class Window:
     def __init__(self) -> None:
         pygame.init()
-        self.mode: BaseMode = TrainingMode()  # TODO #7 use UI / env var to toggle
+        self.mode: BaseMode = PGNMode()  # TODO #7 use UI / env var to toggle
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.clock = pygame.time.Clock()
         pygame.display.set_caption("Flippy")
