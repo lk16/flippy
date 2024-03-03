@@ -43,6 +43,12 @@ class Board:
         turn = BLACK
         return Board(squares, turn)
 
+    @classmethod
+    def empty(cls) -> Board:
+        squares = [EMPTY] * ROWS * COLS
+        turn = BLACK
+        return Board(squares, turn)
+
     def is_valid_move(self, move: int) -> bool:
         return self.do_move(move) is not None
 

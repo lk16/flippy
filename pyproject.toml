@@ -1,7 +1,7 @@
 [project]
 name = "flippy"
 version = "0.1.0"
-description = "Default template for PDM package"
+description = "Tools for the othello boardgame"
 authors = [
     {name = "Luuk Verweij",email = "luuk_verweij@msn.com"},
 ]
@@ -14,7 +14,7 @@ readme = "README.md"
 license = {text = "MIT"}
 
 [tool.pdm.scripts]
-gui = {call = "flippy.window:main"}
+gui = {call = "flippy.main:main"}
 
 [tool.pdm]
 [tool.pdm.dev-dependencies]
