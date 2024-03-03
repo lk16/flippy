@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from flippy.board import BLACK, COLS, EMPTY, ROWS, WHITE, WRONG_MOVE, Board
+from flippy.othello.board import BLACK, COLS, EMPTY, ROWS, WHITE, WRONG_MOVE, Board
 from flippy.mode.base import BaseMode
 
 from typing import TYPE_CHECKING

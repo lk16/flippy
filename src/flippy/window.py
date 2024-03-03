@@ -1,7 +1,7 @@
 from typing import Optional
 from flippy.mode.base import BaseMode
 from flippy.mode.pgn import PGNMode
-from flippy.board import BLACK, UNKNOWN, WHITE, WRONG_MOVE, ROWS, COLS
+from flippy.othello.board import BLACK, UNKNOWN, WHITE, WRONG_MOVE, ROWS, COLS
 
 
 import pygame

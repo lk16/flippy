@@ -1,4 +1,4 @@
-from flippy.board import Board
+from flippy.othello.board import Board
 from flippy.mode.base import BaseMode
 
 from typing import TYPE_CHECKING

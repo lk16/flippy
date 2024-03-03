@@ -2,7 +2,7 @@ from copy import copy
 from pathlib import Path
 from typing import Dict, List
 
-from flippy.board import Board
+from flippy.othello.board import Board
 
 
 class Game:

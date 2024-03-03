@@ -2,11 +2,11 @@ from pathlib import Path
 from typing import Optional
 
 import pygame
-from flippy.board import Board
+from flippy.othello.board import Board
 from pygame.event import Event
 from flippy.mode.base import BaseMode
 
-from flippy.game import Game
+from flippy.othello.game import Game
 
 import tkinter as tk
 from tkinter import filedialog

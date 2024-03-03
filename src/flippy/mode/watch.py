@@ -1,4 +1,4 @@
-from flippy.board import EMPTY, BLACK, WHITE, UNKNOWN, Board, opponent
+from flippy.othello.board import EMPTY, BLACK, WHITE, UNKNOWN, Board, opponent
 from flippy.mode.base import BaseMode
 
 from typing import TYPE_CHECKING
