@@ -1,7 +1,7 @@
 from __future__ import annotations
 from copy import deepcopy
 from itertools import count
-from typing import Optional
+from typing import Iterable, Optional
 
 
 ROWS = 8
@@ -11,6 +11,7 @@ BLACK = -1
 WHITE = 1
 EMPTY = 0
 UNKNOWN = 2  # Used in watch mode
+WRONG_MOVE = 3  # Used in openings training mode
 
 DIRECTIONS = [
     (-1, -1),
@@ -66,7 +67,7 @@ class Board:
                 s = 8 * y + x
                 square = self.squares[s]
 
-                if square == EMPTY:
+                if square not in [WHITE, BLACK]:
                     break
 
                 if square == self.turn:
@@ -104,3 +105,54 @@ class Board:
 
     def count(self, color: int) -> int:
         return len([s for s in self.squares if s == color])
+
+    def show(self) -> None:
+        print("+-a-b-c-d-e-f-g-h-+")
+        for y in range(8):
+            print("{} ".format(y + 1), end="")
+
+            for x in range(8):
+                offset = (y * 8) + x
+                square = self.squares[offset]
+
+                if square == BLACK:
+                    print("○ ", end="")
+                elif square == WHITE:
+                    print("● ", end="")
+                elif self.is_valid_move(offset):
+                    print("· ", end="")
+                else:
+                    print("  ", end="")
+            print("|")
+        print("+-----------------+")
+
+    @classmethod
+    def offset_to_str(cls, offset: int) -> str:
+        if offset not in range(COLS * ROWS):
+            raise ValueError
+        return "abcdefgh"[offset % COLS] + "12345678"[offset // COLS]
+
+    @classmethod
+    def offsets_to_str(cls, offsets: Iterable[int]) -> str:
+        return " ".join(cls.offset_to_str(offset) for offset in offsets)
+
+    @classmethod
+    def str_to_offset(cls, string: str) -> int:
+        if len(string) != 2:
+            raise ValueError(f'Invalid move length "{string}"')
+
+        if not "a" <= string[0] <= "h" or not "1" <= string[1] <= "8":
+            raise ValueError(f'Invalid move "{string}"')
+
+        move_offset_x = ord(string[0]) - ord("a")
+        move_offset_y = ord(string[1]) - ord("1")
+        return move_offset_y * COLS + move_offset_x
+
+    def __hash__(self) -> int:
+        return hash((tuple(self.squares), self.turn))
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Board):
+            raise TypeError(f"Cannot compare Board with {type(other)}")
+
+        return self.squares == other.squares and self.turn == other.turn

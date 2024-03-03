@@ -17,7 +17,7 @@ repos:
       - id: mypy
         name: run mypy
         language: system
-        entry: mypy --strict --explicit-package-bases
+        entry: mypy --strict --namespace-packages
         types: [python]
 
   - repo: https://github.com/lk16/detect-missing-init
