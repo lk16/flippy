@@ -17,27 +17,8 @@ repos:
       - id: mypy
         name: run mypy
         language: system
-        entry: mypy --strict --namespace-packages
+        entry: mypy --strict
         types: [python]
-
-  - repo: https://github.com/lk16/detect-missing-init
-    rev: v0.1.6
-    hooks:
-      - id: detect-missing-init
-        args: ["--create", "--track", "--python-folders", "aaa,tests"]
-
-  - repo: https://github.com/doublify/pre-commit-rust
-    rev: v1.0
-    hooks:
-      - id: fmt
-        pass_filenames: false
-        args: [--manifest-path, aaa-stdlib/Cargo.toml]
-      - id: cargo-check
-        pass_filenames: false
-        args: [--manifest-path, aaa-stdlib/Cargo.toml]
-      - id: clippy
-        pass_filenames: false
-        args: [--manifest-path, aaa-stdlib/Cargo.toml]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.1.8

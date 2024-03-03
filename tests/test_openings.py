@@ -168,37 +168,36 @@ def test_tree_exploration(exercises: list[Exercise]) -> None:
 
             board_explored_children[board].add(move)
 
-    # TODO #10 support Board normalization and mirroring
-    symmetrical_positions = {
-        Board.start(),
-        Board.from_bitset(0x103810000000, 0x200008000000, 1),
-    }
+    for board, explored_moves in board_explored_children.items():
+        normalized_explored_children = {
+            board.do_normalized_move(move) for move in explored_moves
+        }
 
-    for board, explored_children in board_explored_children.items():
+        unexplored_moves = set()
+        for move in board.get_moves_as_set():
+            child = board.do_normalized_move(move)
+
+            if child not in normalized_explored_children:
+                unexplored_moves.add(move)
+
         has_skipped = board in boards_with_skipped_children
-        fully_explored = explored_children == board.get_moves()
-
-        if board in symmetrical_positions:
-            continue
 
         sequence = Board.offsets_to_str(sequences[board])
 
-        if has_skipped and fully_explored:
+        if has_skipped and not unexplored_moves:
             board.show()
             print("Board is fully explored and has `...` marker.")
             print("Sequence: " + sequence)
             assert False
 
-        if not has_skipped and not fully_explored:
-            unexplored_children = board.get_moves() - explored_children
-
+        if not has_skipped and unexplored_moves:
             board.show()
             print("Board is not fully explored and has no `...` marker.")
             print("Sequence: " + sequence)
             print(
                 "Unexplored children: "
-                + ", ".join(Board.offset_to_str(child) for child in unexplored_children)
+                + ", ".join(Board.offset_to_str(move) for move in unexplored_moves)
             )
-            print("Board hex: " + board.to_bitset_repr())
+            print(f"Board: {board}")
             print()
             assert False

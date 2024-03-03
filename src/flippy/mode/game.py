@@ -1,10 +1,6 @@
-from flippy.othello.board import Board
+from flippy.othello.board import Board, InvalidMove
 from flippy.mode.base import BaseMode
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass
 from pygame.event import Event
 import pygame
 
@@ -24,9 +20,9 @@ class GameMode(BaseMode):
             self.history = [Board.start()]
             return
 
-        child = self.get_board().do_move(move)
-
-        if not child:
+        try:
+            child = self.get_board().do_move(move)
+        except InvalidMove:
             return
 
         if not child.has_moves():

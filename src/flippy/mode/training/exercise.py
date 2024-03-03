@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional
-from flippy.othello.board import BLACK, WHITE, Board
+from flippy.othello.board import BLACK, WHITE, Board, InvalidMove
 
 
 class Exercise:
@@ -29,9 +29,9 @@ class Exercise:
         boards = [Board.start()]
 
         for move in moves:
-            child = boards[-1].do_move(move)
-
-            if not child:
+            try:
+                child = boards[-1].do_move(move)
+            except InvalidMove:
                 boards[-1].show()
                 bad_move_str = Board.offset_to_str(move)
                 bad_move_seq = " ".join(Board.offset_to_str(move) for move in moves)

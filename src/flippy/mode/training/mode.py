@@ -1,9 +1,9 @@
 from __future__ import annotations
+from typing import Any
 from flippy.mode.training.exercise import Exercise
 from flippy.mode.training.loader import ExerciseLoader
-from flippy.othello.board import WRONG_MOVE, Board
+from flippy.othello.board import Board
 from flippy.mode.base import BaseMode
-from copy import deepcopy
 from pathlib import Path
 import random
 
@@ -60,12 +60,10 @@ class TrainingMode(BaseMode):
         except NoExercisesLeft:
             return Board.empty()
 
-        board = deepcopy(exercise.boards[self.moves_done])
+        return exercise.boards[self.moves_done]
 
-        for offset in self.move_mistakes:
-            board.squares[offset] = WRONG_MOVE
-
-        return board
+    def get_ui_details(self) -> dict[str, Any]:
+        return {"move_mistakes": self.move_mistakes}
 
     def on_move(self, move: int) -> None:
         try:

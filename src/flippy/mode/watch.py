@@ -1,15 +1,10 @@
-from flippy.othello.board import EMPTY, BLACK, WHITE, UNKNOWN, Board, opponent
+from flippy.othello.board import EMPTY, BLACK, WHITE, Board, opponent
 from flippy.mode.base import BaseMode
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass
+from typing import Any
 from PIL.Image import Image
 from math import sqrt
 from typing import Optional
-
-
 import pyautogui
 
 FOD_LEFT_TOP_MARKER = (53, 144, 103)
@@ -32,7 +27,11 @@ def is_similar_color(
 
 
 class BoardNotFound(Exception):
-    ...
+    pass
+
+
+class UnknownSquare(Exception):
+    pass
 
 
 class FlyOrDieWatchCoords:
@@ -76,30 +75,38 @@ class FlyOrDieWatchCoords:
 
 class WatchMode(BaseMode):
     def __init__(self) -> None:
-        self.prev_coords: Optional[FlyOrDieWatchCoords] = None
         self.screenshot: Image
+        self.prev_coords: Optional[FlyOrDieWatchCoords] = None
         self.prev_board = Board.empty()
+        self.prev_unknown_squares: set[int] = set()
 
     def get_board(self) -> Board:
         try:
-            board = self._get_board()
+            coords, board, unknown_squares = self._get_board()
         except BoardNotFound:
             return self.prev_board
 
+        self.prev_coords = coords
+        self.prev_unknown_squares = unknown_squares
         self.prev_board = board
         return board
 
-    def _get_board(self) -> Board:
+    def get_ui_details(self) -> dict[str, Any]:
+        return {"unknown_squares": self.prev_unknown_squares}
+
+    def _get_board(self) -> tuple[FlyOrDieWatchCoords, Board, set[int]]:
         self.screenshot = pyautogui.screenshot()
 
         if self.prev_coords:
             try:
-                return self.get_board_from_coords(self.prev_coords)
+                board, unknown_squares = self.get_board_from_coords(self.prev_coords)
             except BoardNotFound:
                 if self.prev_coords.is_valid_coords(self.screenshot):
                     # No board is visible, but anchor coords are still the same.
                     # This prevents a full re-search of the screenshot for anchors.
                     raise BoardNotFound
+            else:
+                return self.prev_coords, board, unknown_squares
 
         width, height = self.screenshot.size
 
@@ -119,21 +126,31 @@ class WatchMode(BaseMode):
                 coords = FlyOrDieWatchCoords(left_x, right_x, y)
 
                 if coords.is_valid_coords(self.screenshot):
-                    board = self.get_board_from_coords(coords)
-                    self.prev_coords = coords
-                    return board
+                    board, unknown_squares = self.get_board_from_coords(coords)
+                    return coords, board, unknown_squares
 
         raise BoardNotFound
 
-    def get_board_from_coords(self, coords: FlyOrDieWatchCoords) -> Board:
+    def get_board_from_coords(
+        self, coords: FlyOrDieWatchCoords
+    ) -> tuple[Board, set[int]]:
         squares = [EMPTY] * 64
+        unknown_squares: set[int] = set()
 
         for i in range(64):
             centre = coords.get_square_centre_coords(i)
-            squares[i] = self.get_square_at_coords(centre)
+
+            try:
+                square = self.get_square_at_coords(centre)
+            except UnknownSquare:
+                unknown_squares.add(i)
+                continue
+
+            squares[i] = square
 
         turn = self.get_turn(coords)
-        return Board(squares, turn)
+        board = Board.from_squares(squares, turn)
+        return board, unknown_squares
 
     def get_square_at_coords(self, coord: tuple[int, int]) -> int:
         pixel = self.screenshot.getpixel(coord)
@@ -148,16 +165,17 @@ class WatchMode(BaseMode):
         if is_similar_color(pixel, FOD_WHITE, 20):
             return WHITE
 
-        return UNKNOWN
+        raise UnknownSquare
 
     def get_turn(self, coords: FlyOrDieWatchCoords) -> int:
         turn_highlighter_coords = coords.get_turn_highlighter_coords()
         turn_highlighter = self.screenshot.getpixel(turn_highlighter_coords)
 
         turn_color_coords = coords.get_turn_color_coords()
-        turn = self.get_square_at_coords(turn_color_coords)
 
-        if turn not in [WHITE, BLACK]:
+        try:
+            turn = self.get_square_at_coords(turn_color_coords)
+        except UnknownSquare:
             raise BoardNotFound
 
         if is_similar_color(turn_highlighter, FOD_TURN_HIGHLIGHTER, 50):
