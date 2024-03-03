@@ -1,8 +1,14 @@
+from flippy.othello.board import EMPTY, BLACK, WHITE, UNKNOWN, Board, opponent
+from flippy.mode.base import BaseMode
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    pass
 from PIL.Image import Image
 from math import sqrt
 from typing import Optional
 
-from flippy.board import EMPTY, BLACK, WHITE, UNKNOWN, Board, opponent
 
 import pyautogui
 
@@ -10,7 +16,7 @@ FOD_LEFT_TOP_MARKER = (53, 144, 103)
 FOD_RIGHT_TOP_MARKER = (64, 134, 169)
 FOD_WHITE = (223, 225, 227)
 FOD_BLACK = (48, 48, 48)
-FOD_EMPTY = (7, 96, 0)
+FOD_EMPTIES = [(41, 91, 25), (51, 111, 31)]
 FOD_TURN_HIGHLIGHTER = (182, 170, 65)
 
 
@@ -39,12 +45,12 @@ class FlyOrDieWatchCoords:
         return self.right_x - self.left_x
 
     def get_square_centre_coords(self, offset: int) -> tuple[int, int]:
-        a1_x_centre = self.left_x + self.scale_factor() * 0.053
+        a1_x_centre = self.left_x + self.scale_factor() * 0.037
         a1_y_centre = self.y + self.scale_factor() * 0.053
         field_size_px = self.scale_factor() * 0.072
 
-        x = int(a1_x_centre + (offset % 8) * field_size_px)
-        y = int(a1_y_centre + (offset // 8) * field_size_px)
+        x = int(a1_x_centre + ((offset % 8) * field_size_px))
+        y = int(a1_y_centre + ((offset // 8) * field_size_px))
         return x, y
 
     def get_turn_highlighter_coords(self) -> tuple[int, int]:
@@ -68,12 +74,22 @@ class FlyOrDieWatchCoords:
         )
 
 
-class FlyOrDieWatcher:
+class WatchMode(BaseMode):
     def __init__(self) -> None:
         self.prev_coords: Optional[FlyOrDieWatchCoords] = None
         self.screenshot: Image
+        self.prev_board = Board.empty()
 
     def get_board(self) -> Board:
+        try:
+            board = self._get_board()
+        except BoardNotFound:
+            return self.prev_board
+
+        self.prev_board = board
+        return board
+
+    def _get_board(self) -> Board:
         self.screenshot = pyautogui.screenshot()
 
         if self.prev_coords:
@@ -117,23 +133,21 @@ class FlyOrDieWatcher:
             squares[i] = self.get_square_at_coords(centre)
 
         turn = self.get_turn(coords)
-
-        board = Board(squares, turn)
-
-        if board.count(UNKNOWN) > 0:
-            raise BoardNotFound
-
-        return board
+        return Board(squares, turn)
 
     def get_square_at_coords(self, coord: tuple[int, int]) -> int:
         pixel = self.screenshot.getpixel(coord)
 
-        if is_similar_color(pixel, FOD_BLACK, 50):
+        for empty in FOD_EMPTIES:
+            if is_similar_color(pixel, empty, 20):
+                return EMPTY
+
+        if is_similar_color(pixel, FOD_BLACK, 20):
             return BLACK
-        elif is_similar_color(pixel, FOD_WHITE, 50):
+
+        if is_similar_color(pixel, FOD_WHITE, 20):
             return WHITE
-        elif is_similar_color(pixel, FOD_EMPTY, 50):
-            return EMPTY
+
         return UNKNOWN
 
     def get_turn(self, coords: FlyOrDieWatchCoords) -> int:

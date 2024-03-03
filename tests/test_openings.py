@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
-from flippy.board import BLACK, WHITE, Board
+from flippy.othello.board import BLACK, WHITE, Board
 
-from flippy.openings_training import OpeningsTraining
+from flippy.mode.training import TrainingMode
 
 
 OPENINGS_FILE = Path(__file__).parent / "../openings.json"
@@ -16,12 +16,12 @@ def test_sorted() -> None:
 
 def test_valid_moves() -> None:
     # The opening file should only have sequences of valid moves.
-    OpeningsTraining(OPENINGS_FILE)
+    TrainingMode()
 
 
 def test_all_positions_have_moves() -> None:
     # Every position in the opening file should have at least one move.
-    openings = OpeningsTraining(OPENINGS_FILE)
+    openings = TrainingMode()
     for exercise in openings.remaining_exercises:
         for board in exercise.boards:
             assert board.has_moves()
@@ -30,7 +30,7 @@ def test_all_positions_have_moves() -> None:
 def test_move_sequence_count() -> None:
     # Openings for black should have an odd number of moves, since white starts.
     # Likewise openings for white should have an even number of moves.
-    openings = OpeningsTraining(OPENINGS_FILE)
+    openings = TrainingMode()
     for exercise in openings.remaining_exercises:
         if exercise.color == WHITE:
             assert len(exercise.moves) % 2 == 0
@@ -42,7 +42,7 @@ def test_move_sequence_count() -> None:
 
 def test_score_estimation() -> None:
     # Every opening should have an even score estimation or a "?" in the third column.
-    openings = OpeningsTraining(OPENINGS_FILE)
+    openings = TrainingMode()
     for exercise in openings.remaining_exercises:
         score = exercise.raw_input[2]
         try:
@@ -58,7 +58,7 @@ def test_no_double_transposition_subtree_investigation() -> None:
 
     investigated_subtrees: dict[Board, list[int]] = {}
 
-    openings = OpeningsTraining(OPENINGS_FILE)
+    openings = TrainingMode()
     for exercise in openings.remaining_exercises:
         for moves_done, board in enumerate(exercise.boards):
             if board.turn != exercise.color:
@@ -89,7 +89,7 @@ def test_no_double_transposition_subtree_investigation() -> None:
 def test_notes_column() -> None:
     ALLOWED_PREFIXES = ["boring", "weird", "interesting", "transposition"]
 
-    openings = OpeningsTraining(OPENINGS_FILE)
+    openings = TrainingMode()
     for exercise in openings.remaining_exercises:
         assert any(
             exercise.raw_input[3].startswith(prefix) for prefix in ALLOWED_PREFIXES
@@ -100,7 +100,7 @@ def test_uniqueness() -> None:
     # All exercises must be unique.
     exercise_moves: set[tuple[int, ...]] = set()
 
-    openings = OpeningsTraining(OPENINGS_FILE)
+    openings = TrainingMode()
     for exercise in openings.remaining_exercises:
         moves = tuple(exercise.moves)
 
@@ -115,7 +115,7 @@ def test_consistent_moves() -> None:
     # The same position should always have the same next move, but only when the user is to move.
     next_moves: dict[Board, int] = {}
 
-    openings = OpeningsTraining(OPENINGS_FILE)
+    openings = TrainingMode()
     for exercise in openings.remaining_exercises:
         for moves_done in range(len(exercise.moves)):
             move = exercise.moves[moves_done]

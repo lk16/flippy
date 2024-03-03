@@ -1,10 +1,18 @@
 from __future__ import annotations
+
+from flippy.othello.board import BLACK, COLS, EMPTY, ROWS, WHITE, WRONG_MOVE, Board
+from flippy.mode.base import BaseMode
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    pass
+
+
 from copy import deepcopy
 import json
 from pathlib import Path
 import random
-
-from flippy.board import BLACK, COLS, EMPTY, ROWS, WHITE, WRONG_MOVE, Board
 
 
 class Exercise:
@@ -50,12 +58,12 @@ class Exercise:
         return self.color == other.color and self.moves == other.moves
 
 
-class OpeningsTraining:
-    def __init__(self, file: Path) -> None:
-        self.file = file
+class TrainingMode(BaseMode):
+    def __init__(self) -> None:
+        self.file = Path(Path(__file__).parent / "../../../openings.json")
         self.remaining_exercises: list[Exercise] = []
 
-        for item in json.loads(file.read_text()):
+        for item in json.loads(self.file.read_text()):
             self.remaining_exercises.append(Exercise(item))
 
         random.shuffle(self.remaining_exercises)
@@ -83,7 +91,7 @@ class OpeningsTraining:
 
         return board
 
-    def on_click(self, move: int) -> None:
+    def on_move(self, move: int) -> None:
         if not self.remaining_exercises:
             return
 

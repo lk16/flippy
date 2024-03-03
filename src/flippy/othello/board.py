@@ -13,6 +13,8 @@ EMPTY = 0
 UNKNOWN = 2  # Used in watch mode
 WRONG_MOVE = 3  # Used in openings training mode
 
+PASS_MOVE = -1
+
 DIRECTIONS = [
     (-1, -1),
     (-1, 0),
@@ -43,10 +45,19 @@ class Board:
         turn = BLACK
         return Board(squares, turn)
 
+    @classmethod
+    def empty(cls) -> Board:
+        squares = [EMPTY] * ROWS * COLS
+        turn = BLACK
+        return Board(squares, turn)
+
     def is_valid_move(self, move: int) -> bool:
         return self.do_move(move) is not None
 
     def do_move(self, move: int) -> Optional[Board]:
+        if move == PASS_MOVE:
+            return self.pass_move()
+
         if self.squares[move] != EMPTY:
             return None
 
@@ -73,7 +84,6 @@ class Board:
                 if square == self.turn:
                     if d > 1:
                         flipped += flipped_line
-                        continue
                     break
 
                 if square == opponent(self.turn):
@@ -140,6 +150,9 @@ class Board:
     def str_to_offset(cls, string: str) -> int:
         if len(string) != 2:
             raise ValueError(f'Invalid move length "{string}"')
+
+        if string == "--":
+            return PASS_MOVE
 
         if not "a" <= string[0] <= "h" or not "1" <= string[1] <= "8":
             raise ValueError(f'Invalid move "{string}"')
