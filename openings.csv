@@ -23,9 +23,21 @@ black |   +6 | high     | e6 f4 c3 c4 d3 c2 f3 f5 f6
 black |   +6 | high     | e6 f4 c3 c4 d3 c2 f3 f6 f5
 black |  +14 | low      | e6 f4 c3 c4 d3 c2 f3 f7 f5
 black |   +6 | mid      | e6 f4 c3 c4 d3 c6 d6
-black |   +0 | high     | e6 f4 c3 c4 d3 d6 e3 c2 b3
-black |   +0 | vhigh    | e6 f4 c3 c4 d3 d6 e3 d2 c2
-black |   +0 | high     | e6 f4 c3 c4 d3 d6 e3 e2 d2
+black |   +2 | mid      | e6 f4 c3 c4 d3 d6 e3 c2 b3 a4 c1
+black |   +0 | vhigh    | e6 f4 c3 c4 d3 d6 e3 c2 b3 b4 f5
+black |   +0 | vhigh    | e6 f4 c3 c4 d3 d6 e3 c2 b3 c5 b4
+black |   +0 | vhigh    | e6 f4 c3 c4 d3 d6 e3 c2 b3 d2 c5
+black |   +0 | vhigh    | e6 f4 c3 c4 d3 d6 e3 c2 b3 f5 f3
+black |   +4 | mid      | e6 f4 c3 c4 d3 d6 e3 c2 b3 f6 c1
+black |    ? | vlow     | e6 f4 c3 c4 d3 d6 e3 d2 c2 ...
+black |   +2 | high     | e6 f4 c3 c4 d3 d6 e3 d2 c2 b3 g4
+black |   +4 | mid      | e6 f4 c3 c4 d3 d6 e3 d2 c2 b4 f3
+black |   +4 | high     | e6 f4 c3 c4 d3 d6 e3 d2 c2 e2 f3
+black |   +0 | high     | e6 f4 c3 c4 d3 d6 e3 d2 c2 f3 b3
+black |   +2 | high     | e6 f4 c3 c4 d3 d6 e3 d2 c2 f5 f3
+black |    ? | vlow     | e6 f4 c3 c4 d3 d6 e3 e2 d2 ...
+black |   +0 | high     | e6 f4 c3 c4 d3 d6 e3 e2 d2 c2 b3
+black |   +4 | mid      | e6 f4 c3 c4 d3 d6 e3 e2 d2 f6 c5
 black |   +8 | low      | e6 f4 c3 c4 d3 d6 e3 f6 c5
 black |   +8 | mid      | e6 f4 c3 c4 d3 d6 e3 f7 c5
 black |   +6 | high     | e6 f4 c3 c4 d3 e2 d2 c2 g3
@@ -101,11 +113,28 @@ black |   +8 | high     | e6 f4 c3 e7 f3 f2 f6 g6 e8
 black |   +6 | high     | e6 f6 f5 f4 e3 c5 c4 b4 d3
 black |   +8 | low      | e6 f6 f5 f4 e3 c5 c4 c3 d3
 black |   +4 | high     | e6 f6 f5 f4 e3 c5 c4 d2 g5
-black |   +0 | high     | e6 f6 f5 f4 e3 c5 c4 d3 f3
+black |    ? | vlow     | e6 f6 f5 f4 e3 c5 c4 d3 f3 ...
+black |   +4 | low      | e6 f6 f5 f4 e3 c5 c4 d3 f3 b4 c3
+black |   +6 | low      | e6 f6 f5 f4 e3 c5 c4 d3 f3 b5 c3
+black |   +2 | high     | e6 f6 f5 f4 e3 c5 c4 d3 f3 c3 b4
+black |   +2 | high     | e6 f6 f5 f4 e3 c5 c4 d3 f3 d2 f2
+black |   +4 | mid      | e6 f6 f5 f4 e3 c5 c4 d3 f3 d7 c3
+black |   +0 | high     | e6 f6 f5 f4 e3 c5 c4 d3 f3 e2 g4
+black |   +2 | high     | e6 f6 f5 f4 e3 c5 c4 d3 f3 e7 c3
 black |   +2 | high     | e6 f6 f5 f4 e3 c5 c4 d6 b5
-black |   +0 | high     | e6 f6 f5 f4 e3 c5 c4 d7 c6
+black |    ? | vlow     | e6 f6 f5 f4 e3 c5 c4 d7 c6 ...
+black |   +2 | high     | e6 f6 f5 f4 e3 c5 c4 d7 c6 d2 e2
+black |   +4 | high     | e6 f6 f5 f4 e3 c5 c4 d7 c6 d3 c3
+black |   +0 | vhigh    | e6 f6 f5 f4 e3 c5 c4 d7 c6 e2 e8
 black |   +4 | high     | e6 f6 f5 f4 e3 c5 c4 e2 g6
-black |   +0 | high     | e6 f6 f5 f4 e3 c5 c4 e7 c6
+black |    ? | vlow     | e6 f6 f5 f4 e3 c5 c4 e7 c6 ...
+black |   +2 | high     | e6 f6 f5 f4 e3 c5 c4 e7 c6 d2 e2
+black |   +2 | high     | e6 f6 f5 f4 e3 c5 c4 e7 c6 d3 c3
+black |    ? | vlow     | e6 f6 f5 f4 e3 c5 c4 e7 c6 e2 f3 ...
+black |   +4 | low      | e6 f6 f5 f4 e3 c5 c4 e7 c6 e2 f3 c3 g5
+black |   +0 | vhigh    | e6 f6 f5 f4 e3 c5 c4 e7 c6 e2 f3 d3 c3
+black |   +0 | vhigh    | e6 f6 f5 f4 e3 c5 c4 e7 c6 e2 f3 f2 g4
+black |   +2 | high     | e6 f6 f5 f4 e3 c5 c4 e7 c6 e2 f3 g4 g5
 black |  +10 | low      | e6 f6 f5 f4 e3 c5 c4 f2 d3
 black |  +10 | mid      | e6 f6 f5 f4 e3 d2 g6
 black |   +4 | high     | e6 f6 f5 f4 e3 d3 f3 c5 g5
@@ -114,7 +143,14 @@ black |   +8 | high     | e6 f6 f5 f4 e3 d3 f3 d6 g4
 black |   +6 | tp       | e6 f6 f5 f4 e3 d3 f3 d7 g4
 black |   +6 | high     | e6 f6 f5 f4 e3 d3 f3 f2 g5
 black |   +6 | high     | e6 f6 f5 f4 e3 d3 f3 g3 g5
-black |   +0 | high     | e6 f6 f5 f4 e3 d6 g4 d3 c3
+black |    ? | vlow     | e6 f6 f5 f4 e3 d6 g4 d3 c3 ...
+black |   +2 | high     | e6 f6 f5 f4 e3 d6 g4 d3 c3 d2 c4
+black |   +8 | low      | e6 f6 f5 f4 e3 d6 g4 d3 c3 e2 f3
+black |   +4 | mid      | e6 f6 f5 f4 e3 d6 g4 d3 c3 f2 f3
+black |   +4 | high     | e6 f6 f5 f4 e3 d6 g4 d3 c3 f3 g5
+black |   +2 | high     | e6 f6 f5 f4 e3 d6 g4 d3 c3 g3 g5
+black |   +0 | vhigh    | e6 f6 f5 f4 e3 d6 g4 d3 c3 h3 c4
+black |   +2 | high     | e6 f6 f5 f4 e3 d6 g4 d3 c3 h4 c5
 black |   +6 | high     | e6 f6 f5 f4 e3 d6 g4 e2 f7
 black |   +6 | high     | e6 f6 f5 f4 e3 d6 g4 f2 g6
 black |   +2 | high     | e6 f6 f5 f4 e3 d6 g4 f3 e7
@@ -204,14 +240,25 @@ white |  +14 | mid      | e6 f4 d3 c4 f3 d6 g4 e2
 white |  +16 | mid      | e6 f4 d3 c4 f5 d6 b3 g5
 white |  +10 | high     | e6 f4 d3 c4 f5 d6 b4 f6
 white |  +12 | mid      | e6 f4 d3 c4 f5 d6 b5 g5
-white |   +4 | high     | e6 f4 d3 c4 f5 d6 c5 c6
+white |   +4 | vhigh    | e6 f4 d3 c4 f5 d6 c5 c6
 white |  +12 | high     | e6 f4 d3 c4 f5 d6 c6 e3
 white |  +16 | low      | e6 f4 d3 c4 f5 d6 d7 c3
 white |   +6 | high     | e6 f4 d3 c4 f5 d6 f3 e3
 white |   +6 | high     | e6 f4 d3 c4 f5 d6 g4 e3
 white |   +6 | mid      | e6 f4 d3 c4 g3 c6
-white |   +2 | vhigh    | e6 f4 e3 d6 c4 c5
-white |   +2 | vhigh    | e6 f4 e3 d6 c5 f3
+white |    ? | vlow     | e6 f4 e3 d6 c4 c5 ...
+white |    ? | vlow     | e6 f4 e3 d6 c4 c5 d7 e7 ...
+white |   +4 | high     | e6 f4 e3 d6 c4 c5 d7 e7 b5 d3
+white |   +4 | high     | e6 f4 e3 d6 c4 c5 d7 e7 b6 d3
+white |   +6 | high     | e6 f4 e3 d6 c4 c5 d7 e7 c6 d3
+white |   +4 | vhigh    | e6 f4 e3 d6 c4 c5 d7 e7 f5 d3
+white |   +6 | mid      | e6 f4 e3 d6 c4 c5 d7 e7 g4 d3
+white |    ? | vlow     | e6 f4 e3 d6 c5 f3 ...
+white |   +2 | vhigh    | e6 f4 e3 d6 c5 f3 c4 f6
+white |   +4 | high     | e6 f4 e3 d6 c5 f3 c6 e7
+white |   +2 | high     | e6 f4 e3 d6 c5 f3 f5 f6
+white |   +6 | mid      | e6 f4 e3 d6 c5 f3 f6 f5
+white |   +4 | mid      | e6 f4 e3 d6 c5 f3 g4 f5
 white |   +4 | mid      | e6 f4 e3 d6 c6 c5
 white |   +6 | low      | e6 f4 e3 d6 g4 f6
 white |   +8 | low      | e6 f4 e3 d6 g5 f6
