@@ -10,10 +10,13 @@ COLS = 8
 BLACK = -1
 WHITE = 1
 EMPTY = 0
+
+# TODO remove these two
 UNKNOWN = 2  # Used in watch mode
 WRONG_MOVE = 3  # Used in openings training mode
 
 PASS_MOVE = -1
+SKIPPED_CHILDREN = -2  # used in training mode
 
 DIRECTIONS = [
     (-1, -1),
@@ -46,13 +49,38 @@ class Board:
         return Board(squares, turn)
 
     @classmethod
+    def from_bitset(cls, black: int, white: int, turn: int) -> Board:
+        squares = [EMPTY] * ROWS * COLS
+        for i in range(64):
+            mask = 1 << i
+            if black & mask:
+                squares[i] = BLACK
+            if white & mask:
+                squares[i] = WHITE
+        return Board(squares, turn)
+
+    @classmethod
     def empty(cls) -> Board:
         squares = [EMPTY] * ROWS * COLS
         turn = BLACK
         return Board(squares, turn)
 
+    def to_bitset_repr(self) -> str:
+        white = 0
+        black = 0
+        for i, square in enumerate(self.squares):
+            mask = 1 << i
+            if square == BLACK:
+                black |= mask
+            if square == WHITE:
+                white |= mask
+        return f"Board.from_bitset({hex(black)}, {hex(white)}, {self.turn})"
+
     def is_valid_move(self, move: int) -> bool:
         return self.do_move(move) is not None
+
+    def get_moves(self) -> set[int]:
+        return {move for move in range(64) if self.is_valid_move(move)}
 
     def do_move(self, move: int) -> Optional[Board]:
         if move == PASS_MOVE:

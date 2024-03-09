@@ -1,37 +1,50 @@
-import json
+import csv
 from pathlib import Path
+
+import pytest
+from flippy.mode.training.exercise import Exercise
 from flippy.othello.board import BLACK, WHITE, Board
 
-from flippy.mode.training import TrainingMode
+from flippy.mode.training.mode import TrainingMode
 
 
-OPENINGS_FILE = Path(__file__).parent / "../openings.json"
+OPENINGS_FILE = Path(__file__).parent / "../openings.csv"
+
+
+@pytest.fixture()
+def exercises() -> list[Exercise]:
+    openings = TrainingMode()
+    openings.load_exercises([])
+    return openings.exercises
 
 
 def test_sorted() -> None:
     # The openings file should be sorted.
-    openings = json.loads(OPENINGS_FILE.read_text())
-    assert sorted(openings) == openings
+    reader = csv.DictReader(open(OPENINGS_FILE, "r"), delimiter="|")
+
+    stripped_rows: list[dict[str, str]] = []
+
+    for row in reader:
+        stripped_row = {k.strip(): v.strip() for (k, v) in row.items()}
+        stripped_rows.append(stripped_row)
+
+    def sort_key(row: dict[str, str]) -> tuple[str, str]:
+        return (row["color"], row["moves"])
+
+    assert sorted(stripped_rows, key=sort_key) == stripped_rows
 
 
-def test_valid_moves() -> None:
-    # The opening file should only have sequences of valid moves.
-    TrainingMode()
-
-
-def test_all_positions_have_moves() -> None:
+def test_all_positions_have_moves(exercises: list[Exercise]) -> None:
     # Every position in the opening file should have at least one move.
-    openings = TrainingMode()
-    for exercise in openings.remaining_exercises:
+    for exercise in exercises:
         for board in exercise.boards:
             assert board.has_moves()
 
 
-def test_move_sequence_count() -> None:
+def test_move_sequence_count(exercises: list[Exercise]) -> None:
     # Openings for black should have an odd number of moves, since white starts.
     # Likewise openings for white should have an even number of moves.
-    openings = TrainingMode()
-    for exercise in openings.remaining_exercises:
+    for exercise in exercises:
         if exercise.color == WHITE:
             assert len(exercise.moves) % 2 == 0
         elif exercise.color == BLACK:
@@ -40,26 +53,14 @@ def test_move_sequence_count() -> None:
             raise NotImplementedError
 
 
-def test_score_estimation() -> None:
-    # Every opening should have an even score estimation or a "?" in the third column.
-    openings = TrainingMode()
-    for exercise in openings.remaining_exercises:
-        score = exercise.raw_input[2]
-        try:
-            int(score)
-        except ValueError:
-            assert score == "?"
-        else:
-            assert int(score) % 2 == 0
-
-
-def test_no_double_transposition_subtree_investigation() -> None:
+def test_no_double_transposition_subtree_investigation(
+    exercises: list[Exercise],
+) -> None:
     # Prevent having multiple transpositions investigate same subtree.
 
     investigated_subtrees: dict[Board, list[int]] = {}
 
-    openings = TrainingMode()
-    for exercise in openings.remaining_exercises:
+    for exercise in exercises:
         for moves_done, board in enumerate(exercise.boards):
             if board.turn != exercise.color:
                 # Transposition happens user's opponent.
@@ -86,22 +87,11 @@ def test_no_double_transposition_subtree_investigation() -> None:
                 assert False
 
 
-def test_notes_column() -> None:
-    ALLOWED_PREFIXES = ["boring", "weird", "interesting", "transposition"]
-
-    openings = TrainingMode()
-    for exercise in openings.remaining_exercises:
-        assert any(
-            exercise.raw_input[3].startswith(prefix) for prefix in ALLOWED_PREFIXES
-        )
-
-
-def test_uniqueness() -> None:
+def test_uniqueness(exercises: list[Exercise]) -> None:
     # All exercises must be unique.
     exercise_moves: set[tuple[int, ...]] = set()
 
-    openings = TrainingMode()
-    for exercise in openings.remaining_exercises:
+    for exercise in exercises:
         moves = tuple(exercise.moves)
 
         if moves in exercise_moves:
@@ -111,12 +101,11 @@ def test_uniqueness() -> None:
         exercise_moves.add(moves)
 
 
-def test_consistent_moves() -> None:
+def test_consistent_moves(exercises: list[Exercise]) -> None:
     # The same position should always have the same next move, but only when the user is to move.
     next_moves: dict[Board, int] = {}
 
-    openings = TrainingMode()
-    for exercise in openings.remaining_exercises:
+    for exercise in exercises:
         for moves_done in range(len(exercise.moves)):
             move = exercise.moves[moves_done]
             board = exercise.boards[moves_done]
@@ -140,3 +129,76 @@ def test_consistent_moves() -> None:
                     print("- " + Board.offset_to_str(move))
                     print("- " + Board.offset_to_str(found_move))
                     assert False
+
+
+def test_skipped_children(exercises: list[Exercise]) -> None:
+    # Rows with skipped children should have certain values
+
+    for exercise in exercises:
+        if exercise.has_skipped_children:
+            assert exercise.raw["interest"] == "vlow"
+            assert exercise.eval is None
+
+
+def test_tree_exploration(exercises: list[Exercise]) -> None:
+    # In every exercise, when the player is to move, the move is either:
+    # - not explored
+    # - completely explored (all children have an exercise)
+    # - partially explored but parent is marked as having skipped children
+
+    board_explored_children: dict[Board, set[int]] = {}
+    boards_with_skipped_children: set[Board] = set()
+    sequences: dict[Board, list[int]] = {}
+
+    for exercise in exercises:
+        if exercise.has_skipped_children:
+            boards_with_skipped_children.add(exercise.boards[-1])
+
+        for i in range(len(exercise.moves)):
+            move = exercise.moves[i]
+            board = exercise.boards[i]
+
+            if exercise.color == board.turn:
+                # Opponent not to move.
+                continue
+
+            if board not in board_explored_children:
+                board_explored_children[board] = set()
+                sequences[board] = exercise.moves[:i]
+
+            board_explored_children[board].add(move)
+
+    # TODO #10 support Board normalization and mirroring
+    symmetrical_positions = {
+        Board.start(),
+        Board.from_bitset(0x103810000000, 0x200008000000, 1),
+    }
+
+    for board, explored_children in board_explored_children.items():
+        has_skipped = board in boards_with_skipped_children
+        fully_explored = explored_children == board.get_moves()
+
+        if board in symmetrical_positions:
+            continue
+
+        sequence = Board.offsets_to_str(sequences[board])
+
+        if has_skipped and fully_explored:
+            board.show()
+            print("Board is fully explored and has `...` marker.")
+            print("Sequence: " + sequence)
+            assert False
+
+        if not has_skipped and not fully_explored:
+            unexplored_children = board.get_moves() - explored_children
+
+            board.show()
+            print("Board is not fully explored and has no `...` marker.")
+            print("Sequence: " + sequence)
+            print(
+                "Unexplored children: "
+                + ", ".join(Board.offset_to_str(child) for child in unexplored_children)
+            )
+            print("Board hex: " + board.to_bitset_repr())
+            print()
+            assert False
