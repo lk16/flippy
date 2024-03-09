@@ -40,10 +40,10 @@ class Game:
 
                 move = Board.str_to_offset(word)
                 game.moves.append(move)
-                child = board.do_move(move)
 
-                assert child
+                child = board.do_move(move)
                 game.boards.append(child)
+
                 board = child
 
         return game

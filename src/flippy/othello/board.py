@@ -1,19 +1,13 @@
 from __future__ import annotations
-from copy import deepcopy
-from itertools import count
-from typing import Iterable, Optional
+from copy import copy
+from typing import Iterable
 
+from flippy.othello.bitset import bits_rotate
 
-ROWS = 8
-COLS = 8
 
 BLACK = -1
 WHITE = 1
 EMPTY = 0
-
-# TODO remove these two
-UNKNOWN = 2  # Used in watch mode
-WRONG_MOVE = 3  # Used in openings training mode
 
 PASS_MOVE = -1
 SKIPPED_CHILDREN = -2  # used in training mode
@@ -35,105 +29,196 @@ def opponent(color: int) -> int:
     return -color
 
 
+# TODO #16 make naming of offset move_id and so on consistent, like in othello_tree
+
+
+class InvalidMove(Exception):
+    pass
+
+
 class Board:
-    def __init__(self, squares: list[int], turn: int) -> None:
-        self.squares = squares
+    def __init__(self, me: int, opp: int, turn: int) -> None:
+        assert me == me & 0xFFFFFFFFFFFFFFFF
+        assert opp == opp & 0xFFFFFFFFFFFFFFFF
+        assert turn in [BLACK, WHITE]
+
+        self.me = me
+        self.opp = opp
         self.turn = turn
 
     @classmethod
     def start(cls) -> Board:
-        squares = [EMPTY] * ROWS * COLS
-        squares[3 * ROWS + 3] = squares[4 * ROWS + 4] = WHITE
-        squares[3 * ROWS + 4] = squares[4 * ROWS + 3] = BLACK
-        turn = BLACK
-        return Board(squares, turn)
-
-    @classmethod
-    def from_bitset(cls, black: int, white: int, turn: int) -> Board:
-        squares = [EMPTY] * ROWS * COLS
-        for i in range(64):
-            mask = 1 << i
-            if black & mask:
-                squares[i] = BLACK
-            if white & mask:
-                squares[i] = WHITE
-        return Board(squares, turn)
+        me = 1 << 28 | 1 << 35
+        opp = 1 << 27 | 1 << 36
+        return Board(me, opp, BLACK)
 
     @classmethod
     def empty(cls) -> Board:
-        squares = [EMPTY] * ROWS * COLS
-        turn = BLACK
-        return Board(squares, turn)
+        return Board(0x0, 0x0, BLACK)
 
-    def to_bitset_repr(self) -> str:
+    @classmethod
+    def from_squares(cls, squares: list[int], turn: int) -> Board:
+        assert len(squares) == 64
+        assert turn in [BLACK, WHITE]
+
         white = 0
         black = 0
-        for i, square in enumerate(self.squares):
-            mask = 1 << i
-            if square == BLACK:
-                black |= mask
+        for index, square in enumerate(squares):
+            mask = 1 << index
             if square == WHITE:
                 white |= mask
-        return f"Board.from_bitset({hex(black)}, {hex(white)}, {self.turn})"
+            elif square == BLACK:
+                black |= mask
+
+        if turn == BLACK:
+            return Board(black, white, BLACK)
+        return Board(white, black, WHITE)
+
+    def __repr__(self) -> str:
+        return f"Board({hex(self.me)}, {hex(self.opp)}, {self.turn})"
 
     def is_valid_move(self, move: int) -> bool:
-        return self.do_move(move) is not None
+        return move in self.get_moves_as_set()
 
-    def get_moves(self) -> set[int]:
-        return {move for move in range(64) if self.is_valid_move(move)}
+    def get_square(self, move: int) -> int:
+        assert move in range(64)
+        mask = 1 << move
+        if self.me & mask:
+            return self.turn
+        if self.opp & mask:
+            return opponent(self.turn)
+        return EMPTY
 
-    def do_move(self, move: int) -> Optional[Board]:
+    def black(self) -> int:
+        if self.turn == BLACK:
+            return self.me
+        return self.opp
+
+    def white(self) -> int:
+        if self.turn == WHITE:
+            return self.me
+        return self.opp
+
+    def get_moves_as_set(self) -> set[int]:
+        moves = self.get_moves()
+        return {i for i in range(64) if (1 << i) & moves}
+
+    def get_moves(self) -> int:
+        mask = self.opp & 0x7E7E7E7E7E7E7E7E
+
+        flipL = mask & (self.me << 1)
+        flipL |= mask & (flipL << 1)
+        maskL = mask & (mask << 1)
+        flipL |= maskL & (flipL << (2 * 1))
+        flipL |= maskL & (flipL << (2 * 1))
+        flipR = mask & (self.me >> 1)
+        flipR |= mask & (flipR >> 1)
+        maskR = mask & (mask >> 1)
+        flipR |= maskR & (flipR >> (2 * 1))
+        flipR |= maskR & (flipR >> (2 * 1))
+        movesSet = (flipL << 1) | (flipR >> 1)
+
+        flipL = mask & (self.me << 7)
+        flipL |= mask & (flipL << 7)
+        maskL = mask & (mask << 7)
+        flipL |= maskL & (flipL << (2 * 7))
+        flipL |= maskL & (flipL << (2 * 7))
+        flipR = mask & (self.me >> 7)
+        flipR |= mask & (flipR >> 7)
+        maskR = mask & (mask >> 7)
+        flipR |= maskR & (flipR >> (2 * 7))
+        flipR |= maskR & (flipR >> (2 * 7))
+        movesSet |= (flipL << 7) | (flipR >> 7)
+
+        flipL = mask & (self.me << 9)
+        flipL |= mask & (flipL << 9)
+        maskL = mask & (mask << 9)
+        flipL |= maskL & (flipL << (2 * 9))
+        flipL |= maskL & (flipL << (2 * 9))
+        flipR = mask & (self.me >> 9)
+        flipR |= mask & (flipR >> 9)
+        maskR = mask & (mask >> 9)
+        flipR |= maskR & (flipR >> (2 * 9))
+        flipR |= maskR & (flipR >> (2 * 9))
+        movesSet |= (flipL << 9) | (flipR >> 9)
+
+        flipL = self.opp & (self.me << 8)
+        flipL |= self.opp & (flipL << 8)
+        maskL = self.opp & (self.opp << 8)
+        flipL |= maskL & (flipL << (2 * 8))
+        flipL |= maskL & (flipL << (2 * 8))
+        flipR = self.opp & (self.me >> 8)
+        flipR |= self.opp & (flipR >> 8)
+        maskR = self.opp & (self.opp >> 8)
+        flipR |= maskR & (flipR >> (2 * 8))
+        flipR |= maskR & (flipR >> (2 * 8))
+        movesSet |= (flipL << 8) | (flipR >> 8)
+
+        return movesSet & ~(self.me | self.opp) & 0xFFFFFFFFFFFFFFFF
+
+    def do_move(self, move: int) -> Board:
         if move == PASS_MOVE:
             return self.pass_move()
 
-        if self.squares[move] != EMPTY:
-            return None
+        if self.get_square(move) != EMPTY:
+            raise InvalidMove
 
-        move_y = move // COLS
-        move_x = move % COLS
-        flipped: list[int] = []
+        moves = self.get_moves()
+        if moves & (1 << move) == 0:
+            raise InvalidMove
 
-        for dy, dx in DIRECTIONS:
-            flipped_line: list[int] = []
-
-            for d in count(1):
-                y = move_y + dy * d
-                x = move_x + dx * d
-
-                if y not in range(ROWS) or x not in range(COLS):
+        flipped = 0
+        for dx, dy in DIRECTIONS:
+            s = 1
+            while True:
+                curx = int(move % 8) + (dx * s)
+                cury = int(move / 8) + (dy * s)
+                if curx < 0 or curx >= 8 or cury < 0 or cury >= 8:
                     break
 
-                s = 8 * y + x
-                square = self.squares[s]
-
-                if square not in [WHITE, BLACK]:
+                cur = 8 * cury + curx
+                if self.opp & (1 << cur):
+                    s += 1
+                else:
+                    if (self.me & (1 << cur)) and (s >= 2):
+                        for p in range(1, s):
+                            f = move + (p * (8 * dy + dx))
+                            flipped |= 1 << f
                     break
 
-                if square == self.turn:
-                    if d > 1:
-                        flipped += flipped_line
-                    break
+        opp = self.me | flipped | (1 << move)
+        me = self.opp & ~opp
+        turn = opponent(self.turn)
+        return Board(me, opp, turn)
 
-                if square == opponent(self.turn):
-                    flipped_line.append(s)
-                    continue
+    def do_normalized_move(self, move: int) -> Board:
+        return self.do_move(move).normalized()[0]
 
-        if not flipped:
-            return None
+    def rotated(self, rotation: int) -> Board:
+        me = bits_rotate(self.me, rotation)
+        opp = bits_rotate(self.opp, rotation)
+        return Board(me, opp, self.turn)
 
-        child = Board(deepcopy(self.squares), opponent(self.turn))
-        child.squares[move] = self.turn
+    def normalized(self) -> tuple[Board, int]:
+        normalized = Board(self.me, self.opp, self.turn)
+        rotation = 0
 
-        for f in flipped:
-            child.squares[f] = self.turn
+        for r in range(1, 8):
+            me = bits_rotate(self.me, r)
+            opp = bits_rotate(self.opp, r)
 
-        return child
+            if (me, opp) < (normalized.me, normalized.opp):
+                normalized.me = me
+                normalized.opp = opp
+                rotation = r
+
+        return normalized, rotation
 
     def pass_move(self) -> Board:
-        return Board(deepcopy(self.squares), opponent(self.turn))
+        return Board(copy(self.opp), copy(self.me), opponent(self.turn))
 
     def has_moves(self) -> bool:
-        for move in range(ROWS * COLS):
+        for move in range(64):
             if self.is_valid_move(move):
                 return True
         return False
@@ -142,7 +227,11 @@ class Board:
         return not (self.has_moves() or self.pass_move().has_moves())
 
     def count(self, color: int) -> int:
-        return len([s for s in self.squares if s == color])
+        assert color in [WHITE, BLACK]
+
+        if color == WHITE:
+            return bin(self.white()).count("1")
+        return bin(self.black()).count("1")
 
     def show(self) -> None:
         print("+-a-b-c-d-e-f-g-h-+")
@@ -151,7 +240,7 @@ class Board:
 
             for x in range(8):
                 offset = (y * 8) + x
-                square = self.squares[offset]
+                square = self.get_square(offset)
 
                 if square == BLACK:
                     print("○ ", end="")
@@ -166,9 +255,9 @@ class Board:
 
     @classmethod
     def offset_to_str(cls, offset: int) -> str:
-        if offset not in range(COLS * ROWS):
+        if offset not in range(64):
             raise ValueError
-        return "abcdefgh"[offset % COLS] + "12345678"[offset // COLS]
+        return "abcdefgh"[offset % 8] + "12345678"[offset // 8]
 
     @classmethod
     def offsets_to_str(cls, offsets: Iterable[int]) -> str:
@@ -187,13 +276,16 @@ class Board:
 
         move_offset_x = ord(string[0]) - ord("a")
         move_offset_y = ord(string[1]) - ord("1")
-        return move_offset_y * COLS + move_offset_x
+        return move_offset_y * 8 + move_offset_x
+
+    def as_tuple(self) -> tuple[int, int, int]:
+        return (self.me, self.opp, self.turn)
 
     def __hash__(self) -> int:
-        return hash((tuple(self.squares), self.turn))
+        return hash(self.as_tuple())
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Board):
             raise TypeError(f"Cannot compare Board with {type(other)}")
 
-        return self.squares == other.squares and self.turn == other.turn
+        return self.as_tuple() == other.as_tuple()
