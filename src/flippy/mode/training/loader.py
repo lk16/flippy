@@ -1,7 +1,13 @@
 from __future__ import annotations
 import csv
+from typing import Optional
 from flippy.mode.training.exercise import Exercise
 from pathlib import Path
+
+from flippy.mode.training.logs import LogFile
+
+
+OPENINGS_FILE = Path(__file__).parent / "../../../../openings.csv"
 
 
 class BaseFilter:
@@ -27,16 +33,22 @@ class PrefixFilter(BaseFilter):
         return exercise.raw[self.field].startswith(self.prefix)
 
 
+class ExerciseLoaderArgs:
+    def __init__(self, filters: list[str], top: Optional[int]) -> None:
+        self.filters = filters
+        self.top = top
+
+
 class ExerciseLoader:
-    def __init__(self, file: Path, filters: list[str]) -> None:
-        self.file = file
-        self.str_filters = filters
+    def __init__(self, args: ExerciseLoaderArgs) -> None:
+        self.str_filters = args.filters
+        self.top = args.top
         self.filters: list[BaseFilter] = []
         self.exercises: list[Exercise] = []
         self.skipped_initial_moves = 0
 
     def _load_all_exercises(self) -> None:
-        reader = csv.DictReader(open(self.file, "r"), delimiter="|")
+        reader = csv.DictReader(open(OPENINGS_FILE, "r"), delimiter="|")
         exercises: list[Exercise] = []
         for row in reader:
             stripped_row = {k.strip(): v.strip() for (k, v) in row.items()}
@@ -99,4 +111,23 @@ class ExerciseLoader:
             if all(filter.matches(exercise) for filter in self.filters):
                 ids.append(id)
 
+        if self.top is not None:
+            ids = self._select_top(ids)
+
         return self.exercises, ids
+
+    def _select_top(self, ids: list[int]) -> list[int]:
+        assert self.top
+
+        exercises = [self.exercises[id] for id in ids]
+        top_exercises = LogFile().get_top_n(exercises, self.top)
+
+        top_ids: list[int] = []
+
+        for top_exercise in top_exercises:
+            for id, exercise in enumerate(self.exercises):
+                if top_exercise == exercise:
+                    top_ids.append(id)
+                    break
+
+        return top_ids
