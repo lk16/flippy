@@ -104,7 +104,7 @@ class LogFile:
         if last_correct > last_mistake:
             priority -= 10
 
-        priority += eval
+        priority -= eval
 
         priority += 5 * move_count
 
