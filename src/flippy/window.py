@@ -1,5 +1,6 @@
 from typing import Optional
 from flippy.mode.base import BaseMode
+from flippy.mode.training.loader import ExerciseLoaderArgs
 from flippy.mode.training.mode import TrainingMode
 from flippy.othello.board import BLACK, WHITE
 
@@ -23,7 +24,7 @@ FRAME_RATE = 60
 
 
 class Window:
-    def __init__(self, training_filters: list[str]) -> None:
+    def __init__(self, loader_args: ExerciseLoaderArgs) -> None:
         pygame.init()
         self.mode: BaseMode = TrainingMode()  # TODO #7 use UI / env var to toggle
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -31,7 +32,7 @@ class Window:
         pygame.display.set_caption("Flippy")
 
         if isinstance(self.mode, TrainingMode):
-            self.mode.load_exercises(training_filters)
+            self.mode.load_exercises(loader_args)
 
     def run(self) -> None:
         running = True

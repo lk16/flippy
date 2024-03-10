@@ -68,3 +68,6 @@ class Exercise:
         if not isinstance(other, Exercise):
             raise TypeError
         return self.color == other.color and self.moves == other.moves
+
+    def get_moves_seq_str(self) -> str:
+        return Board.offsets_to_str(self.moves)
