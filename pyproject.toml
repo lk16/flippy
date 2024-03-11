@@ -9,13 +9,15 @@ dependencies = [
     "pygame>=2.5.2",
     "pyautogui>=0.9.54",
     "typer>=0.9.0",
+    "requests>=2.31.0",
 ]
 requires-python = "==3.11.*"
 readme = "README.md"
 license = {text = "MIT"}
 
 [tool.pdm.scripts]
-gui = {call = "flippy.main:main"}
+gui = {call = "flippy.main:gui"}
+organize-pgn = {call = "flippy.main:organize_pgn"}
 
 [tool.pdm]
 [tool.pdm.dev-dependencies]
@@ -27,4 +29,5 @@ dev = [
     "types-PyAutoGUI>=0.9.3.20240106",
     "pytest>=8.0.1",
     "pytest-cov>=4.1.0",
+    "types-requests>=2.31.0.20240311",
 ]

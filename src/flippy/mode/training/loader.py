@@ -1,13 +1,13 @@
 from __future__ import annotations
 import csv
 from typing import Optional
+from flippy import PROJECT_ROOT
 from flippy.mode.training.exercise import Exercise
-from pathlib import Path
 
 from flippy.mode.training.logs import LogFile
 
 
-OPENINGS_FILE = Path(__file__).parent / "../../../../openings.csv"
+OPENINGS_FILE = PROJECT_ROOT / "openings.csv"
 
 
 class BaseFilter:

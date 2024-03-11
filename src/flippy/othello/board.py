@@ -271,6 +271,8 @@ class Board:
         if string == "--":
             return PASS_MOVE
 
+        string = string.lower()
+
         if not "a" <= string[0] <= "h" or not "1" <= string[1] <= "8":
             raise ValueError(f'Invalid move "{string}"')
 
