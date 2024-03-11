@@ -2,7 +2,7 @@ from copy import copy
 from pathlib import Path
 from typing import Dict, List
 
-from flippy.othello.board import Board
+from flippy.othello.board import PASS_MOVE, Board, InvalidMove
 
 
 class Game:
@@ -39,11 +39,16 @@ class Game:
                     continue
 
                 move = Board.str_to_offset(word)
+
+                try:
+                    board.do_move(move)
+                except InvalidMove:
+                    # Some PGN's don't mark passed moves properly
+                    board = board.do_move(PASS_MOVE)
+                    game.boards.append(board)
+
+                board = board.do_move(move)
                 game.moves.append(move)
-
-                child = board.do_move(move)
-                game.boards.append(child)
-
-                board = child
+                game.boards.append(board)
 
         return game
