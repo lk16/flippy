@@ -1,0 +1,10 @@
+{
+    "pgn_organizer": {
+        "source_folders": [
+            "~",
+            "$PROJECT_ROOT/something"
+        ],
+        "target_folder": "$PROJECT_ROOT/pgn",
+        "playok_usernames": ["username", "other_username"]
+    }
+}

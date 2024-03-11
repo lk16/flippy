@@ -3,14 +3,14 @@ from collections import defaultdict
 from datetime import datetime
 import json
 
-from pathlib import Path
 from typing import DefaultDict, Optional
+from flippy import PROJECT_ROOT
 
 from flippy.mode.training.exercise import Exercise
 from flippy.othello.board import Board
 
 
-LOG_FILE = Path(__file__).parent / "../../../../opening_logs.txt"
+LOG_FILE = PROJECT_ROOT / "opening_logs.txt"
 
 
 class LogItem:

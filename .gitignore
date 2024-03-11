@@ -163,6 +163,10 @@ cython_debug/
 
 # Othello game log files
 pgn/
+pgn.zip
 
 # opening training logs
 opening_logs.txt
+
+# flippy config file
+config.json
