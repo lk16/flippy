@@ -175,7 +175,21 @@ white |  +12 | low      | e6 f4 c3 c4 c5 c6
 white |  +10 | mid      | e6 f4 c3 c4 d3 d6 b3 c5
 white |   +8 | mid      | e6 f4 c3 c4 d3 d6 b4 f6
 white |   +8 | mid      | e6 f4 c3 c4 d3 d6 b5 c5
-white |   +4 | high     | e6 f4 c3 c4 d3 d6 c5 c6
+white |    ? | vlow     | e6 f4 c3 c4 d3 d6 c5 c6 ...
+white |    ? |  vlow    | e6 f4 c3 c4 d3 d6 c5 c6 d7 f6 ...
+white |   +4 |  high    | e6 f4 c3 c4 d3 d6 c5 c6 d7 f6 b5 b4
+white |   +4 |  high    | e6 f4 c3 c4 d3 d6 c5 c6 d7 f6 c7 d8
+white |   +4 |  high    | e6 f4 c3 c4 d3 d6 c5 c6 d7 f6 e7 c8
+white |   +6 |  mid     | e6 f4 c3 c4 d3 d6 c5 c6 d7 f6 f3 c8
+white |   +6 |  mid     | e6 f4 c3 c4 d3 d6 c5 c6 d7 f6 f5 f3
+white |    ? | vlow     | e6 f4 c3 c4 d3 d6 c5 c6 e7 d7 ...
+white |   +6 | mid      | e6 f4 c3 c4 d3 d6 c5 c6 e7 d7 c8 b5
+white |   +4 | mid      | e6 f4 c3 c4 d3 d6 c5 c6 e7 d7 f6 b5
+white |    ? | vlow     | e6 f4 c3 c4 d3 d6 c5 c6 f5 f6 ...
+white |   +4 | high     | e6 f4 c3 c4 d3 d6 c5 c6 f5 f6 d7 c8
+white |   +8 | mid      | e6 f4 c3 c4 d3 d6 c5 c6 f5 f6 f7 b5
+white |   +8 | mid      | e6 f4 c3 c4 d3 d6 c5 c6 f5 f6 g5 g4
+white |   +6 | low      | e6 f4 c3 c4 d3 d6 c5 c6 f6 b5
 white |  +10 | low      | e6 f4 c3 c4 d3 d6 c6 c5
 white |  +10 | low      | e6 f4 c3 c4 d3 d6 d7 c5
 white |    ? | vlow     | e6 f4 c3 c4 d3 d6 e3 c2 ...
