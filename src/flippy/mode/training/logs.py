@@ -141,7 +141,7 @@ class LogFile:
                 correct_percentage = 100.0 * (correct / attempts)
 
             print(
-                f"{priority:>8} | {correct_percentage:6.2f}% | {attempts:>8} | {interest:>8} | {eval:>4} | {Board.offsets_to_str(exercise.moves)}"
+                f"{priority:>8} | {correct_percentage:6.2f}% | {attempts:>8} | {interest:>8} | {eval:>4} | {Board.indexes_to_fields(exercise.moves)}"
             )
 
         return [item[0] for item in priorities][:n]

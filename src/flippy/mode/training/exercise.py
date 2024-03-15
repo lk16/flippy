@@ -5,15 +5,15 @@ from flippy.othello.board import BLACK, WHITE, Board, InvalidMove
 
 class Exercise:
     @classmethod
-    def load_moves(cls, moves: str) -> tuple[list[int], bool]:
+    def load_moves(cls, fields: str) -> tuple[list[int], bool]:
         has_skipped_children = False
-        if moves.endswith("..."):
-            moves = moves[:-3].strip()
+        if fields.endswith("..."):
+            fields = fields[:-3].strip()
             has_skipped_children = True
 
-        offsets = [Board.str_to_offset(move) for move in moves.split()]
+        moves = [Board.field_to_index(field) for field in fields.split()]
 
-        return offsets, has_skipped_children
+        return moves, has_skipped_children
 
     @classmethod
     def load_color(cls, color: str) -> int:
@@ -33,8 +33,8 @@ class Exercise:
                 child = boards[-1].do_move(move)
             except InvalidMove:
                 boards[-1].show()
-                bad_move_str = Board.offset_to_str(move)
-                bad_move_seq = " ".join(Board.offset_to_str(move) for move in moves)
+                bad_move_str = Board.index_to_field(move)
+                bad_move_seq = " ".join(Board.index_to_field(move) for move in moves)
                 raise ValueError(f'Invalid move "{bad_move_str}" in "{bad_move_seq}"')
 
             boards.append(child)
@@ -70,4 +70,4 @@ class Exercise:
         return self.color == other.color and self.moves == other.moves
 
     def get_moves_seq_str(self) -> str:
-        return Board.offsets_to_str(self.moves)
+        return Board.indexes_to_fields(self.moves)

@@ -27,7 +27,7 @@ class Game:
         game = Game()
 
         lines = string.split("\n")
-        for offset, line in enumerate(lines):
+        for line_offset, line in enumerate(lines):
             if not line.startswith("["):
                 break
 
@@ -39,7 +39,7 @@ class Game:
         board = Board.start()
         game.boards.append(copy(board))
 
-        for line in lines[offset:]:
+        for line in lines[line_offset:]:
             if line == "":
                 continue
 
@@ -47,7 +47,7 @@ class Game:
                 if word[0].isdigit():
                     continue
 
-                move = Board.str_to_offset(word)
+                move = Board.field_to_index(word)
 
                 try:
                     board.do_move(move)

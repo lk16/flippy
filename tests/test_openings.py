@@ -83,8 +83,8 @@ def test_no_double_transposition_subtree_investigation(
             if investigated_seq != moves_seq:
                 board.show()
                 print("Transposition:")
-                print("- " + Board.offsets_to_str(investigated_seq))
-                print("- " + Board.offsets_to_str(moves_seq))
+                print("- " + Board.indexes_to_fields(investigated_seq))
+                print("- " + Board.indexes_to_fields(moves_seq))
 
                 assert False
 
@@ -97,7 +97,7 @@ def test_uniqueness(exercises: list[Exercise]) -> None:
         moves = tuple(exercise.moves)
 
         if moves in exercise_moves:
-            print("non-unique exercise: " + Board.offsets_to_str(moves))
+            print("non-unique exercise: " + Board.indexes_to_fields(moves))
             assert False
 
         exercise_moves.add(moves)
@@ -124,12 +124,13 @@ def test_consistent_moves(exercises: list[Exercise]) -> None:
                 if move != found_move:
                     board.show()
                     print(
-                        "Sequence: " + Board.offsets_to_str(exercise.moves[:moves_done])
+                        "Sequence: "
+                        + Board.indexes_to_fields(exercise.moves[:moves_done])
                     )
                     print()
                     print("Inconsistent moves:")
-                    print("- " + Board.offset_to_str(move))
-                    print("- " + Board.offset_to_str(found_move))
+                    print("- " + Board.index_to_field(move))
+                    print("- " + Board.index_to_field(found_move))
                     assert False
 
 
@@ -184,7 +185,7 @@ def test_tree_exploration(exercises: list[Exercise]) -> None:
 
         has_skipped = board in boards_with_skipped_children
 
-        sequence = Board.offsets_to_str(sequences[board])
+        sequence = Board.indexes_to_fields(sequences[board])
 
         if has_skipped and not unexplored_moves:
             board.show()
@@ -198,7 +199,7 @@ def test_tree_exploration(exercises: list[Exercise]) -> None:
             print("Sequence: " + sequence)
             print(
                 "Unexplored children: "
-                + ", ".join(Board.offset_to_str(move) for move in unexplored_moves)
+                + ", ".join(Board.index_to_field(move) for move in unexplored_moves)
             )
             print(f"Board: {board}")
             print()

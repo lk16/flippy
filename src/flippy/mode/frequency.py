@@ -51,7 +51,7 @@ class PositionFrequency(GameMode):
         return frequencies
 
     def get_ui_details(self) -> dict[str, Any]:
-        # dict of move index to frequency
+        # dict of move to frequency
         child_frequencies: dict[int, int] = {}
         board = self.get_board()
 
