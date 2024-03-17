@@ -34,7 +34,14 @@ black |   +2 | high     | e6 f4 c3 c4 d3 d6 e3 d2 c2 b3 g4
 black |   +4 | mid      | e6 f4 c3 c4 d3 d6 e3 d2 c2 b4 f3
 black |   +4 | high     | e6 f4 c3 c4 d3 d6 e3 d2 c2 e2 f3
 black |   +0 | high     | e6 f4 c3 c4 d3 d6 e3 d2 c2 f3 b3
-black |   +2 | high     | e6 f4 c3 c4 d3 d6 e3 d2 c2 f5 f3
+black |    ? | vlow     | e6 f4 c3 c4 d3 d6 e3 d2 c2 f5 f3 ...
+black |    ? | vlow     | e6 f4 c3 c4 d3 d6 e3 d2 c2 f5 f3 e2 c5 ...
+black |   +2 | mid      | e6 f4 c3 c4 d3 d6 e3 d2 c2 f5 f3 e2 c5 b5 c6
+black |    ? | vlow     | e6 f4 c3 c4 d3 d6 e3 d2 c2 f5 f3 e2 c5 b6 f1 ...
+black |   +4 | high     | e6 f4 c3 c4 d3 d6 e3 d2 c2 f5 f3 e2 c5 b6 f1 b3 b5
+black |   +4 | high     | e6 f4 c3 c4 d3 d6 e3 d2 c2 f5 f3 e2 c5 b6 f1 b4 d1
+black |   +2 | high     | e6 f4 c3 c4 d3 d6 e3 d2 c2 f5 f3 e2 c5 b6 f1 e1 g4
+black |   +2 | high     | e6 f4 c3 c4 d3 d6 e3 d2 c2 f5 f3 e2 c5 b6 f1 f6 g4
 black |    ? | vlow     | e6 f4 c3 c4 d3 d6 e3 e2 d2 ...
 black |   +0 | high     | e6 f4 c3 c4 d3 d6 e3 e2 d2 c2 b3
 black |   +4 | mid      | e6 f4 c3 c4 d3 d6 e3 e2 d2 f6 c5
