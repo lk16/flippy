@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Optional
 
 import pygame
+from flippy.arguments import Arguments
 from flippy.othello.board import Board
 from pygame.event import Event
 from flippy.mode.base import BaseMode
@@ -13,7 +14,7 @@ from tkinter import filedialog
 
 
 class PGNMode(BaseMode):
-    def __init__(self) -> None:
+    def __init__(self, args: Arguments) -> None:
         self.game: Optional[Game] = None
         self.moves_done = 0
 

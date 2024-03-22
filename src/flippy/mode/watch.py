@@ -1,3 +1,4 @@
+from inspect import Arguments
 from flippy.othello.board import EMPTY, BLACK, WHITE, Board, opponent
 from flippy.mode.base import BaseMode
 
@@ -74,7 +75,7 @@ class FlyOrDieWatchCoords:
 
 
 class WatchMode(BaseMode):
-    def __init__(self) -> None:
+    def __init__(self, args: Arguments) -> None:
         self.screenshot: Image
         self.prev_coords: Optional[FlyOrDieWatchCoords] = None
         self.prev_board = Board.empty()

@@ -1,3 +1,4 @@
+from flippy.arguments import Arguments
 from flippy.othello.board import Board, InvalidMove
 from flippy.mode.base import BaseMode
 
@@ -6,7 +7,7 @@ import pygame
 
 
 class GameMode(BaseMode):
-    def __init__(self) -> None:
+    def __init__(self, args: Arguments) -> None:
         self.history = [Board.start()]
 
     def on_event(self, event: Event) -> None:

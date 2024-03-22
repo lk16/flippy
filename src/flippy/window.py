@@ -1,7 +1,6 @@
 from typing import Optional
-from flippy.mode.base import BaseMode
-from flippy.mode.training.loader import ExerciseLoaderArgs
-from flippy.mode.training.mode import TrainingMode
+from flippy.mode.frequency import PositionFrequency
+from flippy.arguments import Arguments
 from flippy.othello.board import BLACK, WHITE
 
 
@@ -24,15 +23,17 @@ FRAME_RATE = 60
 
 
 class Window:
-    def __init__(self, loader_args: ExerciseLoaderArgs) -> None:
+    def __init__(self, args: Arguments) -> None:
         pygame.init()
-        self.mode: BaseMode = TrainingMode()  # TODO #7 use UI / env var to toggle
+        self.args = args
+
+        # TODO #7 use UI / env var to toggle
+        self.mode = PositionFrequency(args)
+
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.clock = pygame.time.Clock()
-        pygame.display.set_caption("Flippy")
 
-        if isinstance(self.mode, TrainingMode):
-            self.mode.load_exercises(loader_args)
+        pygame.display.set_caption("Flippy")
 
     def run(self) -> None:
         running = True
@@ -61,6 +62,7 @@ class Window:
         ui_details = self.mode.get_ui_details()
         move_mistakes: set[int] = ui_details.pop("move_mistakes", set())
         unknown_squares: set[int] = ui_details.pop("unknown_squares", set())
+        child_frequencies: dict[int, int] = ui_details.pop("child_frequencies", {})
 
         if ui_details:
             print(
@@ -102,15 +104,48 @@ class Window:
                 pygame.draw.circle(
                     self.screen, COLOR_WRONG_MOVE, square_centre, SQUARE_SIZE // 8
                 )
+
             elif board.is_valid_move(offset):
-                if board.turn == WHITE:
-                    pygame.draw.circle(
-                        self.screen, COLOR_WHITE_DISC, square_centre, SQUARE_SIZE // 8
-                    )
-                elif board.turn == BLACK:
-                    pygame.draw.circle(
-                        self.screen, COLOR_BLACK_DISC, square_centre, SQUARE_SIZE // 8
-                    )
+                if offset in child_frequencies:
+                    child_frequency = child_frequencies[offset]
+                    if child_frequency < 100:
+                        font_size = 60
+                    elif child_frequency < 1000:
+                        font_size = 45
+                    else:
+                        font_size = 30
+
+                    if board.turn == WHITE:
+                        font = pygame.font.Font(None, font_size)
+                        text_surface = font.render(
+                            str(child_frequency), True, COLOR_WHITE_DISC
+                        )
+                        text_rect = text_surface.get_rect()
+                        text_rect.center = square_centre
+                        self.screen.blit(text_surface, text_rect.topleft)
+                    elif board.turn == BLACK:
+                        font = pygame.font.Font(None, font_size)
+                        text_surface = font.render(
+                            str(child_frequency), True, COLOR_BLACK_DISC
+                        )
+                        text_rect = text_surface.get_rect()
+                        text_rect.center = square_centre
+                        self.screen.blit(text_surface, text_rect.topleft)
+                else:
+                    if board.turn == WHITE:
+                        pygame.draw.circle(
+                            self.screen,
+                            COLOR_WHITE_DISC,
+                            square_centre,
+                            SQUARE_SIZE // 8,
+                        )
+                    elif board.turn == BLACK:
+                        pygame.draw.circle(
+                            self.screen,
+                            COLOR_BLACK_DISC,
+                            square_centre,
+                            SQUARE_SIZE // 8,
+                        )
 
         pygame.display.flip()
 

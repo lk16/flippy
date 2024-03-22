@@ -3,9 +3,9 @@ from __future__ import annotations
 from copy import copy
 from datetime import date, datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional
 
-from flippy.othello.board import PASS_MOVE, Board, InvalidMove
+from flippy.othello.board import BLACK, PASS_MOVE, WHITE, Board, InvalidMove
 
 
 class Game:
@@ -79,3 +79,28 @@ class Game:
         except KeyError:
             return None
         return datetime.strptime(raw, "%Y.%m.%d %H:%M:%S")
+
+    def get_color(self, username: str) -> Optional[int]:
+        if self.metadata["White"] == username:
+            return WHITE
+        if self.metadata["Black"] == username:
+            return BLACK
+        return None
+
+    def get_color_any(self, usernames: Iterable[str]) -> Optional[int]:
+        for username in usernames:
+            color = self.get_color(username)
+            if color is not None:
+                return color
+        return None
+
+    def get_winner(self) -> Optional[int]:
+        final_position = self.boards[-1]
+        black_discs = final_position.count(BLACK)
+        white_discs = final_position.count(WHITE)
+
+        if black_discs > white_discs:
+            return BLACK
+        if white_discs > black_discs:
+            return WHITE
+        return None

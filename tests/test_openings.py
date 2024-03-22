@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 from flippy.mode.training.exercise import Exercise
-from flippy.mode.training.loader import ExerciseLoaderArgs
+from flippy.arguments import Arguments
 from flippy.othello.board import BLACK, WHITE, Board
 
 from flippy.mode.training.mode import TrainingMode
@@ -14,9 +14,9 @@ OPENINGS_FILE = Path(__file__).parent / "../openings.csv"
 
 @pytest.fixture()
 def exercises() -> list[Exercise]:
-    openings = TrainingMode()
-    loader_args = ExerciseLoaderArgs([], None)
-    openings.load_exercises(loader_args)
+    args = Arguments.empty()
+    openings = TrainingMode(args)
+    openings.load_exercises()
     return openings.exercises
 
 

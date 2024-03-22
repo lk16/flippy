@@ -6,5 +6,7 @@
         ],
         "target_folder": "$PROJECT_ROOT/pgn",
         "playok_usernames": ["username", "other_username"]
-    }
+    },
+    "usernames": ["username", "some_user"],
+    "edax_path": "~/your/path/to/edax"
 }
