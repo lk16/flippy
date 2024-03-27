@@ -1,7 +1,7 @@
 from __future__ import annotations
 import csv
-from typing import Optional
 from flippy import PROJECT_ROOT
+from flippy.arguments import TrainingArguments
 from flippy.mode.training.exercise import Exercise
 
 from flippy.mode.training.logs import LogFile
@@ -33,14 +33,8 @@ class PrefixFilter(BaseFilter):
         return exercise.raw[self.field].startswith(self.prefix)
 
 
-class ExerciseLoaderArgs:
-    def __init__(self, filters: list[str], top: Optional[int]) -> None:
-        self.filters = filters
-        self.top = top
-
-
 class ExerciseLoader:
-    def __init__(self, args: ExerciseLoaderArgs) -> None:
+    def __init__(self, args: TrainingArguments) -> None:
         self.str_filters = args.filters
         self.top = args.top
         self.filters: list[BaseFilter] = []

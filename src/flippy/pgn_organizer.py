@@ -1,32 +1,18 @@
 import requests
 from datetime import datetime
 from itertools import count
-import json
 import os
 from pathlib import Path
 
-from flippy import PROJECT_ROOT
 from flippy.othello.game import Game
-
-
-CONFIG_PATH = PROJECT_ROOT / "config.json"
-
-
-def config_str_to_path(string: str) -> Path:
-    string = string.replace("$PROJECT_ROOT", str(PROJECT_ROOT))
-    string = string.replace("~", str(Path.home()))
-    return Path(string).resolve()
+from flippy.config import config
 
 
 class PgnOrganizer:
     def __init__(self) -> None:
-        config = json.loads(CONFIG_PATH.read_text())["pgn_organizer"]
-
-        self.source_folders = [
-            config_str_to_path(item) for item in config["source_folders"]
-        ]
-        self.target_folder = config_str_to_path(config["target_folder"])
-        self.playok_usernames = config["playok_usernames"]
+        self.source_folders = config.pgn_source_folders()
+        self.target_folder = config.pgn_target_folder()
+        self.playok_usernames = config.playok_usernames()
 
     def __call__(self) -> None:
         moved = self.move_from_source_folders()
