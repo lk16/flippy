@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import copy
 from datetime import date, datetime
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Iterable, Optional
 
 from flippy.othello.board import BLACK, PASS_MOVE, WHITE, Board, InvalidMove
 
@@ -11,9 +11,9 @@ from flippy.othello.board import BLACK, PASS_MOVE, WHITE, Board, InvalidMove
 class Game:
     def __init__(self, file: Optional[Path] = None) -> None:
         self.file = file
-        self.metadata: Dict[str, str] = {}
-        self.boards: List[Board] = []
-        self.moves: List[int] = []
+        self.metadata: dict[str, str] = {}
+        self.boards: list[Board] = []
+        self.moves: list[int] = []
 
     @classmethod
     def from_pgn(cls, file: Path) -> Game:
@@ -133,3 +133,6 @@ class Game:
             return 64 - 2 * white
         else:
             return -64 + 2 * black
+
+    def zip_board_moves(self) -> zip[tuple[Board, int]]:
+        return zip(self.boards[:-1], self.moves, strict=True)

@@ -13,7 +13,7 @@ SQUARE_SIZE = WIDTH // 8
 DISC_RADIUS = SQUARE_SIZE // 2 - 5
 MOVE_INDICATOR_RADIUS = SQUARE_SIZE // 8
 
-FONT_SIZE = 60
+FONT_SIZE = 50
 
 COLOR_WHITE_DISC = (255, 255, 255)
 COLOR_BLACK_DISC = (0, 0, 0)
@@ -81,6 +81,11 @@ class Window:
         center = self.get_board_square_center(index)
         pygame.draw.circle(self.screen, color, center, MOVE_INDICATOR_RADIUS)
 
+    def draw_best_move_marker(self, index: int, color: tuple[int, int, int]) -> None:
+        center = self.get_board_square_center(index)
+        radius = (SQUARE_SIZE / 2) - 8
+        pygame.draw.circle(self.screen, color, center, radius, 1)
+
     def draw_number(self, index: int, color: tuple[int, int, int], number: int) -> None:
         if number < 100:
             font_size = FONT_SIZE
@@ -132,6 +137,8 @@ class Window:
                 self.draw_number(index, turn_color, child_frequencies[index])
             elif index in evaluations:
                 self.draw_number(index, turn_color, evaluations[index])
+                if evaluations[index] == max(evaluations.values()):
+                    self.draw_best_move_marker(index, turn_color)
             elif board.is_valid_move(index):
                 self.draw_move_indicator(index, turn_color)
 

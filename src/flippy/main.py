@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Optional
 import typer
 from flippy.arguments import (
@@ -8,6 +9,7 @@ from flippy.arguments import (
 )
 from flippy.commands.pgn_organizer import PgnOrganizer
 from flippy.commands.recent_games import RecentGames
+from flippy.commands.pgn_analyzer import PgnAnanlyzer
 
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 
@@ -40,5 +42,12 @@ def organize_pgn() -> None:
 def recent_games() -> None:
     def command(count: int = typer.Option(20, "-n")) -> None:
         RecentGames(count)()
+
+    typer.run(command)
+
+
+def analyze_pgn() -> None:
+    def command(file: Path, level: int = typer.Option(18, "-l")) -> None:
+        PgnAnanlyzer(file, level)()
 
     typer.run(command)
