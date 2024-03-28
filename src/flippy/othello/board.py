@@ -29,9 +29,6 @@ def opponent(color: int) -> int:
     return -color
 
 
-# TODO #16 make naming of offset move_id and so on consistent, like in othello_tree
-
-
 class InvalidMove(Exception):
     pass
 
@@ -239,14 +236,14 @@ class Board:
             print("{} ".format(y + 1), end="")
 
             for x in range(8):
-                offset = (y * 8) + x
-                square = self.get_square(offset)
+                index = (y * 8) + x
+                square = self.get_square(index)
 
                 if square == BLACK:
                     print("○ ", end="")
                 elif square == WHITE:
                     print("● ", end="")
-                elif self.is_valid_move(offset):
+                elif self.is_valid_move(index):
                     print("· ", end="")
                 else:
                     print("  ", end="")
@@ -254,31 +251,31 @@ class Board:
         print("+-----------------+")
 
     @classmethod
-    def offset_to_str(cls, offset: int) -> str:
-        if offset not in range(64):
+    def index_to_field(cls, index: int) -> str:
+        if index not in range(64):
             raise ValueError
-        return "abcdefgh"[offset % 8] + "12345678"[offset // 8]
+        return "abcdefgh"[index % 8] + "12345678"[index // 8]
 
     @classmethod
-    def offsets_to_str(cls, offsets: Iterable[int]) -> str:
-        return " ".join(cls.offset_to_str(offset) for offset in offsets)
+    def indexes_to_fields(cls, indexes: Iterable[int]) -> str:
+        return " ".join(cls.index_to_field(index) for index in indexes)
 
     @classmethod
-    def str_to_offset(cls, string: str) -> int:
-        if len(string) != 2:
-            raise ValueError(f'Invalid move length "{string}"')
+    def field_to_index(cls, field: str) -> int:
+        if len(field) != 2:
+            raise ValueError(f'Invalid move length "{field}"')
 
-        if string == "--":
+        if field == "--":
             return PASS_MOVE
 
-        string = string.lower()
+        field = field.lower()
 
-        if not "a" <= string[0] <= "h" or not "1" <= string[1] <= "8":
-            raise ValueError(f'Invalid move "{string}"')
+        if not ("a" <= field[0] <= "h" and "1" <= field[1] <= "8"):
+            raise ValueError(f'Invalid field "{field}"')
 
-        move_offset_x = ord(string[0]) - ord("a")
-        move_offset_y = ord(string[1]) - ord("1")
-        return move_offset_y * 8 + move_offset_x
+        x = ord(field[0]) - ord("a")
+        y = ord(field[1]) - ord("1")
+        return y * 8 + x
 
     def as_tuple(self) -> tuple[int, int, int]:
         return (self.me, self.opp, self.turn)
@@ -291,3 +288,52 @@ class Board:
             raise TypeError(f"Cannot compare Board with {type(other)}")
 
         return self.as_tuple() == other.as_tuple()
+
+    def to_fen(self) -> str:
+        empties_mask = ~(self.white() | self.black())
+        rows = []
+
+        for y in range(8):
+            row = ""
+            empties_count = 0
+            for x in range(8):
+                index = y * 8 + x
+                mask = 1 << index
+
+                if empties_mask & mask:
+                    empties_count += 1
+                    continue
+
+                if empties_count != 0:
+                    row += f"{empties_count}"
+                empties_count = 0
+
+                if self.white() & mask:
+                    row += "P"
+                else:
+                    row += "p"
+
+            if empties_count != 0:
+                row += f"{empties_count}"
+
+            rows.append(row)
+
+        if self.turn == WHITE:
+            turn = "w"
+        else:
+            turn = "b"
+
+        # For some reason FEN rows are listed in bottom-to-top order.
+        return "/".join(reversed(rows)) + f" {turn}"
+
+    def to_problem(self) -> str:
+        square_values = {
+            EMPTY: "-",
+            BLACK: "X",
+            WHITE: "O",
+        }
+
+        squares = [square_values[self.get_square(index)] for index in range(64)]
+        turn = square_values[self.turn]
+
+        return "".join(squares) + " " + turn + ";\n"

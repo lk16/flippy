@@ -5,12 +5,10 @@ from typing import cast
 from flippy import PROJECT_ROOT
 
 
-CONFIG_PATH = PROJECT_ROOT / "config.json"
-
-
 class Config:
     def __init__(self) -> None:
-        self.__raw = json.loads(CONFIG_PATH.read_text())
+        config_path = PROJECT_ROOT / "config.json"
+        self.__raw = json.loads(config_path.read_text())
 
     @staticmethod
     def resolve_path(string: str) -> Path:
@@ -35,6 +33,9 @@ class Config:
 
     def all_usernames(self) -> set[str]:
         return {*self.playok_usernames(), *self.usernames()}
+
+    def edax_path(self) -> Path:
+        return self.resolve_path(self.__raw["edax_path"])
 
 
 config = Config()

@@ -44,13 +44,13 @@ class FlyOrDieWatchCoords:
     def scale_factor(self) -> int:
         return self.right_x - self.left_x
 
-    def get_square_centre_coords(self, offset: int) -> tuple[int, int]:
+    def get_square_centre_coords(self, index: int) -> tuple[int, int]:
         a1_x_centre = self.left_x + self.scale_factor() * 0.037
         a1_y_centre = self.y + self.scale_factor() * 0.053
         field_size_px = self.scale_factor() * 0.072
 
-        x = int(a1_x_centre + ((offset % 8) * field_size_px))
-        y = int(a1_y_centre + ((offset // 8) * field_size_px))
+        x = int(a1_x_centre + ((index % 8) * field_size_px))
+        y = int(a1_y_centre + ((index // 8) * field_size_px))
         return x, y
 
     def get_turn_highlighter_coords(self) -> tuple[int, int]:
@@ -138,16 +138,16 @@ class WatchMode(BaseMode):
         squares = [EMPTY] * 64
         unknown_squares: set[int] = set()
 
-        for i in range(64):
-            centre = coords.get_square_centre_coords(i)
+        for index in range(64):
+            centre = coords.get_square_centre_coords(index)
 
             try:
                 square = self.get_square_at_coords(centre)
             except UnknownSquare:
-                unknown_squares.add(i)
+                unknown_squares.add(index)
                 continue
 
-            squares[i] = square
+            squares[index] = square
 
         turn = self.get_turn(coords)
         board = Board.from_squares(squares, turn)

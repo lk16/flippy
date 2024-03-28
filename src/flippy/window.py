@@ -1,6 +1,5 @@
-from typing import Optional
-from flippy.mode.frequency import PositionFrequency
 from flippy.arguments import Arguments
+from flippy.mode.evaluate import EvaluateMode
 from flippy.othello.board import BLACK, WHITE
 
 
@@ -11,15 +10,23 @@ WIDTH = 600
 HEIGHT = 600
 
 SQUARE_SIZE = WIDTH // 8
+DISC_RADIUS = SQUARE_SIZE // 2 - 5
+MOVE_INDICATOR_RADIUS = SQUARE_SIZE // 8
+
+FONT_SIZE = 60
 
 COLOR_WHITE_DISC = (255, 255, 255)
 COLOR_BLACK_DISC = (0, 0, 0)
-COLOR_GREY_DISC = (128, 128, 128)
+COLOR_GRAY_DISC = (128, 128, 128)
 COLOR_BACKGROUND = (0, 128, 0)
 COLOR_UNKNOWN = (180, 180, 180)
 COLOR_WRONG_MOVE = (255, 0, 0)
 
 FRAME_RATE = 60
+
+
+class NonMoveEvent(Exception):
+    pass
 
 
 class Window:
@@ -28,7 +35,7 @@ class Window:
         self.args = args
 
         # TODO #7 use UI / env var to toggle
-        self.mode = PositionFrequency(args)
+        self.mode = EvaluateMode(args)
 
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.clock = pygame.time.Clock()
@@ -44,17 +51,49 @@ class Window:
                     running = False
                     break
 
-                move = self.get_move_from_event(event)
-                if move is not None:
+                try:
+                    move = self.get_move_from_event(event)
+                except NonMoveEvent:
+                    self.mode.on_event(event)
+                else:
                     self.mode.on_move(move)
-
-                self.mode.on_event(event)
 
             self.mode.on_frame(event)
             self.draw()
             self.clock.tick(FRAME_RATE)
 
         pygame.quit()
+
+    def get_board_square_center(self, index: int) -> tuple[int, int]:
+        col = index % 8
+        row = index // 8
+
+        x = col * SQUARE_SIZE + SQUARE_SIZE // 2
+        y = row * SQUARE_SIZE + SQUARE_SIZE // 2
+
+        return (x, y)
+
+    def draw_disc(self, index: int, color: tuple[int, int, int]) -> None:
+        center = self.get_board_square_center(index)
+        pygame.draw.circle(self.screen, color, center, DISC_RADIUS)
+
+    def draw_move_indicator(self, index: int, color: tuple[int, int, int]) -> None:
+        center = self.get_board_square_center(index)
+        pygame.draw.circle(self.screen, color, center, MOVE_INDICATOR_RADIUS)
+
+    def draw_number(self, index: int, color: tuple[int, int, int], number: int) -> None:
+        if number < 100:
+            font_size = FONT_SIZE
+        elif number < 1000:
+            font_size = int(0.75 * FONT_SIZE)
+        else:
+            font_size = int(0.5 * FONT_SIZE)
+
+        font = pygame.font.Font(None, font_size)
+        text_surface = font.render(str(number), True, color)
+        text_rect = text_surface.get_rect()
+        text_rect.center = self.get_board_square_center(index)
+        self.screen.blit(text_surface, text_rect.topleft)
 
     def draw(self) -> None:
         board = self.mode.get_board()
@@ -63,6 +102,7 @@ class Window:
         move_mistakes: set[int] = ui_details.pop("move_mistakes", set())
         unknown_squares: set[int] = ui_details.pop("unknown_squares", set())
         child_frequencies: dict[int, int] = ui_details.pop("child_frequencies", {})
+        evaluations: dict[int, int] = ui_details.pop("evaluations", {})
 
         if ui_details:
             print(
@@ -70,96 +110,45 @@ class Window:
                 + ", ".join(sorted(ui_details))
             )
 
+        if board.turn == WHITE:
+            turn_color = COLOR_WHITE_DISC
+        else:
+            turn_color = COLOR_BLACK_DISC
+
         self.screen.fill(COLOR_BACKGROUND)
-        for offset in range(64):
-            col = offset % 8
-            row = offset // 8
 
-            pygame.draw.rect(
-                self.screen,
-                COLOR_BACKGROUND,
-                (col * SQUARE_SIZE, row * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE),
-            )
-
-            square_centre = (
-                col * SQUARE_SIZE + SQUARE_SIZE // 2,
-                row * SQUARE_SIZE + SQUARE_SIZE // 2,
-            )
-
-            square = board.get_square(offset)
+        for index in range(64):
+            square = board.get_square(index)
 
             if square == WHITE:
-                pygame.draw.circle(
-                    self.screen, COLOR_WHITE_DISC, square_centre, SQUARE_SIZE // 2 - 5
-                )
+                self.draw_disc(index, COLOR_WHITE_DISC)
             elif square == BLACK:
-                pygame.draw.circle(
-                    self.screen, COLOR_BLACK_DISC, square_centre, SQUARE_SIZE // 2 - 5
-                )
-            elif offset in unknown_squares:
-                pygame.draw.circle(
-                    self.screen, COLOR_GREY_DISC, square_centre, SQUARE_SIZE // 2 - 5
-                )
-            elif offset in move_mistakes:
-                pygame.draw.circle(
-                    self.screen, COLOR_WRONG_MOVE, square_centre, SQUARE_SIZE // 8
-                )
-
-            elif board.is_valid_move(offset):
-                if offset in child_frequencies:
-                    child_frequency = child_frequencies[offset]
-                    if child_frequency < 100:
-                        font_size = 60
-                    elif child_frequency < 1000:
-                        font_size = 45
-                    else:
-                        font_size = 30
-
-                    if board.turn == WHITE:
-                        font = pygame.font.Font(None, font_size)
-                        text_surface = font.render(
-                            str(child_frequency), True, COLOR_WHITE_DISC
-                        )
-                        text_rect = text_surface.get_rect()
-                        text_rect.center = square_centre
-                        self.screen.blit(text_surface, text_rect.topleft)
-                    elif board.turn == BLACK:
-                        font = pygame.font.Font(None, font_size)
-                        text_surface = font.render(
-                            str(child_frequency), True, COLOR_BLACK_DISC
-                        )
-                        text_rect = text_surface.get_rect()
-                        text_rect.center = square_centre
-                        self.screen.blit(text_surface, text_rect.topleft)
-                else:
-                    if board.turn == WHITE:
-                        pygame.draw.circle(
-                            self.screen,
-                            COLOR_WHITE_DISC,
-                            square_centre,
-                            SQUARE_SIZE // 8,
-                        )
-                    elif board.turn == BLACK:
-                        pygame.draw.circle(
-                            self.screen,
-                            COLOR_BLACK_DISC,
-                            square_centre,
-                            SQUARE_SIZE // 8,
-                        )
+                self.draw_disc(index, COLOR_BLACK_DISC)
+            elif index in unknown_squares:
+                self.draw_disc(index, COLOR_GRAY_DISC)
+            elif index in move_mistakes:
+                self.draw_move_indicator(index, COLOR_WRONG_MOVE)
+            elif index in child_frequencies:
+                self.draw_number(index, turn_color, child_frequencies[index])
+            elif index in evaluations:
+                self.draw_number(index, turn_color, evaluations[index])
+            elif board.is_valid_move(index):
+                self.draw_move_indicator(index, turn_color)
 
         pygame.display.flip()
 
-    def get_move_from_event(self, event: Event) -> Optional[int]:
-        if not (
-            event.type == pygame.MOUSEBUTTONDOWN and event.button == pygame.BUTTON_LEFT
-        ):
-            return None
+    def get_move_from_event(self, event: Event) -> int:
+        if event.type != pygame.MOUSEBUTTONDOWN:
+            raise NonMoveEvent
+
+        if event.button != pygame.BUTTON_LEFT:
+            raise NonMoveEvent
 
         x, y = event.pos
         col: int = x // SQUARE_SIZE
         row: int = y // SQUARE_SIZE
 
         if not (row in range(8) and col in range(8)):
-            return None
+            raise NonMoveEvent
 
         return row * 8 + col
