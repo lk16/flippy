@@ -18,6 +18,7 @@ license = {text = "MIT"}
 [tool.pdm.scripts]
 gui = {call = "flippy.main:gui"}
 organize-pgn = {call = "flippy.main:organize_pgn"}
+recent-games = {call = "flippy.main:recent_games"}
 
 [tool.pdm]
 [tool.pdm.dev-dependencies]

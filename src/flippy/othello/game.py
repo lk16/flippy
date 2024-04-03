@@ -80,10 +80,25 @@ class Game:
             return None
         return datetime.strptime(raw, "%Y.%m.%d %H:%M:%S")
 
+    def get_white_player(self) -> str:
+        return self.metadata["White"]
+
+    def get_black_player(self) -> str:
+        return self.metadata["Black"]
+
+    def get_winning_player(self) -> Optional[str]:
+        winner = self.get_winner()
+        if winner is None:
+            return None
+        elif winner == WHITE:
+            return self.get_white_player()
+        else:
+            return self.get_black_player()
+
     def get_color(self, username: str) -> Optional[int]:
-        if self.metadata["White"] == username:
+        if username == self.get_white_player():
             return WHITE
-        if self.metadata["Black"] == username:
+        if username == self.get_black_player():
             return BLACK
         return None
 
@@ -95,12 +110,26 @@ class Game:
         return None
 
     def get_winner(self) -> Optional[int]:
-        final_position = self.boards[-1]
-        black_discs = final_position.count(BLACK)
-        white_discs = final_position.count(WHITE)
+        if self.metadata["Result"] == "1/2-1/2":
+            return None
 
-        if black_discs > white_discs:
+        black, white = [int(n) for n in self.metadata["Result"].split("-")]
+
+        if black > white:
             return BLACK
-        if white_discs > black_discs:
+        if white > black:
             return WHITE
         return None
+
+    def get_black_score(self) -> int:
+        if self.metadata["Result"] == "1/2-1/2":
+            return 0
+
+        black, white = [int(n) for n in self.metadata["Result"].split("-")]
+
+        if white == black:
+            return 0
+        elif black > white:
+            return 64 - 2 * white
+        else:
+            return -64 + 2 * black

@@ -6,7 +6,8 @@ from flippy.arguments import (
     TrainingArguments,
     PositionFrequencyArguments,
 )
-from flippy.pgn_organizer import PgnOrganizer
+from flippy.commands.pgn_organizer import PgnOrganizer
+from flippy.commands.recent_games import RecentGames
 
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 
@@ -32,5 +33,12 @@ def gui() -> None:
 def organize_pgn() -> None:
     def command() -> None:
         PgnOrganizer()()
+
+    typer.run(command)
+
+
+def recent_games() -> None:
+    def command(count: int = typer.Option(20, "-n")) -> None:
+        RecentGames(count)()
 
     typer.run(command)
