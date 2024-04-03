@@ -60,6 +60,12 @@ class PGNMode(BaseMode):
             return Board.start()
         return self.game.boards[self.moves_done]
 
+    def get_played_move(self) -> Optional[int]:
+        if self.game is None or self.moves_done >= len(self.game.moves):
+            return None
+
+        return self.game.moves[self.moves_done]
+
     def select_pgn_file(self) -> Optional[Path]:
         root = tk.Tk()
         root.withdraw()  # Hide the main window
@@ -107,4 +113,10 @@ class PGNMode(BaseMode):
 
             evaluations[move] = -evaluation.score
 
-        return {"evaluations": evaluations}
+        ui_details: dict[str, Any] = {"evaluations": evaluations}
+
+        played_move = self.get_played_move()
+        if played_move is not None:
+            ui_details["played_move"] = played_move
+
+        return ui_details

@@ -30,7 +30,7 @@ class RecentGames:
         score = game.get_black_score()
 
         if winner is None:
-            result = "draw: ◑ + 0"
+            result = f"draw: {color_char} + 0"
         elif winner in self.all_usernames:
             result = f"win: {color_char} +{abs(score):>2}"
         else:

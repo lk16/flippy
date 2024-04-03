@@ -1,3 +1,4 @@
+from typing import Optional
 from flippy.arguments import Arguments
 from flippy.mode.pgn import PGNMode
 from flippy.othello.board import BLACK, WHITE
@@ -21,6 +22,7 @@ COLOR_GRAY_DISC = (128, 128, 128)
 COLOR_BACKGROUND = (0, 128, 0)
 COLOR_UNKNOWN = (180, 180, 180)
 COLOR_WRONG_MOVE = (255, 0, 0)
+COLOR_PLAYED_MOVE = (0, 96, 0)
 
 FRAME_RATE = 60
 
@@ -108,6 +110,7 @@ class Window:
         unknown_squares: set[int] = ui_details.pop("unknown_squares", set())
         child_frequencies: dict[int, int] = ui_details.pop("child_frequencies", {})
         evaluations: dict[int, int] = ui_details.pop("evaluations", {})
+        played_move: Optional[int] = ui_details.pop("played_move", None)
 
         if ui_details:
             print(
@@ -135,7 +138,11 @@ class Window:
                 self.draw_move_indicator(index, COLOR_WRONG_MOVE)
             elif index in child_frequencies:
                 self.draw_number(index, turn_color, child_frequencies[index])
-            elif index in evaluations:
+
+            if played_move == index:
+                self.draw_disc(index, COLOR_PLAYED_MOVE)
+
+            if index in evaluations:
                 self.draw_number(index, turn_color, evaluations[index])
                 if evaluations[index] == max(evaluations.values()):
                     self.draw_best_move_marker(index, turn_color)
