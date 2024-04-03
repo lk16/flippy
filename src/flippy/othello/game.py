@@ -136,3 +136,12 @@ class Game:
 
     def zip_board_moves(self) -> zip[tuple[Board, int]]:
         return zip(self.boards[:-1], self.moves, strict=True)
+
+    def get_all_children(self) -> list[Board]:
+        all_children: list[Board] = []
+
+        for board in self.boards:
+            for child in board.get_children():
+                all_children.append(child)
+
+        return all_children

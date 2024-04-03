@@ -1,5 +1,5 @@
 from flippy.arguments import Arguments
-from flippy.mode.evaluate import EvaluateMode
+from flippy.mode.pgn import PGNMode
 from flippy.othello.board import BLACK, WHITE
 
 
@@ -35,7 +35,7 @@ class Window:
         self.args = args
 
         # TODO #7 use UI / env var to toggle
-        self.mode = EvaluateMode(args)
+        self.mode = PGNMode(args)
 
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.clock = pygame.time.Clock()

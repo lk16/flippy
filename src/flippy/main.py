@@ -4,6 +4,7 @@ from typing import Optional
 import typer
 from flippy.arguments import (
     Arguments,
+    PGNArguments,
     TrainingArguments,
     PositionFrequencyArguments,
 )
@@ -22,10 +23,12 @@ def gui() -> None:
         top: Optional[int] = typer.Option(None, "-t"),
         lost_only: bool = typer.Option(False, "-l"),
         most_recent: Optional[int] = typer.Option(None, "-r"),
+        pgn_file: Optional[Path] = typer.Option(None, "-p"),
     ) -> None:
         loader_args = TrainingArguments(filters, top)
         freq_args = PositionFrequencyArguments(lost_only, most_recent)
-        args = Arguments(loader_args, freq_args)
+        pgn_args = PGNArguments(pgn_file)
+        args = Arguments(loader_args, freq_args, pgn_args)
 
         Window(args).run()
 

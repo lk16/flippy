@@ -1,7 +1,7 @@
 from multiprocessing import Queue
 from pathlib import Path
 
-from flippy.edax.manager import EdaxEvaluations, EdaxManager
+from flippy.edax.manager import EdaxEvaluations, EdaxProcess
 from flippy.othello.board import BLACK, PASS_MOVE, WHITE, Board
 from flippy.othello.game import Game
 
@@ -13,15 +13,6 @@ class PgnAnanlyzer:
         self.game = Game.from_pgn(file)
         self.evaluations = EdaxEvaluations({})
 
-    def _get_evaluated_boards(self) -> list[Board]:
-        options: list[Board] = []
-
-        for board in self.game.boards:
-            for child in board.get_children():
-                options.append(child)
-
-        return options
-
     def _get_best(self, board: Board) -> tuple[list[int], int]:
         child_scores: list[tuple[int, int]] = []
 
@@ -30,19 +21,16 @@ class PgnAnanlyzer:
             score = self.evaluations.lookup(child).score
             child_scores.append((move, score))
 
-        # Take minimum, because scores are from opponent point of view
+        # Take minimum, because scores are from opponent's point of view
         best_score = min(score for _, score in child_scores)
         best_moves = [move for move, score in child_scores if score == best_score]
 
         return best_moves, best_score
 
     def __call__(self) -> None:
-        evaluated_boards = self._get_evaluated_boards()
-
-        edax_manager = EdaxManager(Queue(), Queue())
-
-        # TODO reduce move_options by using normalization
-        self.evaluations = edax_manager.evaluate(evaluated_boards, self.level)
+        all_children = self.game.get_all_children()
+        edax_proc = EdaxProcess(all_children, self.level, Queue(), None)
+        self.evaluations = edax_proc.search_sync()
 
         for move_offset, (board, played_move) in enumerate(self.game.zip_board_moves()):
             turn = {WHITE: "●", BLACK: "○"}[board.turn]

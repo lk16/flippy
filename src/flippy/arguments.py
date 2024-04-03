@@ -1,4 +1,5 @@
 from __future__ import annotations
+from pathlib import Path
 from typing import Optional
 
 
@@ -14,18 +15,26 @@ class PositionFrequencyArguments:
         self.most_recent = most_recent
 
 
+class PGNArguments:
+    def __init__(self, pgn_file: Optional[Path]) -> None:
+        self.pgn_file = pgn_file
+
+
 class Arguments:
     def __init__(
         self,
         training: TrainingArguments,
         position_frequency: PositionFrequencyArguments,
+        pgn: PGNArguments,
     ) -> None:
         self.training = training
         self.position_frequency = position_frequency
+        self.pgn = pgn
 
     @classmethod
     def empty(cls) -> Arguments:
         return Arguments(
             TrainingArguments([], None),
             PositionFrequencyArguments(False, None),
+            PGNArguments(None),
         )

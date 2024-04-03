@@ -9,6 +9,7 @@ import queue
 from typing import Any, Optional, cast
 
 from flippy.othello.board import EMPTY, PASS_MOVE, Board
+from flippy.othello.game import Game
 
 
 class EdaxEvaluation:
@@ -200,7 +201,6 @@ class EdaxManager:
                 break
             else:
                 last_message = message
-
         if not last_message:
             raise queue.Empty
         return last_message
@@ -214,12 +214,22 @@ class EdaxManager:
             except queue.Empty:
                 continue
 
+            # TODO refactor this if-else chain
             if raw_message[0] == "set_board":
                 set_board_message = cast(tuple[str, Board], raw_message)
                 _, board = set_board_message
 
                 self.searching = board
                 children = board.get_children()
+
+                proc = EdaxProcess(children, 4, self.recv_queue, self.searching)
+                multiprocessing.Process(target=proc.search).start()
+            elif raw_message[0] == "set_game":  # TODO start using this
+                set_game_message = cast(tuple[str, Game], raw_message)
+                _, game = set_game_message
+
+                self.searching = None
+                children = game.get_all_children()
 
                 proc = EdaxProcess(children, 4, self.recv_queue, self.searching)
                 multiprocessing.Process(target=proc.search).start()
@@ -244,10 +254,11 @@ class EdaxManager:
             else:
                 print(f"Unhandled message kind {set_board_message[0]}")
 
-    def evaluate(self, boards: list[Board], level: int) -> EdaxEvaluations:
+    def evaluate_game(self, game: Game, level: int) -> EdaxEvaluations:
         if self.loop_running:
             raise ValueError(
-                "Cannot call evaluate() when loop is running! Use queues instead."
+                "Cannot call evaluate_game() when loop is running! Use queues instead."
             )
 
+        boards = game.get_all_children()
         return EdaxProcess(boards, level, Queue(), None).search_sync()
