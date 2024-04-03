@@ -12,8 +12,8 @@ from pygame.event import Event
 class EvaluateMode(GameMode):
     def __init__(self, args: Arguments) -> None:
         super().__init__(args)
-        self.send_queue: "Queue[tuple[Any, ...]]" = Queue()
-        self.recv_queue: "Queue[EdaxEvaluations]" = Queue()
+        self.send_queue: Queue[tuple[Any, ...]] = Queue()
+        self.recv_queue: Queue[EdaxEvaluations] = Queue()
         self.all_evaluations = EdaxEvaluations({})
 
         edax_manager = EdaxManager(self.recv_queue, self.send_queue)

@@ -1,7 +1,8 @@
 from multiprocessing import Queue
 from pathlib import Path
 
-from flippy.edax.manager import EdaxEvaluations, EdaxProcess
+from flippy.edax.evaluations import EdaxEvaluations
+from flippy.edax.process import EdaxProcess
 from flippy.othello.board import BLACK, PASS_MOVE, WHITE, Board
 from flippy.othello.game import Game
 

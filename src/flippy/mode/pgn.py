@@ -22,8 +22,8 @@ class PGNMode(BaseMode):
         self.args = args.pgn
         self.game: Optional[Game] = None
         self.moves_done = 0
-        self.send_queue: "Queue[tuple[Any, ...]]" = Queue()
-        self.recv_queue: "Queue[EdaxEvaluations]" = Queue()
+        self.send_queue: Queue[tuple[Any, ...]] = Queue()
+        self.recv_queue: Queue[EdaxEvaluations] = Queue()
         self.all_evaluations = EdaxEvaluations({})
         self.edax_manager = EdaxManager(self.recv_queue, self.send_queue)
 
