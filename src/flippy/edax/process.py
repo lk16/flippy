@@ -62,10 +62,6 @@ class EdaxProcess:
             if raw_line == b"":
                 break
             line = raw_line.decode()
-
-            # TODO add verbose option
-            # print(line, end="")
-
             lines.append(line)
 
         evaluations: dict[Board, EdaxEvaluation] = {}
@@ -84,7 +80,7 @@ class EdaxProcess:
         message = self.search_sync()
         self.send_queue.put_nowait(("evaluations", self.parent, self.level, message))
 
-    # TODO write tests
+    # TODO #26 write tests for Edax output parser
     def __parse_output_lines(
         self, lines: list[str], board: Board
     ) -> tuple[EdaxEvaluation, int]:
@@ -101,7 +97,7 @@ class EdaxProcess:
         assert evaluation
         return evaluation, read_lines
 
-    # TODO write tests
+    # TODO#26 write tests for Edax output parser
     def __parse_output_line(self, line: str, board: Board) -> Optional[EdaxEvaluation]:
         if (
             line == "\n"

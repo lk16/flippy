@@ -46,8 +46,16 @@ class EdaxEvaluations:
         return value
 
     def update(self, other: EdaxEvaluations) -> None:
-        # TODO worry about losing items with lower search depth
-        self.values.update(other.values)
+        for board, evaluation in other.values.items():
+            try:
+                found = self.values[board]
+            except KeyError:
+                add_board = True
+            else:
+                add_board = found.depth < evaluation.depth
+
+            if add_board:
+                self.values[board] = evaluation
 
     def has_all_children(self, board: Board) -> bool:
         for move in board.get_moves_as_set():

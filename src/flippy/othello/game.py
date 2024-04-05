@@ -3,9 +3,12 @@ from __future__ import annotations
 from copy import copy
 from datetime import date, datetime
 from pathlib import Path
+import re
 from typing import Iterable, Optional
 
 from flippy.othello.board import BLACK, PASS_MOVE, WHITE, Board, InvalidMove
+
+metadata_regex = re.compile('\[(.*) "(.*)"\]')
 
 
 class Game:
@@ -31,9 +34,13 @@ class Game:
             if not line.startswith("["):
                 break
 
-            split_line = line.split(" ")
-            key = split_line[0][1:]
-            value = split_line[1][1:-2]
+            match = metadata_regex.match(line)
+
+            if not match:
+                raise ValueError("Could not parse PGN metadata")
+
+            key = match.group(1)
+            value = match.group(2)
             game.metadata[key] = value
 
         board = Board.start()

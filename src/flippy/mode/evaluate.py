@@ -3,7 +3,8 @@ from multiprocessing import Queue
 import multiprocessing
 import queue
 from typing import Any
-from flippy.edax.manager import EdaxEvaluations, EdaxManager
+from flippy.edax.manager import EdaxManager
+from flippy.edax.evaluations import EdaxEvaluations
 from flippy.mode.game import GameMode
 
 from pygame.event import Event
@@ -37,13 +38,7 @@ class EvaluateMode(GameMode):
         if self.all_evaluations.has_all_children(board):
             return
 
-        # TODO add flag for sync UI
-        if True:
-            self.send_queue.put_nowait(("set_board", self.get_board()))
-        else:
-            manager = EdaxManager(Queue(), Queue())
-            evaluations = manager.evaluate(board.get_children(), 6)
-            self.all_evaluations.update(evaluations)
+        self.send_queue.put_nowait(("set_board", self.get_board()))
 
     def _process_recv_messages(self) -> None:
         while True:

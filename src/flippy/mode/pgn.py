@@ -6,7 +6,8 @@ from typing import Any, Optional
 
 import pygame
 from flippy.arguments import Arguments
-from flippy.edax.manager import EdaxEvaluations, EdaxManager
+from flippy.edax.manager import EdaxManager
+from flippy.edax.evaluations import EdaxEvaluations
 from flippy.othello.board import Board
 from pygame.event import Event
 from flippy.mode.base import BaseMode
