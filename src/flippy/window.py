@@ -145,7 +145,7 @@ class Window:
                 self.draw_number(index, turn_color, evaluations[index])
                 if evaluations[index] == max(evaluations.values()):
                     self.draw_best_move_marker(index, turn_color)
-            elif board.is_valid_move(index):
+            elif board.is_valid_move(index) and not child_frequencies:
                 self.draw_move_indicator(index, turn_color)
 
         pygame.display.flip()

@@ -17,6 +17,8 @@ os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 
 from flippy.window import Window  # noqa:E402
 
+# TODO make Typer commands better so --help text works
+
 
 def gui() -> None:
     def command(

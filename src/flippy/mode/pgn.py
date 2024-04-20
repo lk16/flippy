@@ -1,4 +1,3 @@
-import multiprocessing
 import pygame
 import queue
 import tkinter as tk
@@ -10,7 +9,7 @@ from typing import Any, Optional
 
 from flippy.arguments import Arguments
 from flippy.edax.evaluations import EdaxEvaluations
-from flippy.edax.manager import EdaxManager
+from flippy.edax.process import start_board_evaluation, start_game_evaluation
 from flippy.mode.base import BaseMode
 from flippy.othello.board import Board, InvalidMove
 from flippy.othello.game import Game
@@ -22,16 +21,12 @@ class PGNMode(BaseMode):
         self.game: Optional[Game] = None
         self.moves_done = 0
         self.alternative_moves: list[Board] = []
-        self.send_queue: Queue[tuple[Any, ...]] = Queue()
-        self.recv_queue: Queue[EdaxEvaluations] = Queue()
+        self.recv_queue: Queue[tuple[int, Board | Game, EdaxEvaluations]] = Queue()
         self.all_evaluations = EdaxEvaluations({})
-        self.edax_manager = EdaxManager(self.recv_queue, self.send_queue)
-
-        multiprocessing.Process(target=self.edax_manager.loop).start()
 
         if self.args.pgn_file:
             self.game = Game.from_pgn(self.args.pgn_file)
-            self.send_queue.put_nowait(("set_game", self.game))
+            start_game_evaluation(2, self.game, self.recv_queue)
 
     def on_frame(self, event: Event) -> None:
         if self.game:
@@ -74,7 +69,7 @@ class PGNMode(BaseMode):
             child = child.pass_move()
 
         self.alternative_moves.append(child)
-        self.send_queue.put_nowait(("set_board", child))
+        start_board_evaluation(2, child, self.recv_queue)
 
     def show_next_position(self) -> None:
         if self.game is None:
@@ -133,18 +128,31 @@ class PGNMode(BaseMode):
         self.game = Game.from_pgn(pgn_file)
         self.moves_done = 0
 
-        self.send_queue.put_nowait(("set_game", self.game))
-
+        start_game_evaluation(2, self.game, self.recv_queue)
         return pgn_file
 
     def _process_recv_messages(self) -> None:
         while True:
             try:
-                evaluations = self.recv_queue.get_nowait()
+                message = self.recv_queue.get_nowait()
             except queue.Empty:
                 break
-            else:
-                self.all_evaluations.update(evaluations)
+
+            self._process_recv_message(message)
+
+    def _process_recv_message(
+        self, message: tuple[int, Board | Game, EdaxEvaluations]
+    ) -> None:
+        level, board_or_game, evaluations = message
+        self.all_evaluations.update(evaluations)
+
+        next_level = level + 2
+        if next_level <= 24:
+            if isinstance(board_or_game, Game):
+                start_game_evaluation(next_level, board_or_game, self.recv_queue)
+
+            elif self.get_board() == board_or_game:
+                start_board_evaluation(next_level, board_or_game, self.recv_queue)
 
     def get_ui_details(self) -> dict[str, Any]:
         self._process_recv_messages()

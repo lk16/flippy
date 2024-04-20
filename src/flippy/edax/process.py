@@ -1,27 +1,49 @@
 from __future__ import annotations
 
+import multiprocessing
 import re
 import subprocess
 from multiprocessing import Queue
-from typing import Any, Optional
+from typing import Optional
 
 from flippy.config import config
 from flippy.edax.evaluations import EdaxEvaluation, EdaxEvaluations
 from flippy.othello.board import Board
+from flippy.othello.game import Game
+
+
+def start_board_evaluation(
+    level: int,
+    board: Board,
+    recv_queue: Queue[tuple[int, Board | Game, EdaxEvaluations]],
+) -> None:
+    proc = EdaxProcess(level, board, recv_queue)
+    multiprocessing.Process(target=proc.search).start()
+
+
+def start_game_evaluation(
+    level: int, game: Game, recv_queue: Queue[tuple[int, Board | Game, EdaxEvaluations]]
+) -> None:
+    proc = EdaxProcess(level, game, recv_queue)
+    multiprocessing.Process(target=proc.search).start()
 
 
 class EdaxProcess:
     def __init__(
         self,
-        boards: list[Board],
         level: int,
-        send_queue: Queue[tuple[Any, ...]],
-        parent: Optional[Board],
+        board_or_game: Board | Game,
+        send_queue: Queue[tuple[int, Board | Game, EdaxEvaluations]],
     ) -> None:
         self.level = level
         self.send_queue = send_queue
-        self.parent = parent
         self.edax_path = config.edax_path()
+        self.board_or_game = board_or_game
+
+        if isinstance(board_or_game, Board):
+            boards = board_or_game.get_children()
+        else:
+            boards = board_or_game.get_all_children()
 
         searchable: list[Board] = []
 
@@ -78,8 +100,9 @@ class EdaxProcess:
         return EdaxEvaluations(evaluations)
 
     def search(self) -> None:
-        message = self.search_sync()
-        self.send_queue.put_nowait(("evaluations", self.parent, self.level, message))
+        evaluations = self.search_sync()
+        message = (self.level, self.board_or_game, evaluations)
+        self.send_queue.put_nowait(message)
 
     # TODO #26 write tests for Edax output parser
     def __parse_output_lines(

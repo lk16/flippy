@@ -53,7 +53,10 @@ class EdaxEvaluations:
             except KeyError:
                 add_board = True
             else:
-                add_board = found.depth < evaluation.depth
+                # TODO this make depth and confidence both fields
+                add_board = int(found.depth.split("@")[0]) < int(
+                    evaluation.depth.split("@")[0]
+                )
 
             if add_board:
                 self.values[board] = evaluation
