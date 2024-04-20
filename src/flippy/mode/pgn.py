@@ -12,7 +12,7 @@ from flippy.arguments import Arguments
 from flippy.edax.evaluations import EdaxEvaluations
 from flippy.edax.manager import EdaxManager
 from flippy.mode.base import BaseMode
-from flippy.othello.board import Board
+from flippy.othello.board import Board, InvalidMove
 from flippy.othello.game import Game
 
 
@@ -21,6 +21,7 @@ class PGNMode(BaseMode):
         self.args = args.pgn
         self.game: Optional[Game] = None
         self.moves_done = 0
+        self.alternative_moves: list[Board] = []
         self.send_queue: Queue[tuple[Any, ...]] = Queue()
         self.recv_queue: Queue[EdaxEvaluations] = Queue()
         self.all_evaluations = EdaxEvaluations({})
@@ -49,26 +50,67 @@ class PGNMode(BaseMode):
             self.show_prev_position()
 
     def on_move(self, move: int) -> None:
-        self.show_next_position()
+        if not self.game:
+            return
+
+        try:
+            child = self.get_board().do_move(move)
+        except InvalidMove:
+            return
+
+        try:
+            next_board = self.game.boards[self.moves_done + 1]
+        except IndexError:
+            pass
+        else:
+            if next_board == child:
+                # User clicked on square that was actually played in game.
+                # We do not handle it as alternative move.
+                self.moves_done += 1
+                return
+
+        if not child.has_moves() and child.pass_move().has_moves():
+            # Opponent ran out of moves, but the game is not over.
+            child = child.pass_move()
+
+        self.alternative_moves.append(child)
+        self.send_queue.put_nowait(("set_board", child))
 
     def show_next_position(self) -> None:
         if self.game is None:
             return
+
+        if self.alternative_moves:
+            return
+
         max_moves_done = len(self.game.boards) - 1
         self.moves_done = min(self.moves_done + 1, max_moves_done)
 
     def show_prev_position(self) -> None:
         if self.game is None:
             return
+
+        if self.alternative_moves:
+            self.alternative_moves.pop()
+            return
+
         self.moves_done = max(self.moves_done - 1, 0)
 
     def get_board(self) -> Board:
         if self.game is None:
             return Board.start()
+
+        if self.alternative_moves:
+            return self.alternative_moves[-1]
+
         return self.game.boards[self.moves_done]
 
     def get_played_move(self) -> Optional[int]:
-        if self.game is None or self.moves_done >= len(self.game.moves):
+        if (
+            self.game is None
+            or self.moves_done >= len(self.game.moves)
+            or self.alternative_moves
+        ):
             return None
 
         return self.game.moves[self.moves_done]
