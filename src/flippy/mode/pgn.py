@@ -39,20 +39,28 @@ class PGNMode(BaseMode):
         self.select_pgn_file()
 
     def on_event(self, event: Event) -> None:
-        if not (
-            event.type == pygame.MOUSEBUTTONDOWN and event.button == pygame.BUTTON_RIGHT
-        ):
-            return
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_RIGHT:
+                self.show_next_position()
+            elif event.key == pygame.K_LEFT:
+                self.show_prev_position()
 
-        if self.moves_done != 0:
-            self.moves_done -= 1
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == pygame.BUTTON_RIGHT:
+            self.show_prev_position()
 
     def on_move(self, move: int) -> None:
+        self.show_next_position()
+
+    def show_next_position(self) -> None:
         if self.game is None:
             return
+        max_moves_done = len(self.game.boards) - 1
+        self.moves_done = min(self.moves_done + 1, max_moves_done)
 
-        if self.moves_done != len(self.game.boards) - 1:
-            self.moves_done += 1
+    def show_prev_position(self) -> None:
+        if self.game is None:
+            return
+        self.moves_done = max(self.moves_done - 1, 0)
 
     def get_board(self) -> Board:
         if self.game is None:
