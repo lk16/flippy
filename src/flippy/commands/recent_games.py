@@ -1,4 +1,6 @@
+import typer
 from pathlib import Path
+from typing import Annotated
 
 from flippy import PROJECT_ROOT
 from flippy.config import config
@@ -68,3 +70,15 @@ class RecentGames:
                 prefix = "\x1b[33m"
                 postfix = "\x1b[0m"
             print(prefix + output_line + postfix)
+
+
+app = typer.Typer()
+
+
+@app.command()
+def recent_games(count: Annotated[int, typer.Option("-n")] = 20) -> None:
+    RecentGames(count)()
+
+
+if __name__ == "__main__":
+    app()

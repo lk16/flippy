@@ -16,10 +16,10 @@ readme = "README.md"
 license = {text = "MIT"}
 
 [tool.pdm.scripts]
-gui = {call = "flippy.main:gui"}
-organize-pgn = {call = "flippy.main:organize_pgn"}
-analyze-pgn = {call = "flippy.main:analyze_pgn"}
-recent-games = {call = "flippy.main:recent_games"}
+gui = "python src/flippy/commands/gui.py"
+organize-pgn = "python src/flippy/commands/pgn_organizer.py"
+analyze-pgn =  "python src/flippy/commands/pgn_analyzer.py"
+recent-games = "python src/flippy/commands/recent_games.py"
 
 [tool.pdm]
 [tool.pdm.dev-dependencies]

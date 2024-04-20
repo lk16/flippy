@@ -1,5 +1,6 @@
 import os
 import requests
+import typer
 from datetime import datetime
 from itertools import count
 from pathlib import Path
@@ -112,3 +113,15 @@ class PgnOrganizer:
             file.write_text(raw_pgn)
 
         return new_files
+
+
+app = typer.Typer()
+
+
+@app.command()
+def pgn_organizer() -> None:
+    PgnOrganizer()()
+
+
+if __name__ == "__main__":
+    app()

@@ -1,5 +1,7 @@
+import typer
 from multiprocessing import Queue
 from pathlib import Path
+from typing import Annotated
 
 from flippy.edax.process import EdaxProcess
 from flippy.edax.types import EdaxEvaluations, EdaxRequest
@@ -66,3 +68,15 @@ class PgnAnanlyzer:
             return f"○ +{abs(score):>2}"
 
         return f"● +{abs(score):>2}"
+
+
+app = typer.Typer()
+
+
+@app.command()
+def pgn_analyzer(file: Path, level: Annotated[int, typer.Option("-l")] = 18) -> None:
+    PgnAnanlyzer(file, level)()
+
+
+if __name__ == "__main__":
+    app()
