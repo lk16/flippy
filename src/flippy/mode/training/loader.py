@@ -1,11 +1,11 @@
 from __future__ import annotations
+
 import csv
+
 from flippy import PROJECT_ROOT
 from flippy.arguments import TrainingArguments
 from flippy.mode.training.exercise import Exercise
-
 from flippy.mode.training.logs import LogFile
-
 
 OPENINGS_FILE = PROJECT_ROOT / "openings.csv"
 

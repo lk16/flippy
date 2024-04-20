@@ -1,12 +1,11 @@
-from inspect import Arguments
-from flippy.othello.board import EMPTY, BLACK, WHITE, Board, opponent
-from flippy.mode.base import BaseMode
-
-from typing import Any
-from PIL.Image import Image
-from math import sqrt
-from typing import Optional
 import pyautogui
+from inspect import Arguments
+from math import sqrt
+from PIL.Image import Image
+from typing import Any, Optional
+
+from flippy.mode.base import BaseMode
+from flippy.othello.board import BLACK, EMPTY, WHITE, Board, opponent
 
 FOD_LEFT_TOP_MARKER = (53, 144, 103)
 FOD_RIGHT_TOP_MARKER = (64, 134, 169)

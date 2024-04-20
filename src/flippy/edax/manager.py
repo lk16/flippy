@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import multiprocessing
 from multiprocessing import Queue
 from typing import Any, Optional, cast

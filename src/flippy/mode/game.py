@@ -1,9 +1,9 @@
-from flippy.arguments import Arguments
-from flippy.othello.board import Board, InvalidMove
-from flippy.mode.base import BaseMode
-
-from pygame.event import Event
 import pygame
+from pygame.event import Event
+
+from flippy.arguments import Arguments
+from flippy.mode.base import BaseMode
+from flippy.othello.board import Board, InvalidMove
 
 
 class GameMode(BaseMode):

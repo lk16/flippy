@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import re
 from copy import copy
 from datetime import date, datetime
 from pathlib import Path
-import re
 from typing import Iterable, Optional
 
 from flippy.othello.board import BLACK, PASS_MOVE, WHITE, Board, InvalidMove

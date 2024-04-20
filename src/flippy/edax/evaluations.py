@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from copy import copy
 
 from flippy.othello.board import EMPTY, PASS_MOVE, Board

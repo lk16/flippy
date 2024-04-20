@@ -33,3 +33,13 @@ dev = [
     "pytest-cov>=4.1.0",
     "types-requests>=2.31.0.20240311",
 ]
+
+[tool.ruff.lint]
+# Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.
+# Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
+# McCabe complexity (`C901`) by default.
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["flippy"]
+known-third-party = ["*"]

@@ -1,11 +1,11 @@
+import os
 import requests
 from datetime import datetime
 from itertools import count
-import os
 from pathlib import Path
 
-from flippy.othello.game import Game
 from flippy.config import config
+from flippy.othello.game import Game
 
 
 class PgnOrganizer:

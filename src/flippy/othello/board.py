@@ -1,9 +1,9 @@
 from __future__ import annotations
+
 from copy import copy
 from typing import Iterable
 
 from flippy.othello.bitset import bits_rotate
-
 
 BLACK = -1
 WHITE = 1

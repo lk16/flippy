@@ -1,10 +1,11 @@
 from __future__ import annotations
+
 import re
 import subprocess
-from flippy.config import config
 from multiprocessing import Queue
 from typing import Any, Optional
 
+from flippy.config import config
 from flippy.edax.evaluations import EdaxEvaluation, EdaxEvaluations
 from flippy.othello.board import Board
 

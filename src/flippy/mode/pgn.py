@@ -1,21 +1,19 @@
 import multiprocessing
-from pathlib import Path
-from multiprocessing import Queue
+import pygame
 import queue
+import tkinter as tk
+from multiprocessing import Queue
+from pathlib import Path
+from pygame.event import Event
+from tkinter import filedialog
 from typing import Any, Optional
 
-import pygame
 from flippy.arguments import Arguments
-from flippy.edax.manager import EdaxManager
 from flippy.edax.evaluations import EdaxEvaluations
-from flippy.othello.board import Board
-from pygame.event import Event
+from flippy.edax.manager import EdaxManager
 from flippy.mode.base import BaseMode
-
+from flippy.othello.board import Board
 from flippy.othello.game import Game
-
-import tkinter as tk
-from tkinter import filedialog
 
 
 class PGNMode(BaseMode):

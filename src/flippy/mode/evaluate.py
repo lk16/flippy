@@ -1,13 +1,13 @@
-from flippy.arguments import Arguments
-from multiprocessing import Queue
 import multiprocessing
 import queue
-from typing import Any
-from flippy.edax.manager import EdaxManager
-from flippy.edax.evaluations import EdaxEvaluations
-from flippy.mode.game import GameMode
-
+from multiprocessing import Queue
 from pygame.event import Event
+from typing import Any
+
+from flippy.arguments import Arguments
+from flippy.edax.evaluations import EdaxEvaluations
+from flippy.edax.manager import EdaxManager
+from flippy.mode.game import GameMode
 
 
 class EvaluateMode(GameMode):

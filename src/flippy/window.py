@@ -1,11 +1,10 @@
+import pygame
+from pygame.event import Event
 from typing import Optional
+
 from flippy.arguments import Arguments
 from flippy.mode.pgn import PGNMode
 from flippy.othello.board import BLACK, WHITE
-
-
-import pygame
-from pygame.event import Event
 
 WIDTH = 600
 HEIGHT = 600

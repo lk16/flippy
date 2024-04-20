@@ -1,16 +1,17 @@
 import os
+import typer
 from pathlib import Path
 from typing import Optional
-import typer
+
 from flippy.arguments import (
     Arguments,
     PGNArguments,
-    TrainingArguments,
     PositionFrequencyArguments,
+    TrainingArguments,
 )
+from flippy.commands.pgn_analyzer import PgnAnanlyzer
 from flippy.commands.pgn_organizer import PgnOrganizer
 from flippy.commands.recent_games import RecentGames
-from flippy.commands.pgn_analyzer import PgnAnanlyzer
 
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 

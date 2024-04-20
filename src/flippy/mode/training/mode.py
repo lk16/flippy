@@ -1,12 +1,14 @@
 from __future__ import annotations
+
+import random
 from typing import Any
+
 from flippy.arguments import Arguments
+from flippy.mode.base import BaseMode
 from flippy.mode.training.exercise import Exercise
 from flippy.mode.training.loader import ExerciseLoader
 from flippy.mode.training.logs import LogItem
 from flippy.othello.board import Board
-from flippy.mode.base import BaseMode
-import random
 
 
 class NoExercisesLeft(Exception):

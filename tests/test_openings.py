@@ -1,13 +1,11 @@
 import csv
+import pytest
 from pathlib import Path
 
-import pytest
-from flippy.mode.training.exercise import Exercise
 from flippy.arguments import Arguments
-from flippy.othello.board import BLACK, WHITE, Board
-
+from flippy.mode.training.exercise import Exercise
 from flippy.mode.training.mode import TrainingMode
-
+from flippy.othello.board import BLACK, WHITE, Board
 
 OPENINGS_FILE = Path(__file__).parent / "../openings.csv"
 
