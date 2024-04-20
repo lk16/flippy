@@ -3,6 +3,19 @@ from __future__ import annotations
 from copy import copy
 
 from flippy.othello.board import EMPTY, PASS_MOVE, Board
+from flippy.othello.game import Game
+
+
+class EdaxRequest:
+    def __init__(self, task: Board | Game, level: int) -> None:
+        self.task = task
+        self.level = level
+
+
+class EdaxResponse:
+    def __init__(self, request: EdaxRequest, evaluations: EdaxEvaluations) -> None:
+        self.request = request
+        self.evaluations = evaluations
 
 
 class EdaxEvaluation:

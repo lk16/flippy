@@ -7,43 +7,25 @@ from multiprocessing import Queue
 from typing import Optional
 
 from flippy.config import config
-from flippy.edax.evaluations import EdaxEvaluation, EdaxEvaluations
+from flippy.edax.types import EdaxEvaluation, EdaxEvaluations, EdaxRequest, EdaxResponse
 from flippy.othello.board import Board
-from flippy.othello.game import Game
 
 
-def start_board_evaluation(
-    level: int,
-    board: Board,
-    recv_queue: Queue[tuple[int, Board | Game, EdaxEvaluations]],
-) -> None:
-    proc = EdaxProcess(level, board, recv_queue)
-    multiprocessing.Process(target=proc.search).start()
-
-
-def start_game_evaluation(
-    level: int, game: Game, recv_queue: Queue[tuple[int, Board | Game, EdaxEvaluations]]
-) -> None:
-    proc = EdaxProcess(level, game, recv_queue)
+def start_evaluation(request: EdaxRequest, recv_queue: Queue[EdaxResponse]) -> None:
+    proc = EdaxProcess(request, recv_queue)
     multiprocessing.Process(target=proc.search).start()
 
 
 class EdaxProcess:
-    def __init__(
-        self,
-        level: int,
-        board_or_game: Board | Game,
-        send_queue: Queue[tuple[int, Board | Game, EdaxEvaluations]],
-    ) -> None:
-        self.level = level
+    def __init__(self, request: EdaxRequest, send_queue: Queue[EdaxResponse]) -> None:
+        self.request = request
         self.send_queue = send_queue
         self.edax_path = config.edax_path()
-        self.board_or_game = board_or_game
 
-        if isinstance(board_or_game, Board):
-            boards = board_or_game.get_children()
+        if isinstance(request.task, Board):
+            boards = request.task.get_children()
         else:
-            boards = board_or_game.get_all_children()
+            boards = request.task.get_all_children()
 
         searchable: list[Board] = []
 
@@ -64,7 +46,7 @@ class EdaxProcess:
 
     def search_sync(self) -> EdaxEvaluations:
         proc = subprocess.Popen(
-            f"{self.edax_path} -solve /dev/stdin -level {self.level} -verbose 3".split(),
+            f"{self.edax_path} -solve /dev/stdin -level {self.request.level} -verbose 3".split(),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -101,7 +83,7 @@ class EdaxProcess:
 
     def search(self) -> None:
         evaluations = self.search_sync()
-        message = (self.level, self.board_or_game, evaluations)
+        message = EdaxResponse(self.request, evaluations)
         self.send_queue.put_nowait(message)
 
     # TODO #26 write tests for Edax output parser

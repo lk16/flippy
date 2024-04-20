@@ -8,8 +8,8 @@ from tkinter import filedialog
 from typing import Any, Optional
 
 from flippy.arguments import Arguments
-from flippy.edax.evaluations import EdaxEvaluations
-from flippy.edax.process import start_board_evaluation, start_game_evaluation
+from flippy.edax.process import start_evaluation
+from flippy.edax.types import EdaxEvaluations, EdaxRequest, EdaxResponse
 from flippy.mode.base import BaseMode
 from flippy.othello.board import Board, InvalidMove
 from flippy.othello.game import Game
@@ -21,12 +21,13 @@ class PGNMode(BaseMode):
         self.game: Optional[Game] = None
         self.moves_done = 0
         self.alternative_moves: list[Board] = []
-        self.recv_queue: Queue[tuple[int, Board | Game, EdaxEvaluations]] = Queue()
+        self.recv_queue: Queue[EdaxResponse] = Queue()
         self.all_evaluations = EdaxEvaluations({})
 
         if self.args.pgn_file:
             self.game = Game.from_pgn(self.args.pgn_file)
-            start_game_evaluation(2, self.game, self.recv_queue)
+            request = EdaxRequest(self.game, 2)
+            start_evaluation(request, self.recv_queue)
 
     def on_frame(self, event: Event) -> None:
         if self.game:
@@ -69,7 +70,8 @@ class PGNMode(BaseMode):
             child = child.pass_move()
 
         self.alternative_moves.append(child)
-        start_board_evaluation(2, child, self.recv_queue)
+        request = EdaxRequest(child, 2)
+        start_evaluation(request, self.recv_queue)
 
     def show_next_position(self) -> None:
         if self.game is None:
@@ -128,7 +130,8 @@ class PGNMode(BaseMode):
         self.game = Game.from_pgn(pgn_file)
         self.moves_done = 0
 
-        start_game_evaluation(2, self.game, self.recv_queue)
+        request = EdaxRequest(self.game, 2)
+        start_evaluation(request, self.recv_queue)
         return pgn_file
 
     def _process_recv_messages(self) -> None:
@@ -140,19 +143,17 @@ class PGNMode(BaseMode):
 
             self._process_recv_message(message)
 
-    def _process_recv_message(
-        self, message: tuple[int, Board | Game, EdaxEvaluations]
-    ) -> None:
-        level, board_or_game, evaluations = message
-        self.all_evaluations.update(evaluations)
+    def _process_recv_message(self, message: EdaxResponse) -> None:
+        self.all_evaluations.update(message.evaluations)
+
+        task = message.request.task
+        level = message.request.level
 
         next_level = level + 2
-        if next_level <= 24:
-            if isinstance(board_or_game, Game):
-                start_game_evaluation(next_level, board_or_game, self.recv_queue)
 
-            elif self.get_board() == board_or_game:
-                start_board_evaluation(next_level, board_or_game, self.recv_queue)
+        if next_level <= 24 and (isinstance(task, Game) or self.get_board() == task):
+            next_request = EdaxRequest(task, next_level)
+            start_evaluation(next_request, self.recv_queue)
 
     def get_ui_details(self) -> dict[str, Any]:
         self._process_recv_messages()

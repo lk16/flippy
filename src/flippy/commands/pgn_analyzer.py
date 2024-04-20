@@ -1,8 +1,8 @@
 from multiprocessing import Queue
 from pathlib import Path
 
-from flippy.edax.evaluations import EdaxEvaluations
 from flippy.edax.process import EdaxProcess
+from flippy.edax.types import EdaxEvaluations, EdaxRequest
 from flippy.othello.board import BLACK, PASS_MOVE, WHITE, Board
 from flippy.othello.game import Game
 
@@ -29,7 +29,8 @@ class PgnAnanlyzer:
         return best_moves, best_score
 
     def __call__(self) -> None:
-        edax_proc = EdaxProcess(self.level, self.game, Queue())
+        request = EdaxRequest(self.game, self.level)
+        edax_proc = EdaxProcess(request, Queue())
         self.evaluations = edax_proc.search_sync()
 
         for move_offset, (board, played_move) in enumerate(self.game.zip_board_moves()):
