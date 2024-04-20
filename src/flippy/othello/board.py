@@ -1,16 +1,15 @@
 from __future__ import annotations
+
 from copy import copy
 from typing import Iterable
 
 from flippy.othello.bitset import bits_rotate
-
 
 BLACK = -1
 WHITE = 1
 EMPTY = 0
 
 PASS_MOVE = -1
-SKIPPED_CHILDREN = -2  # used in training mode
 
 DIRECTIONS = [
     (-1, -1),
@@ -75,7 +74,10 @@ class Board:
         return f"Board({hex(self.me)}, {hex(self.opp)}, {self.turn})"
 
     def is_valid_move(self, move: int) -> bool:
-        return move in self.get_moves_as_set()
+        valid_moves = self.get_moves_as_set()
+        if valid_moves:
+            return move in valid_moves
+        return move == PASS_MOVE
 
     def get_square(self, move: int) -> int:
         assert move in range(64)
@@ -211,6 +213,9 @@ class Board:
 
         return normalized, rotation
 
+    def is_normalized(self) -> bool:
+        return self.normalized()[0] == self
+
     def pass_move(self) -> Board:
         return Board(copy(self.opp), copy(self.me), opponent(self.turn))
 
@@ -224,11 +229,28 @@ class Board:
         return not (self.has_moves() or self.pass_move().has_moves())
 
     def count(self, color: int) -> int:
-        assert color in [WHITE, BLACK]
-
         if color == WHITE:
             return bin(self.white()).count("1")
-        return bin(self.black()).count("1")
+        elif color == BLACK:
+            return bin(self.black()).count("1")
+        elif color == EMPTY:
+            return 64 - self.count(WHITE) - self.count(BLACK)
+        raise ValueError
+
+    def get_final_score(self) -> int:
+        blacks = self.count(BLACK)
+        whites = self.count(WHITE)
+
+        if blacks > whites:
+            black_score = 64 - (2 * whites)
+        elif whites > blacks:
+            black_score = -64 + (2 * blacks)
+        else:
+            black_score = 0
+
+        if self.turn == BLACK:
+            return black_score
+        return -black_score
 
     def show(self) -> None:
         print("+-a-b-c-d-e-f-g-h-+")
@@ -263,12 +285,12 @@ class Board:
     @classmethod
     def field_to_index(cls, field: str) -> int:
         if len(field) != 2:
-            raise ValueError(f'Invalid move length "{field}"')
-
-        if field == "--":
-            return PASS_MOVE
+            raise ValueError(f'Invalid move length "{len(field)}"')
 
         field = field.lower()
+
+        if field in ["--", "ps"]:
+            return PASS_MOVE
 
         if not ("a" <= field[0] <= "h" and "1" <= field[1] <= "8"):
             raise ValueError(f'Invalid field "{field}"')
@@ -276,6 +298,33 @@ class Board:
         x = ord(field[0]) - ord("a")
         y = ord(field[1]) - ord("1")
         return y * 8 + x
+
+    @classmethod
+    def unrotate_move(cls, move: int, rotation: int) -> int:
+        if move == PASS_MOVE:
+            return move
+
+        assert move in range(64)
+
+        reverse_rotation = {
+            0: 0,
+            1: 1,
+            2: 2,
+            3: 3,
+            4: 4,
+            5: 6,
+            6: 5,
+            7: 7,
+        }[rotation]
+
+        # convert to bitset
+        bitset = 1 << move
+
+        # rotate back
+        rotated_back = bits_rotate(bitset, reverse_rotation)
+
+        # take lowest set bit
+        return (rotated_back & -rotated_back).bit_length() - 1
 
     def as_tuple(self) -> tuple[int, int, int]:
         return (self.me, self.opp, self.turn)
@@ -337,3 +386,6 @@ class Board:
         turn = square_values[self.turn]
 
         return "".join(squares) + " " + turn + ";\n"
+
+    def get_children(self) -> list[Board]:
+        return [self.do_move(move) for move in self.get_moves_as_set()]

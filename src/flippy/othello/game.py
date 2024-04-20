@@ -1,19 +1,22 @@
 from __future__ import annotations
 
+import re
 from copy import copy
 from datetime import date, datetime
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Iterable, Optional
 
 from flippy.othello.board import BLACK, PASS_MOVE, WHITE, Board, InvalidMove
+
+metadata_regex = re.compile('\[(.*) "(.*)"\]')
 
 
 class Game:
     def __init__(self, file: Optional[Path] = None) -> None:
         self.file = file
-        self.metadata: Dict[str, str] = {}
-        self.boards: List[Board] = []
-        self.moves: List[int] = []
+        self.metadata: dict[str, str] = {}
+        self.boards: list[Board] = []
+        self.moves: list[int] = []
 
     @classmethod
     def from_pgn(cls, file: Path) -> Game:
@@ -31,9 +34,13 @@ class Game:
             if not line.startswith("["):
                 break
 
-            split_line = line.split(" ")
-            key = split_line[0][1:]
-            value = split_line[1][1:-2]
+            match = metadata_regex.match(line)
+
+            if not match:
+                raise ValueError("Could not parse PGN metadata")
+
+            key = match.group(1)
+            value = match.group(2)
             game.metadata[key] = value
 
         board = Board.start()
@@ -133,3 +140,15 @@ class Game:
             return 64 - 2 * white
         else:
             return -64 + 2 * black
+
+    def zip_board_moves(self) -> zip[tuple[Board, int]]:
+        return zip(self.boards[:-1], self.moves, strict=True)
+
+    def get_all_children(self) -> list[Board]:
+        all_children: list[Board] = []
+
+        for board in self.boards:
+            for child in board.get_children():
+                all_children.append(child)
+
+        return all_children

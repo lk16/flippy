@@ -1,7 +1,8 @@
-from flippy.config import config
 from collections import defaultdict
 from typing import Any
+
 from flippy.arguments import Arguments
+from flippy.config import config
 from flippy.mode.game import GameMode
 from flippy.othello.board import Board
 from flippy.othello.game import Game

@@ -1,11 +1,12 @@
+import os
 import requests
+import typer
 from datetime import datetime
 from itertools import count
-import os
 from pathlib import Path
 
-from flippy.othello.game import Game
 from flippy.config import config
+from flippy.othello.game import Game
 
 
 class PgnOrganizer:
@@ -112,3 +113,15 @@ class PgnOrganizer:
             file.write_text(raw_pgn)
 
         return new_files
+
+
+app = typer.Typer()
+
+
+@app.command()
+def pgn_organizer() -> None:
+    PgnOrganizer()()
+
+
+if __name__ == "__main__":
+    app()

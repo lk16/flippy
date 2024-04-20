@@ -1,6 +1,7 @@
-from typing import Any
-from flippy.othello.board import Board
 from pygame.event import Event
+from typing import Any
+
+from flippy.othello.board import Board
 
 
 class BaseMode:
