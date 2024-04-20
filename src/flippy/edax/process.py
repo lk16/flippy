@@ -103,7 +103,7 @@ class EdaxProcess:
         assert evaluation
         return evaluation, read_lines
 
-    # TODO#26 write tests for Edax output parser
+    # TODO #26 write tests for Edax output parser
     def __parse_output_line(self, line: str, board: Board) -> Optional[EdaxEvaluation]:
         if (
             line == "\n"
@@ -122,6 +122,11 @@ class EdaxProcess:
 
         best_field = line[53:].split(" ")[0]
         best_move = Board.field_to_index(best_field)
-        depth = columns[0]
+        depth = int(columns[0].split("@")[0])
 
-        return EdaxEvaluation(depth, score, best_move)
+        if "@" not in columns[0]:
+            confidence = 100
+        else:
+            confidence = int(columns[0].split("@")[1].split("%")[0])
+
+        return EdaxEvaluation(depth, confidence, score, best_move)

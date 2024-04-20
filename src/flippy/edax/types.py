@@ -19,10 +19,14 @@ class EdaxResponse:
 
 
 class EdaxEvaluation:
-    def __init__(self, depth: str, score: int, best_move: int) -> None:
+    def __init__(self, depth: int, confidence: int, score: int, best_move: int) -> None:
         self.depth = depth
+        self.confidence = confidence
         self.score = score
         self.best_move = best_move
+
+    def is_better_than(self, other: EdaxEvaluation) -> bool:
+        return (self.depth, self.confidence) > (other.depth, other.confidence)
 
 
 class EdaxEvaluations:
@@ -47,9 +51,9 @@ class EdaxEvaluations:
         return value
 
     def _lookup_game_end(self, board: Board) -> EdaxEvaluation:
-        empties = str(board.count(EMPTY))
+        empties = board.count(EMPTY)
         score = board.get_final_score()
-        return EdaxEvaluation(empties, score, PASS_MOVE)
+        return EdaxEvaluation(empties, 100, score, PASS_MOVE)
 
     def _lookup_passed(self, board: Board) -> EdaxEvaluation:
         passed = board.pass_move()
@@ -61,17 +65,13 @@ class EdaxEvaluations:
 
     def update(self, other: EdaxEvaluations) -> None:
         for board, evaluation in other.values.items():
-            try:
-                found = self.values[board]
-            except KeyError:
-                add_board = True
-            else:
-                # TODO this make depth and confidence both fields
-                add_board = int(found.depth.split("@")[0]) < int(
-                    evaluation.depth.split("@")[0]
-                )
+            if board not in self.values:
+                self.values[board] = evaluation
+                continue
 
-            if add_board:
+            found = self.values[board]
+
+            if evaluation.is_better_than(found):
                 self.values[board] = evaluation
 
     def has_all_children(self, board: Board) -> bool:
