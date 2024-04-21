@@ -300,6 +300,10 @@ class Board:
         return y * 8 + x
 
     @classmethod
+    def fields_to_indexes(cls, fields: list[str]) -> list[int]:
+        return [cls.field_to_index(field) for field in fields]
+
+    @classmethod
     def unrotate_move(cls, move: int, rotation: int) -> int:
         if move == PASS_MOVE:
             return move
@@ -322,6 +326,22 @@ class Board:
 
         # rotate back
         rotated_back = bits_rotate(bitset, reverse_rotation)
+
+        # take lowest set bit
+        return (rotated_back & -rotated_back).bit_length() - 1
+
+    @classmethod
+    def rotate_move(cls, move: int, rotation: int) -> int:
+        if move == PASS_MOVE:
+            return move
+
+        assert move in range(64)
+
+        # convert to bitset
+        bitset = 1 << move
+
+        # rotate back
+        rotated_back = bits_rotate(bitset, rotation)
 
         # take lowest set bit
         return (rotated_back & -rotated_back).bit_length() - 1

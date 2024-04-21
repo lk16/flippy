@@ -19,29 +19,36 @@ class EdaxResponse:
 
 
 class EdaxEvaluation:
-    def __init__(self, depth: int, confidence: int, score: int, best_move: int) -> None:
+    def __init__(
+        self,
+        board: Board,
+        depth: int,
+        confidence: int,
+        score: int,
+        best_moves: list[int],
+    ) -> None:
         self.depth = depth
         self.confidence = confidence
         self.score = score
-        self.best_move = best_move
+        self.best_moves = best_moves
+        self._validate(board)
+
+    def _validate(self, board: Board) -> None:
+        assert 0 <= self.depth <= 60
+        assert self.confidence in [73, 87, 95, 98, 99, 100]
+        assert -64 <= self.score <= 64
+
+        for move in self.best_moves:
+            assert board.is_valid_move(move)
+            board = board.do_move(move)
 
     def is_better_than(self, other: EdaxEvaluation) -> bool:
         return (self.depth, self.confidence) > (other.depth, other.confidence)
 
 
 class EdaxEvaluations:
-    def __init__(self, values: dict[Board, EdaxEvaluation]) -> None:
-        self.values = values
-        self._validate()
-
-    def _validate(self) -> None:
-        for board, eval in self.values.items():
-            assert board.is_normalized()
-
-            if eval.best_move == PASS_MOVE:  # TODO remove
-                return
-
-            assert board.is_valid_move(eval.best_move)
+    def __init__(self) -> None:
+        self.__values: dict[Board, EdaxEvaluation] = {}
 
     def lookup(self, board: Board) -> EdaxEvaluation:
         if board.is_game_end():
@@ -50,37 +57,40 @@ class EdaxEvaluations:
             return self._lookup_passed(board)
 
         key, rotation = board.normalized()
-        value = copy(self.values[key])
-        value.best_move = Board.unrotate_move(value.best_move, rotation)
+        value = copy(self.__values[key])
+        value.best_moves = [
+            Board.unrotate_move(move, rotation) for move in value.best_moves
+        ]
         return value
 
     def _lookup_game_end(self, board: Board) -> EdaxEvaluation:
         empties = board.count(EMPTY)
         score = board.get_final_score()
-        return EdaxEvaluation(empties, 100, score, PASS_MOVE)
+        return EdaxEvaluation(board, empties, 100, score, [])
 
     def _lookup_passed(self, board: Board) -> EdaxEvaluation:
         passed = board.pass_move()
         value = copy(self.lookup(passed))
 
-        value.best_move = PASS_MOVE
+        value.best_moves = [PASS_MOVE]
         value.score *= -1
         return value
 
+    def add(self, board: Board, evaluation: EdaxEvaluation) -> None:
+        assert board.is_normalized()
+
+        if board not in self.__values:
+            self.__values[board] = evaluation
+
+        found = self.__values[board]
+
+        if evaluation.is_better_than(found):
+            self.__values[board] = evaluation
+
     def update(self, other: EdaxEvaluations) -> None:
-        for board, evaluation in other.values.items():
-            if board not in self.values:
-                self.values[board] = evaluation
-                continue
-
-            found = self.values[board]
-
-            if evaluation.is_better_than(found):
-                self.values[board] = evaluation
+        for board, evaluation in other.__values.items():
+            self.add(board, evaluation)
 
     def has_all_children(self, board: Board) -> bool:
-        for move in board.get_moves_as_set():
-            key = board.do_normalized_move(move)
-            if key not in self.values:
-                return False
-        return True
+        children = {board.do_normalized_move(move) for move in board.get_moves_as_set()}
+        return all(child in self.__values for child in children)

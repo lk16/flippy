@@ -14,7 +14,7 @@ class EvaluateMode(GameMode):
     def __init__(self, args: Arguments) -> None:
         super().__init__(args)
         self.recv_queue: Queue[EdaxResponse] = Queue()
-        self.all_evaluations = EdaxEvaluations({})
+        self.evaluations = EdaxEvaluations()
         request = EdaxRequest(self.get_board(), 16)
         start_evaluation(request, self.recv_queue)
 
@@ -32,7 +32,7 @@ class EvaluateMode(GameMode):
 
     def on_board_change(self) -> None:
         board = self.get_board()
-        if self.all_evaluations.has_all_children(board):
+        if self.evaluations.has_all_children(board):
             return
 
         request = EdaxRequest(self.get_board(), 16)
@@ -48,7 +48,7 @@ class EvaluateMode(GameMode):
             self._process_recv_message(message)
 
     def _process_recv_message(self, message: EdaxResponse) -> None:
-        self.all_evaluations.update(message.evaluations)
+        self.evaluations.update(message.evaluations)
 
         task = message.request.task
         level = message.request.level
@@ -73,7 +73,7 @@ class EvaluateMode(GameMode):
             child = board.do_move(move)
 
             try:
-                evaluation = self.all_evaluations.lookup(child)
+                evaluation = self.evaluations.lookup(child)
             except KeyError:
                 continue
 

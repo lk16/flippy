@@ -13,7 +13,7 @@ class PgnAnanlyzer:
         self.file = file
         self.level = level
         self.game = Game.from_pgn(file)
-        self.evaluations = EdaxEvaluations({})
+        self.evaluations = EdaxEvaluations()
 
     def _get_best(self, board: Board) -> tuple[list[int], int]:
         child_scores: list[tuple[int, int]] = []

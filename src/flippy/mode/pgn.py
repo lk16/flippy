@@ -22,7 +22,7 @@ class PGNMode(BaseMode):
         self.moves_done = 0
         self.alternative_moves: list[Board] = []
         self.recv_queue: Queue[EdaxResponse] = Queue()
-        self.all_evaluations = EdaxEvaluations({})
+        self.evaluations = EdaxEvaluations()
 
         if self.args.pgn_file:
             self.game = Game.from_pgn(self.args.pgn_file)
@@ -144,7 +144,7 @@ class PGNMode(BaseMode):
             self._process_recv_message(message)
 
     def _process_recv_message(self, message: EdaxResponse) -> None:
-        self.all_evaluations.update(message.evaluations)
+        self.evaluations.update(message.evaluations)
 
         task = message.request.task
         level = message.request.level
@@ -165,7 +165,7 @@ class PGNMode(BaseMode):
             child = board.do_move(move)
 
             try:
-                evaluation = self.all_evaluations.lookup(child)
+                evaluation = self.evaluations.lookup(child)
             except KeyError:
                 continue
 
