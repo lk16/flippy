@@ -197,4 +197,28 @@ class PGNMode(BaseMode):
 
         ui_details["evaluations"] = evaluations
 
+        graph: list[Optional[tuple[int, int]]] = []
+
+        if self.game:
+            for board in self.game.boards:
+                if not board.has_moves():
+                    graph.append(None)
+                    continue
+
+                try:
+                    evaluation = self.evaluations.lookup(board)
+                except KeyError:
+                    graph.append(None)
+                    continue
+
+                graph.append((board.turn, evaluation.get_black_score()))
+
+        ui_details["graph_data"] = graph
+
+        if self.alternative_moves:
+            graph_current_move = None
+        else:
+            graph_current_move = self.moves_done
+
+        ui_details["graph_current_move"] = graph_current_move
         return ui_details
