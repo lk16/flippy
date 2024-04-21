@@ -22,11 +22,11 @@ class PGNMode(BaseMode):
         self.moves_done = 0
         self.alternative_moves: list[Board] = []
         self.recv_queue: Queue[EdaxResponse] = Queue()
-        self.all_evaluations = EdaxEvaluations({})
+        self.evaluations = EdaxEvaluations()
 
         if self.args.pgn_file:
             self.game = Game.from_pgn(self.args.pgn_file)
-            request = EdaxRequest(self.game, 2)
+            request = EdaxRequest(self.game, 16)
             start_evaluation(request, self.recv_queue)
 
     def on_frame(self, event: Event) -> None:
@@ -70,7 +70,7 @@ class PGNMode(BaseMode):
             child = child.pass_move()
 
         self.alternative_moves.append(child)
-        request = EdaxRequest(child, 2)
+        request = EdaxRequest(child, 16)
         start_evaluation(request, self.recv_queue)
 
     def show_next_position(self) -> None:
@@ -144,14 +144,14 @@ class PGNMode(BaseMode):
             self._process_recv_message(message)
 
     def _process_recv_message(self, message: EdaxResponse) -> None:
-        self.all_evaluations.update(message.evaluations)
+        self.evaluations.update(message.evaluations)
 
         task = message.request.task
         level = message.request.level
 
         next_level = level + 2
 
-        if next_level <= 24 and (isinstance(task, Game) or self.get_board() == task):
+        if next_level <= 32 and (isinstance(task, Game) or self.get_board() == task):
             next_request = EdaxRequest(task, next_level)
             start_evaluation(next_request, self.recv_queue)
 
@@ -165,16 +165,36 @@ class PGNMode(BaseMode):
             child = board.do_move(move)
 
             try:
-                evaluation = self.all_evaluations.lookup(child)
+                evaluation = self.evaluations.lookup(child)
             except KeyError:
                 continue
 
             evaluations[move] = -evaluation.score
 
-        ui_details: dict[str, Any] = {"evaluations": evaluations}
+        ui_details: dict[str, Any] = {}
 
         played_move = self.get_played_move()
         if played_move is not None:
             ui_details["played_move"] = played_move
+
+        if not self.alternative_moves and evaluations:
+            max_evaluation = max(evaluations.values())
+
+            shown_evaluations = {
+                move
+                for (move, evaluation) in evaluations.items()
+                if evaluation == max_evaluation
+            }
+
+            if played_move is not None:
+                shown_evaluations.add(played_move)
+
+            evaluations = {
+                move: evaluation
+                for (move, evaluation) in evaluations.items()
+                if move in shown_evaluations
+            }
+
+        ui_details["evaluations"] = evaluations
 
         return ui_details

@@ -16,6 +16,10 @@ def start_evaluation(request: EdaxRequest, recv_queue: Queue[EdaxResponse]) -> N
     multiprocessing.Process(target=proc.search).start()
 
 
+def start_evaluation_sync(request: EdaxRequest) -> EdaxEvaluations:
+    return EdaxProcess(request, Queue())._search_sync()
+
+
 class EdaxProcess:
     def __init__(self, request: EdaxRequest, send_queue: Queue[EdaxResponse]) -> None:
         self.request = request
@@ -25,7 +29,7 @@ class EdaxProcess:
         if isinstance(request.task, Board):
             boards = request.task.get_children()
         else:
-            boards = request.task.get_all_children()
+            boards = request.task.boards
 
         searchable: list[Board] = []
 
@@ -44,7 +48,7 @@ class EdaxProcess:
 
         self.searchable_boards = set(searchable)
 
-    def search_sync(self) -> EdaxEvaluations:
+    def _search_sync(self) -> EdaxEvaluations:
         proc = subprocess.Popen(
             f"{self.edax_path} -solve /dev/stdin -level {self.request.level} -verbose 3".split(),
             stdin=subprocess.PIPE,
@@ -69,22 +73,45 @@ class EdaxProcess:
             line = raw_line.decode()
             lines.append(line)
 
-        evaluations: dict[Board, EdaxEvaluation] = {}
+        evaluations = EdaxEvaluations()
         total_read_lines = 0
         for board in self.searchable_boards:
             remaining_lines = lines[total_read_lines:]
             evaluation, read_lines = self.__parse_output_lines(remaining_lines, board)
-
             total_read_lines += read_lines
-            assert board.is_valid_move(evaluation.best_move)
-            evaluations[board] = evaluation
+            evaluations.add(board, evaluation)
 
-        return EdaxEvaluations(evaluations)
+            best_child, child_evaluation = self._get_child_evaluation(board, evaluation)
+            evaluations.add(best_child, child_evaluation)
+
+        return evaluations
 
     def search(self) -> None:
-        evaluations = self.search_sync()
+        evaluations = self._search_sync()
         message = EdaxResponse(self.request, evaluations)
         self.send_queue.put_nowait(message)
+
+    def _get_child_evaluation(
+        self, board: Board, evaluation: EdaxEvaluation
+    ) -> tuple[Board, EdaxEvaluation]:
+        best_child, child_rotation = board.do_move(
+            evaluation.best_moves[0]
+        ).normalized()
+
+        best_child_moves = [
+            Board.rotate_move(move, child_rotation)
+            for move in evaluation.best_moves[1:]
+        ]
+
+        child_evaluation = EdaxEvaluation(
+            best_child,
+            evaluation.depth - 1,
+            evaluation.confidence,
+            -evaluation.score,
+            best_child_moves,
+        )
+
+        return best_child, child_evaluation
 
     # TODO #26 write tests for Edax output parser
     def __parse_output_lines(
@@ -120,8 +147,8 @@ class EdaxProcess:
         except ValueError:
             return None
 
-        best_field = line[53:].split(" ")[0]
-        best_move = Board.field_to_index(best_field)
+        best_fields = line[53:].strip().split(" ")
+        best_moves = Board.fields_to_indexes(best_fields)
         depth = int(columns[0].split("@")[0])
 
         if "@" not in columns[0]:
@@ -129,4 +156,4 @@ class EdaxProcess:
         else:
             confidence = int(columns[0].split("@")[1].split("%")[0])
 
-        return EdaxEvaluation(depth, confidence, score, best_move)
+        return EdaxEvaluation(board, depth, confidence, score, best_moves)

@@ -1,9 +1,8 @@
 import typer
-from multiprocessing import Queue
 from pathlib import Path
 from typing import Annotated
 
-from flippy.edax.process import EdaxProcess
+from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxEvaluations, EdaxRequest
 from flippy.othello.board import BLACK, PASS_MOVE, WHITE, Board
 from flippy.othello.game import Game
@@ -14,15 +13,20 @@ class PgnAnanlyzer:
         self.file = file
         self.level = level
         self.game = Game.from_pgn(file)
-        self.evaluations = EdaxEvaluations({})
+        self.evaluations = EdaxEvaluations()
 
     def _get_best(self, board: Board) -> tuple[list[int], int]:
         child_scores: list[tuple[int, int]] = []
 
         for move in board.get_moves_as_set():
             child = board.do_move(move)
-            score = self.evaluations.lookup(child).score
-            child_scores.append((move, score))
+
+            try:
+                evaluation = self.evaluations.lookup(child)
+            except KeyError:
+                continue
+
+            child_scores.append((move, evaluation.score))
 
         # Take minimum, because scores are from opponent's point of view
         best_score = min(score for _, score in child_scores)
@@ -32,8 +36,7 @@ class PgnAnanlyzer:
 
     def __call__(self) -> None:
         request = EdaxRequest(self.game, self.level)
-        edax_proc = EdaxProcess(request, Queue())
-        self.evaluations = edax_proc.search_sync()
+        self.evaluations = start_evaluation_sync(request)
 
         for move_offset, (board, played_move) in enumerate(self.game.zip_board_moves()):
             turn = {WHITE: "●", BLACK: "○"}[board.turn]
