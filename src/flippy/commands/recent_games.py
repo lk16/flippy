@@ -72,7 +72,7 @@ class RecentGames:
             print(prefix + output_line + postfix)
 
 
-app = typer.Typer()
+app = typer.Typer(pretty_exceptions_enable=False)
 
 
 @app.command()

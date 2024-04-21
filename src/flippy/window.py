@@ -1,10 +1,10 @@
 import pygame
 from math import floor
 from pygame.event import Event
-from typing import Optional
+from typing import Optional, Type
 
 from flippy.arguments import Arguments
-from flippy.mode.evaluate import EvaluateMode
+from flippy.mode.base import BaseMode
 from flippy.othello.board import BLACK, WHITE
 
 BOARD_WIDTH_PX = 600
@@ -26,7 +26,6 @@ COLOR_WRONG_MOVE = (255, 0, 0)
 COLOR_PLAYED_MOVE = (0, 96, 0)
 COLOR_SCORE_LINE = (96, 96, 96)
 
-
 FRAME_RATE = 60
 
 
@@ -35,12 +34,13 @@ class NonMoveEvent(Exception):
 
 
 class Window:
-    def __init__(self, args: Arguments) -> None:
-        pygame.init()
+    def __init__(self, mode_type: Type[BaseMode], args: Arguments) -> None:
         self.args = args
 
+        pygame.init()
+
         # TODO #7 use UI / env var to toggle
-        self.mode = EvaluateMode(args)
+        self.mode = mode_type(args)
 
         self.screen = pygame.display.set_mode((BOARD_WIDTH_PX, BOARD_HEIGHT_PX))
         self.clock = pygame.time.Clock()
@@ -195,15 +195,15 @@ class Window:
         if not valid_black_scores:
             return
 
-        min_black_score = min(valid_black_scores + [-4])
-        max_black_score = max(valid_black_scores + [4])
+        min_black_score = min(valid_black_scores + [-4]) - 2
+        max_black_score = max(valid_black_scores + [4]) + 2
         score_range = max_black_score - min_black_score
 
         if score_range <= 20:
             y_line_interval = 4
         elif score_range <= 40:
             y_line_interval = 8
-        elif score_range <= 60:
+        elif score_range <= 80:
             y_line_interval = 16
         else:
             y_line_interval = 32

@@ -1,103 +1,154 @@
 from __future__ import annotations
 
-from copy import copy
+from copy import deepcopy
+from typing import Iterable
 
-from flippy.othello.board import EMPTY, PASS_MOVE, WHITE, Board
+from flippy.othello.board import Board
 from flippy.othello.game import Game
+from flippy.othello.position import PASS_MOVE, Position
 
 
 class EdaxRequest:
-    def __init__(self, task: Board | Game, level: int) -> None:
-        self.task = task
+    def __init__(
+        self,
+        positions: Iterable[Position],
+        level: int,
+        *,
+        source: Board | Game | None,
+    ) -> None:
+        self.positions = set(positions)
         self.level = level
+        self.source = source
 
 
 class EdaxResponse:
-    def __init__(self, request: EdaxRequest, evaluations: EdaxEvaluations) -> None:
+    def __init__(self, request: EdaxRequest, evaluations: "EdaxEvaluations") -> None:
         self.request = request
         self.evaluations = evaluations
+
+        for position in self.request.positions:
+            if position.is_game_end() or not position.has_moves():
+                continue
+
+            assert position.normalized() in evaluations.values
 
 
 class EdaxEvaluation:
     def __init__(
         self,
-        board: Board,
+        *,
+        position: Position,
+        level: int,
         depth: int,
         confidence: int,
         score: int,
         best_moves: list[int],
     ) -> None:
-        self.board = board
+        self.position = position
+        self.level = level
         self.depth = depth
         self.confidence = confidence
         self.score = score
         self.best_moves = best_moves
-        self._validate(board)
+        self._validate()
 
-    def _validate(self, board: Board) -> None:
+    def _validate(self) -> None:
         assert 0 <= self.depth <= 60
         assert self.confidence in [73, 87, 95, 98, 99, 100]
         assert -64 <= self.score <= 64
+        assert 0 <= self.level <= 60
+        assert self.level % 2 == 0
 
+        dummy = deepcopy(self.position)
         for move in self.best_moves:
-            assert board.is_valid_move(move)
-            board = board.do_move(move)
+            assert dummy.is_valid_move(move)
+            dummy = dummy.do_move(move)
 
     def is_better_than(self, other: EdaxEvaluation) -> bool:
         return (self.depth, self.confidence) > (other.depth, other.confidence)
 
-    def get_black_score(self) -> int:
-        if self.board.turn == WHITE:
-            return -self.score
+    def unrotate(self, rotation: int) -> EdaxEvaluation:
+        best_moves = [
+            Position.unrotate_move(move, rotation) for move in self.best_moves
+        ]
 
-        return self.score
+        position = self.position.unrotated(rotation)
+
+        return EdaxEvaluation(
+            position=position,
+            level=self.level,
+            depth=self.depth,
+            confidence=self.confidence,
+            score=self.score,
+            best_moves=best_moves,
+        )
+
+    def pass_move(self) -> EdaxEvaluation:
+        return EdaxEvaluation(
+            position=self.position.pass_move(),
+            level=self.level,
+            depth=self.depth,
+            confidence=self.confidence,
+            score=-self.score,
+            best_moves=[PASS_MOVE] + self.best_moves,
+        )
 
 
 class EdaxEvaluations:
     def __init__(self) -> None:
-        self.__values: dict[Board, EdaxEvaluation] = {}
+        self.values: dict[Position, EdaxEvaluation] = {}
 
-    def lookup(self, board: Board) -> EdaxEvaluation:
-        if board.is_game_end():
-            return self._lookup_game_end(board)
-        if not board.has_moves():
-            return self._lookup_passed(board)
+    def lookup(self, position: Position) -> EdaxEvaluation:
+        if position.is_game_end():
+            return self._lookup_game_end(position)
 
-        key, rotation = board.normalized()
-        value = copy(self.__values[key])
-        value.best_moves = [
-            Board.unrotate_move(move, rotation) for move in value.best_moves
-        ]
-        return value
+        if not position.has_moves():
+            return self._lookup_passed(position)
 
-    def _lookup_game_end(self, board: Board) -> EdaxEvaluation:
-        empties = board.count(EMPTY)
-        score = board.get_final_score()
-        return EdaxEvaluation(board, empties, 100, score, [])
+        key, rotation = position.normalize()
+        return deepcopy(self.values[key]).unrotate(rotation)
 
-    def _lookup_passed(self, board: Board) -> EdaxEvaluation:
-        passed = board.pass_move()
-        value = copy(self.lookup(passed))
+    def _lookup_game_end(self, position: Position) -> EdaxEvaluation:
+        empties = position.count_empties()
+        score = position.get_final_score()
+        return EdaxEvaluation(
+            position=position,
+            depth=empties,
+            level=empties + (empties % 2),
+            confidence=100,
+            score=score,
+            best_moves=[],
+        )
 
-        value.best_moves = [PASS_MOVE]
-        value.score *= -1
-        return value
+    def _lookup_passed(self, position: Position) -> EdaxEvaluation:
+        passed = position.pass_move()
+        return deepcopy(self.lookup(passed)).pass_move()
 
-    def add(self, board: Board, evaluation: EdaxEvaluation) -> None:
-        assert board.is_normalized()
+    def add(self, position: Position, evaluation: EdaxEvaluation) -> None:
+        assert position.is_normalized()
+        assert evaluation.position == position
 
-        if board not in self.__values:
-            self.__values[board] = evaluation
+        if position not in self.values:
+            self.values[position] = evaluation
 
-        found = self.__values[board]
+        found = self.values[position]
 
         if evaluation.is_better_than(found):
-            self.__values[board] = evaluation
+            self.values[position] = evaluation
 
     def update(self, other: EdaxEvaluations) -> None:
-        for board, evaluation in other.__values.items():
+        for board, evaluation in other.values.items():
             self.add(board, evaluation)
 
     def has_all_children(self, board: Board) -> bool:
         children = {board.do_normalized_move(move) for move in board.get_moves_as_set()}
-        return all(child in self.__values for child in children)
+        return all(child in self.values for child in children)
+
+    def get_missing(self, positions: set[Position]) -> set[Position]:
+        missing: set[Position] = set()
+        for position in positions:
+            try:
+                self.lookup(position)
+            except KeyError:
+                missing.add(position)
+        return missing

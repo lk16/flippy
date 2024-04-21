@@ -10,6 +10,8 @@ dependencies = [
     "pyautogui>=0.9.54",
     "typer>=0.9.0",
     "requests>=2.31.0",
+    "piccolo[postgres]>=1.5.0",
+    "psycopg2>=2.9.9",
 ]
 requires-python = "==3.11.*"
 readme = "README.md"
@@ -20,6 +22,8 @@ gui = "python src/flippy/commands/gui.py"
 organize-pgn = "python src/flippy/commands/pgn_organizer.py"
 analyze-pgn =  "python src/flippy/commands/pgn_analyzer.py"
 recent-games = "python src/flippy/commands/recent_games.py"
+book = "python src/flippy/commands/book.py"
+unique-positions = "python src/flippy/commands/unique_positions.py"
 
 [tool.pdm]
 [tool.pdm.dev-dependencies]
@@ -32,6 +36,7 @@ dev = [
     "pytest>=8.0.1",
     "pytest-cov>=4.1.0",
     "types-requests>=2.31.0.20240311",
+    "types-psycopg2>=2.9.21.20240417",
 ]
 
 [tool.ruff.lint]

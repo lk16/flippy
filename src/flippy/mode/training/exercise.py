@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from flippy.othello.board import BLACK, WHITE, Board, InvalidMove
+from flippy.othello.board import BLACK, WHITE, Board
+from flippy.othello.position import InvalidMove
 
 
 class Exercise:

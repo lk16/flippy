@@ -8,5 +8,12 @@
         "playok_usernames": ["username", "other_username"]
     },
     "usernames": ["username", "some_user"],
-    "edax_path": "~/your/path/to/edax"
+    "edax_path": "~/your/path/to/edax",
+    "db": {
+        "user": "",
+        "password": "",
+        "host": "",
+        "port": 12321,
+        "db": ""
+    }
 }

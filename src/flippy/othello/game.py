@@ -6,7 +6,8 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Iterable, Optional
 
-from flippy.othello.board import BLACK, PASS_MOVE, WHITE, Board, InvalidMove
+from flippy.othello.board import BLACK, WHITE, Board
+from flippy.othello.position import PASS_MOVE, InvalidMove, Position
 
 metadata_regex = re.compile('\[(.*) "(.*)"\]')
 
@@ -152,3 +153,14 @@ class Game:
                 all_children.append(child)
 
         return all_children
+
+    def get_normalized_positions(self) -> set[Position]:
+        positions: set[Position] = set()
+
+        for board in self.boards:
+            positions.add(board.position.normalized())
+
+            for child_position in board.get_child_positions():
+                positions.add(child_position.normalized())
+
+        return positions
