@@ -1,9 +1,8 @@
 import typer
-from multiprocessing import Queue
 from pathlib import Path
 from typing import Annotated
 
-from flippy.edax.process import EdaxProcess
+from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxEvaluations, EdaxRequest
 from flippy.othello.board import BLACK, PASS_MOVE, WHITE, Board
 from flippy.othello.game import Game
@@ -32,8 +31,7 @@ class PgnAnanlyzer:
 
     def __call__(self) -> None:
         request = EdaxRequest(self.game, self.level)
-        edax_proc = EdaxProcess(request, Queue())
-        self.evaluations = edax_proc.search_sync()
+        self.evaluations = start_evaluation_sync(request)
 
         for move_offset, (board, played_move) in enumerate(self.game.zip_board_moves()):
             turn = {WHITE: "●", BLACK: "○"}[board.turn]

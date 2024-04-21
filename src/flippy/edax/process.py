@@ -8,12 +8,16 @@ from typing import Optional
 
 from flippy.config import config
 from flippy.edax.types import EdaxEvaluation, EdaxEvaluations, EdaxRequest, EdaxResponse
-from flippy.othello.board import Board
+from flippy.othello.board import PASS_MOVE, Board
 
 
 def start_evaluation(request: EdaxRequest, recv_queue: Queue[EdaxResponse]) -> None:
     proc = EdaxProcess(request, recv_queue)
     multiprocessing.Process(target=proc.search).start()
+
+
+def start_evaluation_sync(request: EdaxRequest) -> EdaxEvaluations:
+    return EdaxProcess(request, Queue())._search_sync()
 
 
 class EdaxProcess:
@@ -25,7 +29,7 @@ class EdaxProcess:
         if isinstance(request.task, Board):
             boards = request.task.get_children()
         else:
-            boards = request.task.get_all_children()
+            boards = request.task.boards
 
         searchable: list[Board] = []
 
@@ -44,7 +48,7 @@ class EdaxProcess:
 
         self.searchable_boards = set(searchable)
 
-    def search_sync(self) -> EdaxEvaluations:
+    def _search_sync(self) -> EdaxEvaluations:
         proc = subprocess.Popen(
             f"{self.edax_path} -solve /dev/stdin -level {self.request.level} -verbose 3".split(),
             stdin=subprocess.PIPE,
@@ -67,6 +71,7 @@ class EdaxProcess:
             if raw_line == b"":
                 break
             line = raw_line.decode()
+            print(line, end="")
             lines.append(line)
 
         evaluations: dict[Board, EdaxEvaluation] = {}
@@ -79,10 +84,20 @@ class EdaxProcess:
             assert board.is_valid_move(evaluation.best_move)
             evaluations[board] = evaluation
 
+            best_child = board.do_move(evaluation.best_move).normalized()[0]
+
+            # TODO add principal variation to EdaxEvaluation and use here instead of PASS_MOVE
+            evaluations[best_child] = EdaxEvaluation(
+                evaluation.depth - 1,
+                evaluation.confidence,
+                -evaluation.score,
+                PASS_MOVE,
+            )
+
         return EdaxEvaluations(evaluations)
 
     def search(self) -> None:
-        evaluations = self.search_sync()
+        evaluations = self._search_sync()
         message = EdaxResponse(self.request, evaluations)
         self.send_queue.put_nowait(message)
 

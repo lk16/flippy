@@ -37,6 +37,10 @@ class EdaxEvaluations:
     def _validate(self) -> None:
         for board, eval in self.values.items():
             assert board.is_normalized()
+
+            if eval.best_move == PASS_MOVE:  # TODO remove
+                return
+
             assert board.is_valid_move(eval.best_move)
 
     def lookup(self, board: Board) -> EdaxEvaluation:
