@@ -20,8 +20,13 @@ class PgnAnanlyzer:
 
         for move in board.get_moves_as_set():
             child = board.do_move(move)
-            score = self.evaluations.lookup(child).score
-            child_scores.append((move, score))
+
+            try:
+                evaluation = self.evaluations.lookup(child)
+            except KeyError:
+                continue
+
+            child_scores.append((move, evaluation.score))
 
         # Take minimum, because scores are from opponent's point of view
         best_score = min(score for _, score in child_scores)
