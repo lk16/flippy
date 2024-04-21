@@ -1,15 +1,17 @@
 import pygame
+from math import floor
 from pygame.event import Event
 from typing import Optional
 
 from flippy.arguments import Arguments
-from flippy.mode.pgn import PGNMode
+from flippy.mode.evaluate import EvaluateMode
 from flippy.othello.board import BLACK, WHITE
 
-WIDTH = 600
-HEIGHT = 600
+BOARD_WIDTH_PX = 600
+BOARD_HEIGHT_PX = 600
+GRAPH_HEIGHT_PX = 200
 
-SQUARE_SIZE = WIDTH // 8
+SQUARE_SIZE = BOARD_WIDTH_PX // 8
 DISC_RADIUS = SQUARE_SIZE // 2 - 5
 MOVE_INDICATOR_RADIUS = SQUARE_SIZE // 8
 
@@ -22,6 +24,8 @@ COLOR_BACKGROUND = (0, 128, 0)
 COLOR_UNKNOWN = (180, 180, 180)
 COLOR_WRONG_MOVE = (255, 0, 0)
 COLOR_PLAYED_MOVE = (0, 96, 0)
+COLOR_SCORE_LINE = (96, 96, 96)
+
 
 FRAME_RATE = 60
 
@@ -36,9 +40,9 @@ class Window:
         self.args = args
 
         # TODO #7 use UI / env var to toggle
-        self.mode = PGNMode(args)
+        self.mode = EvaluateMode(args)
 
-        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        self.screen = pygame.display.set_mode((BOARD_WIDTH_PX, BOARD_HEIGHT_PX))
         self.clock = pygame.time.Clock()
 
         pygame.display.set_caption("Flippy")
@@ -110,12 +114,22 @@ class Window:
         child_frequencies: dict[int, int] = ui_details.pop("child_frequencies", {})
         evaluations: dict[int, int] = ui_details.pop("evaluations", {})
         played_move: Optional[int] = ui_details.pop("played_move", None)
+        graph_data: list[Optional[tuple[int, int]]] = ui_details.pop("graph_data", [])
+        graph_current_move: Optional[int] = ui_details.pop("graph_current_move", None)
 
         if ui_details:
             print(
                 "WARNING: found unused ui details key(s): "
                 + ", ".join(sorted(ui_details))
             )
+
+        if graph_data:
+            height = BOARD_HEIGHT_PX + GRAPH_HEIGHT_PX
+        else:
+            height = BOARD_HEIGHT_PX
+
+        if self.screen.get_height() != height:
+            self.screen = pygame.display.set_mode((BOARD_WIDTH_PX, height))
 
         if board.turn == WHITE:
             turn_color = COLOR_WHITE_DISC
@@ -148,7 +162,113 @@ class Window:
             elif board.is_valid_move(index) and not child_frequencies:
                 self.draw_move_indicator(index, turn_color)
 
+        self.draw_graph(graph_data, graph_current_move)
+
         pygame.display.flip()
+
+    def draw_graph(
+        self,
+        graph_data: list[Optional[tuple[int, int]]],
+        graph_current_move: Optional[int],
+    ) -> None:
+        if not graph_data:
+            return
+
+        big_margin = 40
+        small_margin = 10
+
+        x_min = big_margin
+        y_min = BOARD_HEIGHT_PX + small_margin
+        x_max = BOARD_WIDTH_PX - small_margin
+        y_max = BOARD_HEIGHT_PX + GRAPH_HEIGHT_PX - small_margin
+
+        pygame.draw.rect(
+            self.screen,
+            COLOR_GRAY_DISC,
+            ((x_min, y_min), (x_max - x_min, y_max - y_min)),
+        )
+
+        # Graph considers scores from black's POV: positive values means black has an advantage.
+        # Reason: this is best practice, likely choice for black is because black plays first.
+        valid_black_scores = [item[1] for item in graph_data if item is not None]
+
+        if not valid_black_scores:
+            return
+
+        min_black_score = min(valid_black_scores + [-4])
+        max_black_score = max(valid_black_scores + [4])
+        score_range = max_black_score - min_black_score
+
+        if score_range <= 20:
+            y_line_interval = 4
+        elif score_range <= 40:
+            y_line_interval = 8
+        elif score_range <= 60:
+            y_line_interval = 16
+        else:
+            y_line_interval = 32
+
+        # Draw lines
+        for black_score in range(-64, 65, y_line_interval):
+            if not (min_black_score <= black_score <= max_black_score):
+                continue
+
+            y = y_min + (y_max - y_min) * (max_black_score - black_score) / score_range
+            pygame.draw.line(self.screen, COLOR_SCORE_LINE, (x_min, y), (x_max, y))
+
+            font = pygame.font.Font(None, 25)
+
+            if black_score == 0:
+                text = "0"
+                text_color = COLOR_GRAY_DISC
+            else:
+                text = "+" + str(abs(black_score))
+                if black_score < 0:
+                    text_color = COLOR_WHITE_DISC
+                else:
+                    text_color = COLOR_BLACK_DISC
+
+            text_surface = font.render(text, True, text_color)
+            text_rect = text_surface.get_rect()
+            text_rect.center = (x_min // 2, floor(y))
+            self.screen.blit(text_surface, text_rect.topleft)
+
+        circles: list[tuple[tuple[int, int, int], tuple[int, int], int]] = []
+        prev_dot: Optional[tuple[int, int]] = None
+
+        for offset, graph_data_item in enumerate(graph_data):
+            if graph_data_item is None:
+                continue
+
+            turn, black_score = graph_data_item
+
+            x = x_min + (x_max - x_min) * (offset / (len(graph_data) - 1))
+            y = y_min + (y_max - y_min) * (
+                (max_black_score - black_score) / score_range
+            )
+            dot = (floor(x), floor(y))
+
+            if offset == graph_current_move:
+                circle_size = 5
+            else:
+                circle_size = 3
+
+            if turn == BLACK:
+                dot_color = COLOR_BLACK_DISC
+            else:
+                dot_color = COLOR_WHITE_DISC
+
+            if prev_dot is not None:
+                pygame.draw.line(self.screen, COLOR_BLACK_DISC, prev_dot, dot)
+
+            prev_dot = dot
+
+            circle = dot_color, dot, circle_size
+            circles.append(circle)
+
+        # Draw circles last, so lines don't overlap with them
+        for dot_color, dot, circle_size in circles:
+            pygame.draw.circle(self.screen, dot_color, dot, circle_size)
 
     def get_move_from_event(self, event: Event) -> int:
         if event.type != pygame.MOUSEBUTTONDOWN:

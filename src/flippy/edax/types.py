@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import copy
 
-from flippy.othello.board import EMPTY, PASS_MOVE, Board
+from flippy.othello.board import EMPTY, PASS_MOVE, WHITE, Board
 from flippy.othello.game import Game
 
 
@@ -27,6 +27,7 @@ class EdaxEvaluation:
         score: int,
         best_moves: list[int],
     ) -> None:
+        self.board = board
         self.depth = depth
         self.confidence = confidence
         self.score = score
@@ -44,6 +45,12 @@ class EdaxEvaluation:
 
     def is_better_than(self, other: EdaxEvaluation) -> bool:
         return (self.depth, self.confidence) > (other.depth, other.confidence)
+
+    def get_black_score(self) -> int:
+        if self.board.turn == WHITE:
+            return -self.score
+
+        return self.score
 
 
 class EdaxEvaluations:
