@@ -26,7 +26,7 @@ class PGNMode(BaseMode):
 
         if self.args.pgn_file:
             self.game = Game.from_pgn(self.args.pgn_file)
-            request = EdaxRequest(self.game, 2)
+            request = EdaxRequest(self.game, 16)
             start_evaluation(request, self.recv_queue)
 
     def on_frame(self, event: Event) -> None:
@@ -70,7 +70,7 @@ class PGNMode(BaseMode):
             child = child.pass_move()
 
         self.alternative_moves.append(child)
-        request = EdaxRequest(child, 2)
+        request = EdaxRequest(child, 16)
         start_evaluation(request, self.recv_queue)
 
     def show_next_position(self) -> None:
@@ -151,7 +151,7 @@ class PGNMode(BaseMode):
 
         next_level = level + 2
 
-        if next_level <= 24 and (isinstance(task, Game) or self.get_board() == task):
+        if next_level <= 32 and (isinstance(task, Game) or self.get_board() == task):
             next_request = EdaxRequest(task, next_level)
             start_evaluation(next_request, self.recv_queue)
 
@@ -171,10 +171,30 @@ class PGNMode(BaseMode):
 
             evaluations[move] = -evaluation.score
 
-        ui_details: dict[str, Any] = {"evaluations": evaluations}
+        ui_details: dict[str, Any] = {}
 
         played_move = self.get_played_move()
         if played_move is not None:
             ui_details["played_move"] = played_move
+
+        if not self.alternative_moves and evaluations:
+            max_evaluation = max(evaluations.values())
+
+            shown_evaluations = {
+                move
+                for (move, evaluation) in evaluations.items()
+                if evaluation == max_evaluation
+            }
+
+            if played_move is not None:
+                shown_evaluations.add(played_move)
+
+            evaluations = {
+                move: evaluation
+                for (move, evaluation) in evaluations.items()
+                if move in shown_evaluations
+            }
+
+        ui_details["evaluations"] = evaluations
 
         return ui_details

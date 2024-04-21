@@ -71,7 +71,6 @@ class EdaxProcess:
             if raw_line == b"":
                 break
             line = raw_line.decode()
-            print(line, end="")
             lines.append(line)
 
         evaluations: dict[Board, EdaxEvaluation] = {}

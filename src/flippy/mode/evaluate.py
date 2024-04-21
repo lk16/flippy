@@ -15,7 +15,7 @@ class EvaluateMode(GameMode):
         super().__init__(args)
         self.recv_queue: Queue[EdaxResponse] = Queue()
         self.all_evaluations = EdaxEvaluations({})
-        request = EdaxRequest(self.get_board(), 2)
+        request = EdaxRequest(self.get_board(), 16)
         start_evaluation(request, self.recv_queue)
 
     def on_move(self, move: int) -> None:
@@ -35,7 +35,7 @@ class EvaluateMode(GameMode):
         if self.all_evaluations.has_all_children(board):
             return
 
-        request = EdaxRequest(self.get_board(), 2)
+        request = EdaxRequest(self.get_board(), 16)
         start_evaluation(request, self.recv_queue)
 
     def _process_recv_messages(self) -> None:
@@ -58,7 +58,7 @@ class EvaluateMode(GameMode):
 
         next_level = level + 2
 
-        if self.get_board() == task and next_level <= 24:
+        if self.get_board() == task and next_level <= 32:
             next_request = EdaxRequest(task, next_level)
             start_evaluation(next_request, self.recv_queue)
 
