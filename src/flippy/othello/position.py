@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import struct
 from copy import deepcopy
-from typing import Iterable
 
 from flippy.othello.bitset import BitSet
 
@@ -230,44 +229,6 @@ class Position:
                     print("  ", end="")
             print("|")
         print("+-----------------+")
-
-    @classmethod
-    def index_to_field(cls, index: int) -> str:
-        if index not in range(64):
-            raise ValueError
-        return "abcdefgh"[index % 8] + "12345678"[index // 8]
-
-    @classmethod
-    def indexes_to_fields(cls, indexes: Iterable[int]) -> str:
-        return " ".join(cls.index_to_field(index) for index in indexes)
-
-    @classmethod
-    def field_to_index(cls, field: str) -> int:
-        if len(field) != 2:
-            raise ValueError(f'Invalid move length "{len(field)}"')
-
-        field = field.lower()
-
-        if field in ["--", "ps"]:
-            return PASS_MOVE
-
-        if not ("a" <= field[0] <= "h" and "1" <= field[1] <= "8"):
-            raise ValueError(f'Invalid field "{field}"')
-
-        x = ord(field[0]) - ord("a")
-        y = ord(field[1]) - ord("1")
-        return y * 8 + x
-
-    @classmethod
-    def fields_to_indexes(cls, fields: list[str]) -> list[int]:  # pragma: nocover
-        return [cls.field_to_index(field) for field in fields]
-
-    @classmethod
-    def rotate_move(cls, move: int, rotation: int) -> int:
-        if move == PASS_MOVE:
-            return move
-
-        return BitSet(1 << move).rotated(rotation).lowest_bit_index()
 
     @classmethod
     def unrotate_move(cls, move: int, rotation: int) -> int:

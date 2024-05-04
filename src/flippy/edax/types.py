@@ -140,10 +140,6 @@ class EdaxEvaluations:
         for board, evaluation in other.values.items():
             self.add(board, evaluation)
 
-    def has_all_children(self, board: Board) -> bool:
-        children = {board.do_normalized_move(move) for move in board.get_moves_as_set()}
-        return all(child in self.values for child in children)
-
     def get_missing(self, positions: set[Position]) -> set[Position]:
         missing: set[Position] = set()
         for position in positions:
