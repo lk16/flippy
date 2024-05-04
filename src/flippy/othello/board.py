@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
+from flippy.othello.bitset import BitSet
 from flippy.othello.position import PASS_MOVE, Position
 
 BLACK = -1
@@ -48,29 +49,29 @@ class Board:
         else:
             me, opp = white, black
 
-        return Board(Position(me, opp), turn)
+        return Board(Position(BitSet(me), BitSet(opp)), turn)
 
     def __repr__(self) -> str:
-        return f"Board({hex(self.position.me)}, {hex(self.position.opp)}, {self.turn})"
+        me = self.position.me.as_hex()
+        opp = self.position.opp.as_hex()
+        return f"Board({me}, {opp}, {self.turn})"
 
     def is_valid_move(self, move: int) -> bool:
         return self.position.is_valid_move(move)
 
     def get_square(self, move: int) -> int:
-        assert move in range(64)
-        mask = 1 << move
-        if self.position.me & mask:
+        if self.position.me.is_set(move):
             return self.turn
-        if self.position.opp & mask:
+        if self.position.opp.is_set(move):
             return opponent(self.turn)
         return EMPTY
 
-    def black(self) -> int:
+    def black(self) -> BitSet:
         if self.turn == BLACK:
             return self.position.me
         return self.position.opp
 
-    def white(self) -> int:
+    def white(self) -> BitSet:
         if self.turn == WHITE:
             return self.position.me
         return self.position.opp
@@ -78,7 +79,7 @@ class Board:
     def get_moves_as_set(self) -> set[int]:
         return self.position.get_moves_as_set()
 
-    def get_moves(self) -> int:
+    def get_moves(self) -> BitSet:
         return self.position.get_moves()
 
     def do_move(self, move: int) -> Board:
@@ -116,9 +117,9 @@ class Board:
         assert color in [WHITE, BLACK]
 
         if color == WHITE:
-            return bin(self.white()).count("1")
+            return self.white().count()
         else:
-            return bin(self.black()).count("1")
+            return self.black().count()
 
     def show(self) -> None:
         print("+-a-b-c-d-e-f-g-h-+")
