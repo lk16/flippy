@@ -8,15 +8,22 @@ from typing import Optional
 
 from flippy.config import config
 from flippy.edax.types import EdaxEvaluation, EdaxEvaluations, EdaxRequest, EdaxResponse
-from flippy.othello.board import Board
+from flippy.othello.position import Position
 
 
 def start_evaluation(request: EdaxRequest, recv_queue: Queue[EdaxResponse]) -> None:
     proc = EdaxProcess(request, recv_queue)
+
+    if not request.positions:
+        return
+
     multiprocessing.Process(target=proc.search).start()
 
 
 def start_evaluation_sync(request: EdaxRequest) -> EdaxEvaluations:
+    if not request.positions:
+        return EdaxEvaluations()
+
     return EdaxProcess(request, Queue())._search_sync()
 
 
@@ -26,27 +33,21 @@ class EdaxProcess:
         self.send_queue = send_queue
         self.edax_path = config.edax_path()
 
-        if isinstance(request.task, Board):
-            boards = request.task.get_children()
-        else:
-            boards = request.task.boards
+        searchable: set[Position] = set()
 
-        searchable: list[Board] = []
-
-        for board in boards:
-            if board.is_game_end():
+        for position in request.positions:
+            if position.is_game_end():
                 # Discard if the game is over.
                 continue
-            elif not board.has_moves():
+            elif not position.has_moves():
                 # Pass if there are no moves, but opponent has moves.
                 # Edax crashes when asked to solve a position without moves.
-                passed = board.pass_move()
-                searchable.append(passed.normalized()[0])
+                passed = position.pass_move()
+                searchable.add(passed.normalized())
             else:
-                normalized_board = board.normalized()[0]
-                searchable.append(normalized_board)
+                searchable.add(position.normalized())
 
-        self.searchable_boards = set(searchable)
+        self.searchable_positions = searchable
 
     def _search_sync(self) -> EdaxEvaluations:
         proc = subprocess.Popen(
@@ -60,7 +61,7 @@ class EdaxProcess:
         assert proc.stdin
         assert proc.stdout
 
-        proc_input = "".join(board.to_problem() for board in self.searchable_boards)
+        proc_input = "".join(board.to_problem() for board in self.searchable_positions)
         proc.stdin.write(proc_input.encode())
         proc.stdin.close()
 
@@ -75,47 +76,28 @@ class EdaxProcess:
 
         evaluations = EdaxEvaluations()
         total_read_lines = 0
-        for board in self.searchable_boards:
+        for position in self.searchable_positions:
             remaining_lines = lines[total_read_lines:]
-            evaluation, read_lines = self.__parse_output_lines(remaining_lines, board)
+            evaluation, read_lines = self.__parse_output_lines(
+                remaining_lines, position
+            )
             total_read_lines += read_lines
-            evaluations.add(board, evaluation)
-
-            best_child, child_evaluation = self._get_child_evaluation(board, evaluation)
-            evaluations.add(best_child, child_evaluation)
+            evaluations.add(position, evaluation)
 
         return evaluations
 
     def search(self) -> None:
-        evaluations = self._search_sync()
-        message = EdaxResponse(self.request, evaluations)
-        self.send_queue.put_nowait(message)
-
-    def _get_child_evaluation(
-        self, board: Board, evaluation: EdaxEvaluation
-    ) -> tuple[Board, EdaxEvaluation]:
-        best_child, child_rotation = board.do_move(
-            evaluation.best_moves[0]
-        ).normalized()
-
-        best_child_moves = [
-            Board.rotate_move(move, child_rotation)
-            for move in evaluation.best_moves[1:]
-        ]
-
-        child_evaluation = EdaxEvaluation(
-            best_child,
-            evaluation.depth - 1,
-            evaluation.confidence,
-            -evaluation.score,
-            best_child_moves,
-        )
-
-        return best_child, child_evaluation
+        # Catching user interrupt prevents the subproces stacktrace cluttering the output.
+        try:
+            evaluations = self._search_sync()
+            message = EdaxResponse(self.request, evaluations)
+            self.send_queue.put_nowait(message)
+        except KeyboardInterrupt:
+            pass
 
     # TODO #26 write tests for Edax output parser
     def __parse_output_lines(
-        self, lines: list[str], board: Board
+        self, lines: list[str], position: Position
     ) -> tuple[EdaxEvaluation, int]:
         evaluation: Optional[EdaxEvaluation] = None
 
@@ -123,7 +105,7 @@ class EdaxProcess:
             if line.startswith("*** problem") and read_lines > 2:
                 break
 
-            line_evaluation = self.__parse_output_line(line, board)
+            line_evaluation = self.__parse_output_line(line, position)
             if line_evaluation is not None:
                 evaluation = line_evaluation
 
@@ -131,7 +113,9 @@ class EdaxProcess:
         return evaluation, read_lines
 
     # TODO #26 write tests for Edax output parser
-    def __parse_output_line(self, line: str, board: Board) -> Optional[EdaxEvaluation]:
+    def __parse_output_line(
+        self, line: str, position: Position
+    ) -> Optional[EdaxEvaluation]:
         if (
             line == "\n"
             or "positions;" in line
@@ -148,7 +132,7 @@ class EdaxProcess:
             return None
 
         best_fields = line[53:].strip().split(" ")
-        best_moves = Board.fields_to_indexes(best_fields)
+        best_moves = Position.fields_to_indexes(best_fields)
         depth = int(columns[0].split("@")[0])
 
         if "@" not in columns[0]:
@@ -156,4 +140,11 @@ class EdaxProcess:
         else:
             confidence = int(columns[0].split("@")[1].split("%")[0])
 
-        return EdaxEvaluation(board, depth, confidence, score, best_moves)
+        return EdaxEvaluation(
+            position=position,
+            depth=depth,
+            level=self.request.level,
+            confidence=confidence,
+            score=score,
+            best_moves=best_moves,
+        )

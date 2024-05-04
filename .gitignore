@@ -170,3 +170,6 @@ opening_logs.txt
 
 # flippy config file
 config.json
+
+# postgres data
+db_data

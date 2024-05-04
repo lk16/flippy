@@ -31,6 +31,18 @@ def flip_diagonally(x: int) -> int:
     return x & 0xFFFFFFFFFFFFFFFF
 
 
+REVERSE_ROTATION = {
+    0: 0,
+    1: 1,
+    2: 2,
+    3: 3,
+    4: 4,
+    5: 6,
+    6: 5,
+    7: 7,
+}
+
+
 def bits_rotate(x: int, rotation: int) -> int:
     if rotation & 1:
         x = flip_horizontally(x)
@@ -39,6 +51,10 @@ def bits_rotate(x: int, rotation: int) -> int:
     if rotation & 4:
         x = flip_diagonally(x)
     return x
+
+
+def bits_unrotate(x: int, rotation: int) -> int:
+    return bits_rotate(x, REVERSE_ROTATION[rotation])
 
 
 def show_bits(b: int) -> None:

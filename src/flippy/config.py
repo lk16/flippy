@@ -37,5 +37,13 @@ class Config:
     def edax_path(self) -> Path:
         return self.resolve_path(self.__raw["edax_path"])
 
+    def get_db_dsn(self) -> str:
+        user = self.__raw["db"]["user"]
+        password = self.__raw["db"]["password"]
+        host = self.__raw["db"]["host"]
+        port = self.__raw["db"]["port"]
+        db = self.__raw["db"]["db"]
+        return f"postgres://{user}:{password}@{host}:{port}/{db}"
+
 
 config = Config()

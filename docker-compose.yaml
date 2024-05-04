@@ -1,0 +1,14 @@
+version: '3'
+
+services:
+  postgres:
+    image: postgres:latest
+    restart: always
+    ports:
+      - "12321:5432"
+    environment:
+      POSTGRES_USER: book_user
+      POSTGRES_PASSWORD: book_pass
+      POSTGRES_DB: flippy
+    volumes:
+      - ./db_data:/var/lib/postgresql/data

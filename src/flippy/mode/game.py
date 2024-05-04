@@ -3,7 +3,8 @@ from pygame.event import Event
 
 from flippy.arguments import Arguments
 from flippy.mode.base import BaseMode
-from flippy.othello.board import Board, InvalidMove
+from flippy.othello.board import Board
+from flippy.othello.position import InvalidMove
 
 
 class GameMode(BaseMode):

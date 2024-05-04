@@ -8,7 +8,7 @@ from flippy.othello.board import Board
 from flippy.othello.game import Game
 
 
-class PositionFrequency(GameMode):
+class FrequencyMode(GameMode):
     def __init__(self, args: Arguments) -> None:
         super().__init__(args)
         self.args = args.position_frequency
@@ -46,7 +46,7 @@ class PositionFrequency(GameMode):
 
         for game in games:
             for board in game.boards:
-                normalized, _ = board.normalized()
+                normalized, _ = board.normalize()
                 frequencies[normalized] += 1
 
         return frequencies
