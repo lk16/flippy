@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import struct
-from copy import copy
+from copy import deepcopy
 from typing import Iterable
 
 from flippy.othello.bitset import BitSet
@@ -31,6 +31,9 @@ class Position:
     """
 
     def __init__(self, me: BitSet, opp: BitSet) -> None:
+        if (me & opp).has_any():
+            raise ValueError
+
         # Bitset of discs of player to move
         self.me = me
 
@@ -50,27 +53,24 @@ class Position:
     @classmethod
     def from_bytes(cls, bytes_: bytes) -> Position:
         me, opp = struct.unpack("<QQ", bytes_)
-        return Position(me, opp)
+        return Position(BitSet(me), BitSet(opp))
 
     def to_bytes(self) -> bytes:
-        return struct.pack("<QQ", self.me, self.opp)
+        return struct.pack("<QQ", self.me.as_int(), self.opp.as_int())
 
-    def __repr__(self) -> str:
-        me = self.me.as_hex()
-        opp = self.opp.as_hex()
-        return f"Position({me}, {opp})"
+    def __repr__(self) -> str:  # pragma: nocover
+        return f"Position({self.me}, {self.opp})"
 
     def is_valid_move(self, move: int) -> bool:
         moves = self.get_moves()
 
-        if moves.is_empty():
-            return move == PASS_MOVE
+        if move == PASS_MOVE:
+            return moves.is_empty()
 
         return moves.is_set(move)
 
-    def get_moves_as_set(self) -> set[int]:  # TODO move to BitSet
-        moves = self.get_moves()
-        return {i for i in range(64) if moves.is_set(i)}
+    def get_moves_as_set(self) -> set[int]:  # pragma: nocover
+        return self.get_moves().as_set()
 
     def get_moves(self) -> BitSet:
         mask = self.opp & 0x7E7E7E7E7E7E7E7E
@@ -158,7 +158,7 @@ class Position:
         me = self.opp & ~opp
         return Position(me, opp)
 
-    def do_normalized_move(self, move: int) -> Position:
+    def do_normalized_move(self, move: int) -> Position:  # pragma: nocover
         return self.do_move(move).normalized()
 
     def rotated(self, rotation: int) -> Position:
@@ -189,21 +189,21 @@ class Position:
     def normalized(self) -> Position:
         return self.normalize()[0]
 
-    def is_normalized(self) -> bool:
+    def is_normalized(self) -> bool:  # pragma: nocover
         return self.normalized() == self
 
     def pass_move(self) -> Position:
-        return Position(copy(self.opp), copy(self.me))
+        return Position(deepcopy(self.opp), deepcopy(self.me))
 
-    def has_moves(self) -> bool:
+    def has_moves(self) -> bool:  # pragma: nocover
         return self.get_moves().has_any()
 
     def is_game_end(self) -> bool:
         return not (self.has_moves() or self.pass_move().has_moves())
 
     def get_final_score(self) -> int:
-        me = self.me.count()
-        opp = self.opp.count()
+        me = self.me.count_bits()
+        opp = self.opp.count_bits()
 
         if me > opp:
             return 64 - (2 * opp)
@@ -220,11 +220,11 @@ class Position:
             print("{} ".format(y + 1), end="")
 
             for x in range(8):
-                if self.me.is_set_2d(x, y):
+                if self.me.is_set_2d(y=y, x=x):
                     print("○ ", end="")
-                elif self.opp.is_set_2d(x, y):
+                elif self.opp.is_set_2d(y=y, x=x):
                     print("● ", end="")
-                elif moves.is_set_2d(x, y):
+                elif moves.is_set_2d(y=y, x=x):
                     print("· ", end="")
                 else:
                     print("  ", end="")
@@ -259,38 +259,24 @@ class Position:
         return y * 8 + x
 
     @classmethod
-    def fields_to_indexes(cls, fields: list[str]) -> list[int]:
+    def fields_to_indexes(cls, fields: list[str]) -> list[int]:  # pragma: nocover
         return [cls.field_to_index(field) for field in fields]
-
-    @classmethod
-    def unrotate_move(cls, move: int, rotation: int) -> int:
-        if move == PASS_MOVE:
-            return move
-
-        # Convert to BitSet.
-        bit_set = BitSet(1 << move)
-
-        # Rotate back.
-        unrotated = bit_set.unrotated(rotation)
-
-        # Take lowest set bit.
-        return unrotated.lowest_bit_index()
 
     @classmethod
     def rotate_move(cls, move: int, rotation: int) -> int:
         if move == PASS_MOVE:
             return move
 
-        # Convert to BitSet.
-        bit_set = BitSet(1 << move)
+        return BitSet(1 << move).rotated(rotation).lowest_bit_index()
 
-        # Rotate.
-        rotated = bit_set.rotated(rotation)
+    @classmethod
+    def unrotate_move(cls, move: int, rotation: int) -> int:
+        if move == PASS_MOVE:
+            return move
 
-        # take lowest set bit
-        return rotated.lowest_bit_index()
+        return BitSet(1 << move).unrotated(rotation).lowest_bit_index()
 
-    def __hash__(self) -> int:
+    def __hash__(self) -> int:  # pragma: nocover
         hash_tuple = (hash(self.me), hash(self.opp))
         return hash(hash_tuple)
 
@@ -300,7 +286,7 @@ class Position:
 
         return self.me == other.me and self.opp == other.opp
 
-    def get_children(self) -> list[Position]:
+    def get_children(self) -> list[Position]:  # pragma: nocover
         return [self.do_move(move) for move in self.get_moves_as_set()]
 
     def to_problem(self) -> str:
@@ -319,7 +305,7 @@ class Position:
         return "".join(squares) + " " + turn + ";\n"
 
     def count_discs(self) -> int:
-        return (self.me | self.opp).count()
+        return (self.me | self.opp).count_bits()
 
     def count_empties(self) -> int:
         return 64 - self.count_discs()

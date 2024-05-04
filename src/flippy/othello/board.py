@@ -117,9 +117,9 @@ class Board:
         assert color in [WHITE, BLACK]
 
         if color == WHITE:
-            return self.white().count()
+            return self.white().count_bits()
         else:
-            return self.black().count()
+            return self.black().count_bits()
 
     def show(self) -> None:
         print("+-a-b-c-d-e-f-g-h-+")
