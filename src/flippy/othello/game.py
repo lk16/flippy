@@ -34,7 +34,7 @@ class Game:
         for move in moves:
             if not board.is_valid_move(move):
                 # Passed moves may not be present in moves list
-                board = board.do_move(PASS_MOVE)
+                board = board.pass_move()
                 boards.append(board)
 
             board = board.do_move(move)

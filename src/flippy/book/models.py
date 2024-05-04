@@ -4,6 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from flippy.edax.types import EdaxEvaluation
+from flippy.othello.bitset import BitSet
 from flippy.othello.position import Position
 
 
@@ -12,11 +13,11 @@ class SerializedPosition(BaseModel):
     opp: int
 
     def to_position(self) -> Position:
-        return Position(self.me, self.opp)
+        return Position(BitSet(self.me), BitSet(self.opp))
 
     @classmethod
     def from_position(cls, position: Position) -> SerializedPosition:
-        return cls(me=position.me, opp=position.opp)
+        return cls(me=position.me.as_int(), opp=position.opp.as_int())
 
 
 class SerializedEvaluation(BaseModel):
