@@ -4,7 +4,7 @@ import struct
 from copy import copy
 from typing import Iterable
 
-from flippy.othello.bitset import bits_rotate, bits_unrotate
+from flippy.othello.bitset import BitSet
 
 PASS_MOVE = -1
 
@@ -30,10 +30,7 @@ class Position:
     This is useful for storing and loading openings from DB.
     """
 
-    def __init__(self, me: int, opp: int) -> None:
-        assert me == me & 0xFFFFFFFFFFFFFFFF
-        assert opp == opp & 0xFFFFFFFFFFFFFFFF
-
+    def __init__(self, me: BitSet, opp: BitSet) -> None:
         # Bitset of discs of player to move
         self.me = me
 
@@ -42,13 +39,13 @@ class Position:
 
     @classmethod
     def start(cls) -> Position:
-        me = 1 << 28 | 1 << 35
-        opp = 1 << 27 | 1 << 36
+        me = BitSet(1 << 28 | 1 << 35)
+        opp = BitSet(1 << 27 | 1 << 36)
         return Position(me, opp)
 
     @classmethod
     def empty(cls) -> Position:
-        return Position(0x0, 0x0)
+        return Position(BitSet(0x0), BitSet(0x0))
 
     @classmethod
     def from_bytes(cls, bytes_: bytes) -> Position:
@@ -59,24 +56,23 @@ class Position:
         return struct.pack("<QQ", self.me, self.opp)
 
     def __repr__(self) -> str:
-        return f"Position({hex(self.me)}, {hex(self.opp)})"
+        me = self.me.as_hex()
+        opp = self.opp.as_hex()
+        return f"Position({me}, {opp})"
 
     def is_valid_move(self, move: int) -> bool:
         moves = self.get_moves()
 
-        if moves == 0:
+        if moves.is_empty():
             return move == PASS_MOVE
 
-        assert move in range(64)
+        return moves.is_set(move)
 
-        move_bit = 1 << move
-        return move_bit & moves != 0
-
-    def get_moves_as_set(self) -> set[int]:
+    def get_moves_as_set(self) -> set[int]:  # TODO move to BitSet
         moves = self.get_moves()
-        return {i for i in range(64) if (1 << i) & moves}
+        return {i for i in range(64) if moves.is_set(i)}
 
-    def get_moves(self) -> int:
+    def get_moves(self) -> BitSet:
         mask = self.opp & 0x7E7E7E7E7E7E7E7E
 
         flipL = mask & (self.me << 1)
@@ -133,11 +129,7 @@ class Position:
         if move == PASS_MOVE:
             return self.pass_move()
 
-        assert move in range(64)
-
-        move_bit = 1 << move
-
-        if (self.me | self.opp) & move_bit:
+        if (self.me | self.opp).is_set(move):
             raise InvalidMove
 
         flipped = 0
@@ -150,10 +142,10 @@ class Position:
                     break
 
                 cur = 8 * cury + curx
-                if self.opp & (1 << cur):
+                if self.opp.is_set(cur):
                     s += 1
                 else:
-                    if (self.me & (1 << cur)) and (s >= 2):
+                    if (self.me.is_set(cur)) and (s >= 2):
                         for p in range(1, s):
                             f = move + (p * (8 * dy + dx))
                             flipped |= 1 << f
@@ -170,13 +162,13 @@ class Position:
         return self.do_move(move).normalized()
 
     def rotated(self, rotation: int) -> Position:
-        me = bits_rotate(self.me, rotation)
-        opp = bits_rotate(self.opp, rotation)
+        me = self.me.rotated(rotation)
+        opp = self.opp.rotated(rotation)
         return Position(me, opp)
 
     def unrotated(self, rotation: int) -> Position:
-        me = bits_unrotate(self.me, rotation)
-        opp = bits_unrotate(self.opp, rotation)
+        me = self.me.unrotated(rotation)
+        opp = self.opp.unrotated(rotation)
         return Position(me, opp)
 
     def normalize(self) -> tuple[Position, int]:
@@ -184,8 +176,8 @@ class Position:
         rotation = 0
 
         for r in range(1, 8):
-            me = bits_rotate(self.me, r)
-            opp = bits_rotate(self.opp, r)
+            me = self.me.rotated(r)
+            opp = self.opp.rotated(r)
 
             if (me, opp) < (normalized.me, normalized.opp):
                 normalized.me = me
@@ -204,19 +196,19 @@ class Position:
         return Position(copy(self.opp), copy(self.me))
 
     def has_moves(self) -> bool:
-        return self.get_moves() != 0
+        return self.get_moves().has_any()
 
     def is_game_end(self) -> bool:
         return not (self.has_moves() or self.pass_move().has_moves())
 
     def get_final_score(self) -> int:
-        me_count = bin(self.me).count("1")
-        opp_count = bin(self.opp).count("1")
+        me = self.me.count()
+        opp = self.opp.count()
 
-        if me_count > opp_count:
-            return 64 - (2 * opp_count)
-        elif opp_count > me_count:
-            return -64 + (2 * me_count)
+        if me > opp:
+            return 64 - (2 * opp)
+        elif opp > me:
+            return -64 + (2 * me)
         else:
             return 0
 
@@ -228,14 +220,11 @@ class Position:
             print("{} ".format(y + 1), end="")
 
             for x in range(8):
-                index = (y * 8) + x
-                mask = 1 << index
-
-                if self.me & mask:
+                if self.me.is_set_2d(x, y):
                     print("○ ", end="")
-                elif self.opp & mask:
+                elif self.opp.is_set_2d(x, y):
                     print("● ", end="")
-                elif moves & mask:
+                elif moves.is_set_2d(x, y):
                     print("· ", end="")
                 else:
                     print("  ", end="")
@@ -278,44 +267,38 @@ class Position:
         if move == PASS_MOVE:
             return move
 
-        assert move in range(64)
-
-        # Convert to bitset.
-        bitset = 1 << move
+        # Convert to BitSet.
+        bit_set = BitSet(1 << move)
 
         # Rotate back.
-        rotated_back = bits_unrotate(bitset, rotation)
+        unrotated = bit_set.unrotated(rotation)
 
         # Take lowest set bit.
-        return (rotated_back & -rotated_back).bit_length() - 1
+        return unrotated.lowest_bit_index()
 
     @classmethod
     def rotate_move(cls, move: int, rotation: int) -> int:
         if move == PASS_MOVE:
             return move
 
-        assert move in range(64)
+        # Convert to BitSet.
+        bit_set = BitSet(1 << move)
 
-        # convert to bitset
-        bitset = 1 << move
-
-        # rotate back
-        rotated_back = bits_rotate(bitset, rotation)
+        # Rotate.
+        rotated = bit_set.rotated(rotation)
 
         # take lowest set bit
-        return (rotated_back & -rotated_back).bit_length() - 1
-
-    def as_tuple(self) -> tuple[int, int]:
-        return (self.me, self.opp)
+        return rotated.lowest_bit_index()
 
     def __hash__(self) -> int:
-        return hash(self.as_tuple())
+        hash_tuple = (hash(self.me), hash(self.opp))
+        return hash(hash_tuple)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Position):
             raise TypeError(f"Cannot compare Position with {type(other)}")
 
-        return self.as_tuple() == other.as_tuple()
+        return self.me == other.me and self.opp == other.opp
 
     def get_children(self) -> list[Position]:
         return [self.do_move(move) for move in self.get_moves_as_set()]
@@ -323,10 +306,9 @@ class Position:
     def to_problem(self) -> str:
         squares = ""
         for index in range(64):
-            mask = 1 << index
-            if mask & self.me:
+            if self.me.is_set(index):
                 squares += "X"
-            elif mask & self.opp:
+            elif self.opp.is_set(index):
                 squares += "O"
             else:
                 squares += "-"
@@ -337,7 +319,7 @@ class Position:
         return "".join(squares) + " " + turn + ";\n"
 
     def count_discs(self) -> int:
-        return bin(self.me | self.opp).count("1")
+        return (self.me | self.opp).count()
 
     def count_empties(self) -> int:
         return 64 - self.count_discs()
