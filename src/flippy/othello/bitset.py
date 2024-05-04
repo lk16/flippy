@@ -7,12 +7,14 @@ BITSET_MASK = 0xFFFFFFFFFFFFFFFF
 
 class BitSet:
     def __init__(self, value: int) -> None:
-        assert value & BITSET_MASK == value
+        if value & BITSET_MASK != value:
+            raise ValueError
 
         self.__value = value
 
     def rotated(self, rotation: int) -> BitSet:
-        assert rotation & 0x7 == rotation
+        if rotation & 0x7 != rotation:
+            raise ValueError
 
         bit_set = deepcopy(self)
 
@@ -32,12 +34,16 @@ class BitSet:
         return self.rotated(reverse_rotation[rotation])
 
     def is_set(self, index: int) -> bool:
-        assert index in range(64)
-        return self.__value & (1 << index) != 0
+        if index not in range(64):
+            raise ValueError
 
-    def is_set_2d(self, x: int, y: int) -> bool:
-        assert x in range(8)
-        assert y in range(8)
+        mask = 1 << index
+        return self.__value & mask != 0
+
+    def is_set_2d(self, *, x: int, y: int) -> bool:
+        if x not in range(8) or y not in range(8):
+            raise ValueError
+
         return self.is_set(8 * y + x)
 
     def is_empty(self) -> bool:
@@ -46,10 +52,13 @@ class BitSet:
     def has_any(self) -> bool:
         return self.__value != 0
 
-    def count(self) -> int:
+    def count_bits(self) -> int:
         return bin(self.__value).count("1")
 
     def lowest_bit_index(self) -> int:
+        if self.is_empty():
+            raise ValueError
+
         return (self.__value & -self.__value).bit_length() - 1
 
     def show(self) -> None:
@@ -57,21 +66,36 @@ class BitSet:
         for y in range(8):
             print("{} ".format(y + 1), end="")
             for x in range(8):
-                if self.is_set_2d(x, y):
+                if self.is_set_2d(y=y, x=x):
                     print("● ", end="")
                 else:
                     print("  ", end="")
             print("|")
         print("+-----------------+")
 
-    def as_hex(self) -> str:
+    def as_hex(self) -> str:  # pragma: nocover
         return hex(self.__value)
 
-    def __repr__(self) -> str:
+    def as_int(self) -> int:  # pragma: nocover
+        return int(self.__value)
+
+    def as_set(self) -> set[int]:
+        return {index for index in range(64) if self.is_set(index)}
+
+    def __repr__(self) -> str:  # pragma: nocover
         return f"BitSet({self.as_hex()})"
 
-    def __hash__(self) -> int:
+    def __hash__(self) -> int:  # pragma: nocover
         return hash(self.__value)
+
+    def __eq__(self, rhs: object) -> bool:
+        if not isinstance(rhs, BitSet):
+            raise TypeError
+
+        return self.__value == rhs.__value
+
+    def __lt__(self, rhs: BitSet) -> bool:
+        return self.__value < rhs.__value
 
     def __invert__(self) -> BitSet:
         return BitSet(~self.__value & BITSET_MASK)
@@ -92,12 +116,16 @@ class BitSet:
         raise NotImplementedError("Use the more explicit `BitSet.has_any()` instead.")
 
     def __lshift__(self, shift: int) -> BitSet:
-        assert shift in range(64)
+        if shift not in range(64):
+            raise ValueError
+
         value = (self.__value << shift) & BITSET_MASK
         return BitSet(value)
 
     def __rshift__(self, shift: int) -> BitSet:
-        assert shift in range(64)
+        if shift not in range(64):
+            raise ValueError
+
         value = (self.__value >> shift) & BITSET_MASK
         return BitSet(value)
 
