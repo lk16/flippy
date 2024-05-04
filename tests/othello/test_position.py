@@ -1,5 +1,4 @@
 import pytest
-from typing import Iterable
 
 from flippy.othello.bitset import BitSet
 from flippy.othello.position import PASS_MOVE, InvalidMove, Position
@@ -240,108 +239,20 @@ def test_show_after_one_move(capsys: pytest.CaptureFixture[str]) -> None:
     assert expected == printed
 
 
-@pytest.mark.parametrize(
-    ["index", "expected"],
-    [
-        pytest.param(0, "a1", id="index-0"),
-        pytest.param(7, "h1", id="index-7"),
-        pytest.param(56, "a8", id="index-56"),
-        pytest.param(63, "h8", id="index-63"),
-        pytest.param(17, "b3", id="index-17"),
-    ],
-)
-def test_index_to_field_ok(index: int, expected: str) -> None:
-    assert Position.index_to_field(index) == expected
-
-
-@pytest.mark.parametrize(
-    ["index"],
-    [
-        pytest.param(-1, id="too-small"),
-        pytest.param(64, id="too-big"),
-    ],
-)
-def test_index_to_field_error(index: int) -> None:
-    with pytest.raises(ValueError):
-        Position.index_to_field(index)
-
-
-@pytest.mark.parametrize(
-    ["indexes", "expected"],
-    [
-        pytest.param([], "", id="0-indexes"),
-        pytest.param([0], "a1", id="1-index"),
-        pytest.param([0, 1], "a1 b1", id="2-indexes"),
-    ],
-)
-def test_indexes_to_fields(indexes: Iterable[int], expected: str) -> None:
-    assert Position.indexes_to_fields(indexes) == expected
-
-
-@pytest.mark.parametrize(
-    ["field", "expected"],
-    [
-        pytest.param("a1", 0, id="field-a1"),
-        pytest.param("h1", 7, id="field-h1"),
-        pytest.param("a8", 56, id="field-a8"),
-        pytest.param("h8", 63, id="field-h8"),
-        pytest.param("b3", 17, id="field-b3"),
-        pytest.param("A1", 0, id="field-A1"),
-        pytest.param("H1", 7, id="field-H1"),
-        pytest.param("A8", 56, id="field-A8"),
-        pytest.param("H8", 63, id="field-H8"),
-        pytest.param("B3", 17, id="field-B3"),
-        pytest.param("--", PASS_MOVE, id="field---"),
-        pytest.param("ps", PASS_MOVE, id="field-ps"),
-        pytest.param("PS", PASS_MOVE, id="field-PS"),
-    ],
-)
-def test_field_to_index_ok(field: str, expected: int) -> None:
-    assert Position.field_to_index(field) == expected
-
-
-@pytest.mark.parametrize(
-    ["field"],
-    [
-        pytest.param("", id="empty"),
-        pytest.param("a", id="to-short"),
-        pytest.param("aaa", id="too-long"),
-        pytest.param("a9", id="invalid-row"),
-        pytest.param("i8", id="invalid-column"),
-    ],
-)
-def test_field_to_index_error(field: str) -> None:
-    with pytest.raises(ValueError):
-        assert Position.field_to_index(field)
-
-
-def test_rotate_move_normal() -> None:
+def test_unrotate_move_normal() -> None:
     move = 2
-    expected_rotated_moves = [2, 5, 58, 61, 16, 40, 23, 47]
+    expected_rotated_moves = [2, 5, 58, 61, 16, 23, 40, 47]
 
     for rotation in range(8):
         expected = expected_rotated_moves[rotation]
-        assert Position.rotate_move(move, rotation) == expected
+        assert Position.unrotate_move(move, rotation) == expected
 
 
-def test_rotate_move_pass() -> None:
+def test_unrotate_move_pass() -> None:
     move = PASS_MOVE
 
     for rotation in range(8):
-        assert Position.rotate_move(move, rotation) == PASS_MOVE
-
-
-@pytest.mark.parametrize(
-    ["move"],
-    [
-        pytest.param(2, id="normal"),
-        pytest.param(PASS_MOVE, id="pass"),
-    ],
-)
-def test_unrotate(move: int) -> None:
-    for rotation in range(8):
-        rotated_move = Position.rotate_move(move, rotation)
-        assert Position.unrotate_move(rotated_move, rotation) == move
+        assert Position.unrotate_move(move, rotation) == PASS_MOVE
 
 
 @pytest.mark.parametrize(

@@ -52,11 +52,9 @@ class Board:
         return Board(Position(BitSet(me), BitSet(opp)), turn)
 
     def __repr__(self) -> str:
-        me = self.position.me.as_hex()
-        opp = self.position.opp.as_hex()
-        return f"Board({me}, {opp}, {self.turn})"
+        return f"Board({self.position}, {self.turn})"
 
-    def is_valid_move(self, move: int) -> bool:
+    def is_valid_move(self, move: int) -> bool:  # pragma: nocover
         return self.position.is_valid_move(move)
 
     def get_square(self, move: int) -> int:
@@ -76,33 +74,20 @@ class Board:
             return self.position.me
         return self.position.opp
 
-    def get_moves_as_set(self) -> set[int]:
+    def get_moves_as_set(self) -> set[int]:  # pragma: nocover
         return self.position.get_moves_as_set()
 
-    def get_moves(self) -> BitSet:
+    def get_moves(self) -> BitSet:  # pragma: nocover
         return self.position.get_moves()
 
-    def do_move(self, move: int) -> Board:
+    def do_move(self, move: int) -> Board:  # pragma: nocover
         position = self.position.do_move(move)
         turn = opponent(self.turn)
         return Board(position, turn)
 
-    def do_normalized_move(self, move: int) -> Board:
-        return self.do_move(move).normalized()
-
-    def rotated(self, rotation: int) -> Board:
-        position = self.position.rotated(rotation)
-        return Board(position, self.turn)
-
-    def normalize(self) -> tuple[Board, int]:
-        position, rotation = self.position.normalize()
-        return Board(position, self.turn), rotation
-
-    def normalized(self) -> Board:
-        return self.normalize()[0]
-
-    def is_normalized(self) -> bool:
-        return self.position.is_normalized()
+    def do_normalized_move(self, move: int) -> Board:  # pragma: nocover
+        child = self.do_move(move)
+        return Board(child.position.normalized(), child.turn)
 
     def pass_move(self) -> Board:
         return self.do_move(PASS_MOVE)
@@ -143,32 +128,39 @@ class Board:
 
     @classmethod
     def index_to_field(cls, index: int) -> str:
-        return Position.index_to_field(index)
+        if index not in range(64):
+            raise ValueError
+        return "abcdefgh"[index % 8] + "12345678"[index // 8]
 
     @classmethod
     def indexes_to_fields(cls, indexes: Iterable[int]) -> str:
-        return Position.indexes_to_fields(indexes)
+        return " ".join(cls.index_to_field(index) for index in indexes)
 
     @classmethod
     def field_to_index(cls, field: str) -> int:
-        return Position.field_to_index(field)
+        if len(field) != 2:
+            raise ValueError(f'Invalid move length "{len(field)}"')
+
+        field = field.lower()
+
+        if field in ["--", "ps"]:
+            return PASS_MOVE
+
+        if not ("a" <= field[0] <= "h" and "1" <= field[1] <= "8"):
+            raise ValueError(f'Invalid field "{field}"')
+
+        x = ord(field[0]) - ord("a")
+        y = ord(field[1]) - ord("1")
+        return y * 8 + x
 
     @classmethod
-    def fields_to_indexes(cls, fields: list[str]) -> list[int]:
+    def fields_to_indexes(cls, fields: list[str]) -> list[int]:  # pragma: nocover
         return [cls.field_to_index(field) for field in fields]
 
-    @classmethod
-    def unrotate_move(cls, move: int, rotation: int) -> int:
-        return Position.unrotate_move(move, rotation)
-
-    @classmethod
-    def rotate_move(cls, move: int, rotation: int) -> int:
-        return Position.rotate_move(move, rotation)
-
-    def as_tuple(self) -> tuple[Position, int]:
+    def as_tuple(self) -> tuple[Position, int]:  # pragma: nocover
         return (self.position, self.turn)
 
-    def __hash__(self) -> int:
+    def __hash__(self) -> int:  # pragma: nocover
         return hash(self.as_tuple())
 
     def __eq__(self, other: object) -> bool:

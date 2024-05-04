@@ -34,8 +34,6 @@ class EvaluateMode(GameMode):
 
     def on_board_change(self) -> None:
         board = self.get_board()
-        if self.evaluations.has_all_children(board):
-            return
 
         board = self.get_board()
         child_positions = {child.position for child in board.get_children()}

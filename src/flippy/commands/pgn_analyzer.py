@@ -71,9 +71,9 @@ class PgnAnanlyzer:
 
         best_moves, best_score = self._get_best(board)
         best_score_str = self._get_colored_score(best_score, board)
-        best_fields = ",".join(Position.index_to_field(move) for move in best_moves)
+        best_fields = ",".join(Board.index_to_field(move) for move in best_moves)
 
-        played_field = Position.index_to_field(played_move)
+        played_field = Board.index_to_field(played_move)
         played_child = board.do_move(played_move)
 
         score = self.evaluations.lookup(played_child.position).score

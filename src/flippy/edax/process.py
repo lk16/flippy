@@ -8,6 +8,7 @@ from typing import Optional
 
 from flippy.config import EDAX_PATH
 from flippy.edax.types import EdaxEvaluation, EdaxEvaluations, EdaxRequest, EdaxResponse
+from flippy.othello.board import Board
 from flippy.othello.position import Position
 
 
@@ -132,7 +133,7 @@ class EdaxProcess:
             return None
 
         best_fields = line[53:].strip().split(" ")
-        best_moves = Position.fields_to_indexes(best_fields)
+        best_moves = Board.fields_to_indexes(best_fields)
         depth = int(columns[0].split("@")[0])
 
         if "@" not in columns[0]:
