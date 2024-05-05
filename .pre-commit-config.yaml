@@ -17,7 +17,7 @@ repos:
       - id: mypy
         name: run mypy
         language: system
-        entry: mypy --strict
+        entry: mypy --strict --enable-error-code possibly-undefined --warn-unreachable
         types: [python]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
