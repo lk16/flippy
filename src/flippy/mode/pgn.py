@@ -61,9 +61,9 @@ class PGNMode(BaseMode):
         try:
             next_board = self.game.boards[self.moves_done + 1]
         except IndexError:
-            pass
+            next_board = None
 
-        if next_board == child:
+        if next_board is not None and next_board == child:
             # User clicked on square that was actually played in game.
             # We do not handle it as alternative move.
             self.moves_done += 1

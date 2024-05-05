@@ -72,13 +72,14 @@ class PgnOrganizer:
         raise NotImplementedError  # Unreachable
 
     def download_from_playok(self) -> int:
+        raw_pgns: list[str] = []
+        raw_pgn_lines: list[str] = []
+
         for username in self.playok_usernames:
             response = requests.get(f"https://www.playok.com/p/?uid={username}&g=rv")
             response.raise_for_status()
 
             lines = response.text.split("\n")
-            raw_pgns: list[str] = []
-            raw_pgn_lines: list[str] = []
 
             for line_offset, line in enumerate(lines):
                 if line_offset == 0:
