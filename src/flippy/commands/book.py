@@ -22,18 +22,18 @@ def get_normalized_pgn_positions() -> set[Position]:
     positions: set[Position] = set()
     pgn_files = list((config.pgn_target_folder() / "normal").rglob("*.pgn"))
     for offset, file in enumerate(pgn_files):
-        percentage = 100.0 * offset / len(pgn_files)
-        print(
-            f"Loading PGN files: {offset+1}/{len(pgn_files)} ({percentage:6.2f}%)\r",
-            end="",
-        )
-
         game = Game.from_pgn(file)
         for board in game.boards:
             position = board.position
             positions.add(position.normalized())
 
-    print("Loading PGN files: done." + " " * 20)
+        percentage = 100.0 * (offset + 1) / len(pgn_files)
+        print(
+            f"Loading PGN files: {offset+1}/{len(pgn_files)} ({percentage:6.2f}%)\r",
+            end="",
+        )
+
+    print()
     return positions
 
 
@@ -63,7 +63,6 @@ def learn_boards(
 
 
 def learn_pgn_boards(db: DB, chunk_size: int) -> None:
-    print("Loading PGN positions...")
     pgn_positions = get_normalized_pgn_positions()
 
     # Remove positions that we won't save in DB.
