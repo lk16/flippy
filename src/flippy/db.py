@@ -230,10 +230,11 @@ class DB:
         cursor = self.conn.cursor()
 
         query = """
-        SELECT me, opp, depth
+        SELECT me, opp, level
         FROM openings
-        WHERE depth < %s
-        ORDER BY disc_count
+        WHERE level < %s
+        AND confidence < 100
+        ORDER BY level, disc_count
         LIMIT %s;
         """
 
@@ -247,6 +248,7 @@ class DB:
         query = """
         SELECT me, opp, level
         FROM openings
+        WHERE confidence < 100
         ORDER BY learn_priority
         LIMIT %s;
         """
@@ -258,24 +260,38 @@ class DB:
     def print_stats(self) -> None:
         stats = self._get_stats()
         table: dict[int, dict[int, int]] = {}
+        level_totals: dict[int, int] = {}
 
         for discs, level, count in stats:
             if discs not in table:
                 table[discs] = {}
 
-            if level not in table[discs]:
-                table[discs][level] = count
+            table[discs][level] = count
+
+            if level not in level_totals:
+                level_totals[level] = 0
+
+            level_totals[level] += count
 
         levels = set(row[1] for row in stats)
 
-        print("   level: " + " ".join(f"{level:>5}" for level in sorted(levels)))
-        print("----------" + "-".join("-----" for _ in levels))
+        print("   level: " + " ".join(f"{level:>6}" for level in sorted(levels)))
+        print("----------" + "-".join("------" for _ in levels))
 
         for discs in sorted(table.keys()):
             print(f"{discs:>2} discs: ", end="")
             for level in sorted(levels):
                 if level not in table[discs]:
-                    print("      ", end="")
+                    print("       ", end="")
                 else:
-                    print(f"{table[discs][level]:>5} ", end="")
+                    print(f"{table[discs][level]:>6} ", end="")
             print()
+
+        print("----------" + "-".join("------" for _ in levels))
+
+        print(
+            "   total: "
+            + " ".join(
+                f"{level_totals[total]:>6}" for total in sorted(level_totals.keys())
+            )
+        )
