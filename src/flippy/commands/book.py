@@ -15,7 +15,7 @@ app = typer.Typer(pretty_exceptions_enable=False)
 
 @app.command()
 def info() -> None:
-    DB().print_stats()
+    DB().print_edax_stats()
 
 
 def get_normalized_pgn_positions() -> set[Position]:
@@ -71,7 +71,7 @@ def learn_pgn_boards(db: DB, chunk_size: int) -> None:
     }
 
     print("Looking up positions in DB")
-    evaluations = db.lookup_positions(pgn_positions)
+    evaluations = db.lookup_edax_positions(pgn_positions)
 
     found_pgn_positions = set(evaluations.values.keys())
 
@@ -89,7 +89,7 @@ def learn_pgn_boards(db: DB, chunk_size: int) -> None:
 
         seconds_per_board = (after - before).total_seconds() / len(chunk)
 
-        db.update(learned_evaluations)
+        db.update_edax_evaluations(learned_evaluations)
 
         print(f"0 -> {MIN_LEARN_LEVEL} | {seconds_per_board:7.3f} sec / board")
 
@@ -114,7 +114,7 @@ def learn(
                 break
 
             evaluations = learn_boards(tuples, min_learn_level)
-            db.update(evaluations)
+            db.update_edax_evaluations(evaluations)
 
     while True:
         tuples = db.get_learning_boards(chunk_size)
@@ -126,7 +126,7 @@ def learn(
         tuples = [item for item in tuples if item[1] == min_level]
 
         evaluations = learn_boards(tuples, min_level + 2)
-        db.update(evaluations)
+        db.update_edax_evaluations(evaluations)
 
 
 if __name__ == "__main__":

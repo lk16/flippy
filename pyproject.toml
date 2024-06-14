@@ -2,9 +2,7 @@
 name = "flippy"
 version = "0.1.0"
 description = "Tools for the othello boardgame"
-authors = [
-    {name = "Luuk Verweij",email = "luuk_verweij@msn.com"},
-]
+authors = [{ name = "Luuk Verweij", email = "luuk_verweij@msn.com" }]
 dependencies = [
     "pygame>=2.5.2",
     "pyautogui>=0.9.54",
@@ -14,15 +12,17 @@ dependencies = [
 ]
 requires-python = "==3.11.*"
 readme = "README.md"
-license = {text = "MIT"}
+license = { text = "MIT" }
 
 [tool.pdm.scripts]
 gui = "python src/flippy/commands/gui.py"
 organize-pgn = "python src/flippy/commands/pgn_organizer.py"
-analyze-pgn =  "python src/flippy/commands/pgn_analyzer.py"
+analyze-pgn = "python src/flippy/commands/pgn_analyzer.py"
 recent-games = "python src/flippy/commands/recent_games.py"
 book = "python src/flippy/commands/book.py"
 unique-positions = "python src/flippy/commands/unique_positions.py"
+update-greedy = "python src/flippy/commands/update_greedy.py"
+
 
 [tool.pdm]
 [tool.pdm.dev-dependencies]

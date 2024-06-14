@@ -40,7 +40,7 @@ class EvaluateMode(GameMode):
         board = self.get_board()
         child_positions = {child.position for child in board.get_children()}
 
-        evaluations = self.db.lookup_positions(child_positions)
+        evaluations = self.db.lookup_edax_positions(child_positions)
         self.evaluations.update(evaluations)
 
         request_positions = self.evaluations.get_missing(child_positions)
@@ -59,7 +59,7 @@ class EvaluateMode(GameMode):
 
     def _process_recv_message(self, message: EdaxResponse) -> None:
         self.evaluations.update(message.evaluations)
-        self.db.update(message.evaluations)
+        self.db.update_edax_evaluations(message.evaluations)
 
         positions = message.request.positions
         # TODO #33 unify modes, especially searching with PGN Mode and move it back into Window
@@ -86,11 +86,17 @@ class EvaluateMode(GameMode):
         for move in board.get_moves_as_set():
             child = board.do_move(move)
 
-            try:
-                evaluation = self.evaluations.lookup(child.position)
-            except KeyError:
-                continue
+            greedy_value = self.db.lookup_greedy_evaluation(child.position)
 
-            evaluations[move] = -evaluation.score
+            if greedy_value is not None:
+                score = greedy_value[0]
+                evaluations[move] = -score
+
+            # try:
+            #     evaluation = self.evaluations.lookup(child.position)
+            # except KeyError:
+            #     continue
+        #
+        # evaluations[move] = -evaluation.score
 
         return {"evaluations": evaluations}
