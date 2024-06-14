@@ -13,5 +13,5 @@ Tools for learning and playing the othello boardgame, currently using pygame.
 ### How to use docker openings book
 * Start docker: `docker compose up -d`
 * (Optional) Connect with postgres `psql 'postgres://book_user:book_pass@localhost:12321/flippy'`
-* Run migrations: `piccolo migrations forwards db_migrations`
+* Create tables: `psql 'postgres://book_user:book_pass@localhost:12321/flippy' < schema.sql`
 * Import book: `psql 'postgres://book_user:book_pass@localhost:12321/flippy' < dump_file.sql`
