@@ -25,6 +25,7 @@ class PGNMode(BaseMode):
         self.alternative_moves: list[Board] = []
         self.recv_queue: Queue[EdaxResponse] = Queue()
         self.evaluations = EdaxEvaluations()
+        self.show_all_move_evaluations = False
         self.db = DB()
 
         if self.args.pgn_file:
@@ -45,6 +46,8 @@ class PGNMode(BaseMode):
                 self.show_next_position()
             elif event.key == pygame.K_LEFT:
                 self.show_prev_position()
+            elif event.key == pygame.K_SPACE:
+                self.toggle_show_all_move_evaluations()
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == pygame.BUTTON_RIGHT:
             self.show_prev_position()
@@ -79,6 +82,9 @@ class PGNMode(BaseMode):
                 self.alternative_moves.append(child)
 
         self.lookup_or_search(child.get_child_positions(), source=child)
+
+    def toggle_show_all_move_evaluations(self) -> None:
+        self.show_all_move_evaluations = not self.show_all_move_evaluations
 
     def show_next_position(self) -> None:
         if self.game is None:
@@ -190,7 +196,11 @@ class PGNMode(BaseMode):
 
             evaluations[move] = -evaluation.score
 
-        if not self.alternative_moves and evaluations:
+        if (
+            not self.alternative_moves
+            and evaluations
+            and not self.show_all_move_evaluations
+        ):
             max_evaluation = max(evaluations.values())
 
             shown_evaluations = {
