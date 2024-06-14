@@ -91,27 +91,23 @@ class DB:
             chunk = query_positions[chunk_start:chunk_end]
 
             query = """
-            SELECT me, opp, level, depth, confidence, score, best_moves
-            FROM openings
-            WHERE (me, opp)
+            SELECT position, level, depth, confidence, score, best_moves
+            FROM edax
+            WHERE position
             IN (
             """
+            query += ",".join(["%s"] * len(chunk)) + ");"
 
-            query += ",".join(["(%s, %s)"] * len(chunk)) + ");"
-
-            params: list[bytes] = []
-            for position in chunk:
-                me, opp = position.to_bytes()
-                params += [me, opp]
+            params: list[bytes] = [position.to_bytes() for position in chunk]
 
             cursor = self.conn.cursor()
             cursor.execute(query, params)
 
             rows: list[
-                tuple[memoryview, memoryview, int, int, int, int, list[int]]
+                tuple[memoryview, int, int, int, int, list[int]]
             ] = cursor.fetchall()
-            for me, opp, level, depth, confidence, score, best_moves in rows:
-                position = Position.from_bytes(bytes(me), bytes(opp))
+            for position_bytes, level, depth, confidence, score, best_moves in rows:
+                position = Position.from_bytes(position_bytes)
                 evaluation = EdaxEvaluation(
                     position=position,
                     level=level,
@@ -155,7 +151,6 @@ class DB:
         evaluation._validate()
 
         cursor = self.conn.cursor()
-        me, opp = evaluation.position.to_bytes()
 
         assert evaluation.position.is_normalized()
 
@@ -163,8 +158,7 @@ class DB:
         priority = 3 * evaluation.level + disc_count
 
         params = (
-            me,
-            opp,
+            evaluation.position.to_bytes(),
             evaluation.position.count_discs(),
             evaluation.level,
             evaluation.depth,
@@ -175,9 +169,9 @@ class DB:
         )
 
         query = """
-        INSERT INTO openings (me, opp, disc_count, level, depth, confidence, score, learn_priority, best_moves)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (me, opp)
+        INSERT INTO edax (position, disc_count, level, depth, confidence, score, learn_priority, best_moves)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (position)
         DO NOTHING;
         """
         cursor.execute(query, params)
@@ -186,12 +180,10 @@ class DB:
         return cursor.rowcount == 1
 
     def _update(self, evaluation: EdaxEvaluation) -> None:
-        me, opp = evaluation.position.to_bytes()
-
         query = """
-        UPDATE openings
+        UPDATE edax
         SET disc_count=%s, level=%s, depth=%s, confidence=%s, score=%s, learn_priority=%s, best_moves=%s
-        WHERE (me, opp) = (%s, %s) AND level < %s;
+        WHERE (position) = (%s) AND level < %s;
         """
 
         disc_count = evaluation.position.count_discs()
@@ -205,8 +197,7 @@ class DB:
             evaluation.score,
             priority,
             evaluation.best_moves,
-            me,
-            opp,
+            evaluation.position.to_bytes(),
             evaluation.level,
         )
 
@@ -217,7 +208,7 @@ class DB:
     def _get_stats(self) -> list[tuple[int, int, int]]:
         query = """
         SELECT disc_count, level, COUNT(*)
-        FROM openings
+        FROM edax
         GROUP BY disc_count, level;
         """
         cursor = self.conn.cursor()
@@ -230,8 +221,8 @@ class DB:
         cursor = self.conn.cursor()
 
         query = """
-        SELECT me, opp, level
-        FROM openings
+        SELECT position, level
+        FROM edax
         WHERE level < %s
         AND confidence < 100
         ORDER BY level, disc_count
@@ -239,23 +230,29 @@ class DB:
         """
 
         cursor.execute(query, (level, count))
-        rows: list[tuple[bytes, bytes, int]] = cursor.fetchall()
-        return [(Position.from_bytes(me, opp), depth) for me, opp, depth in rows]
+        rows: list[tuple[bytes, int]] = cursor.fetchall()
+        return [
+            (Position.from_bytes(position_bytes), depth)
+            for position_bytes, depth in rows
+        ]
 
     def get_learning_boards(self, count: int) -> list[tuple[Position, int]]:
         cursor = self.conn.cursor()
 
         query = """
-        SELECT me, opp, level
-        FROM openings
+        SELECT position, level
+        FROM edax
         WHERE confidence < 100
         ORDER BY learn_priority
         LIMIT %s;
         """
 
         cursor.execute(query, (count,))
-        rows: list[tuple[bytes, bytes, int]] = cursor.fetchall()
-        return [(Position.from_bytes(me, opp), depth) for me, opp, depth in rows]
+        rows: list[tuple[bytes, int]] = cursor.fetchall()
+        return [
+            (Position.from_bytes(position_bytes), depth)
+            for position_bytes, depth in rows
+        ]
 
     def print_stats(self) -> None:
         stats = self._get_stats()

@@ -51,16 +51,12 @@ class Position:
         return Position(0x0, 0x0)
 
     @classmethod
-    def from_bytes(cls, me_bytes: bytes, opp_bytes: bytes) -> Position:
-        # TODO #34 store Position as one bytes value
-        me = struct.unpack("<Q", me_bytes)[0]
-        opp = struct.unpack("<Q", opp_bytes)[0]
+    def from_bytes(cls, bytes_: bytes) -> Position:
+        me, opp = struct.unpack("<QQ", bytes_)
         return Position(me, opp)
 
-    def to_bytes(self) -> tuple[bytes, bytes]:
-        me = struct.pack("<Q", self.me)
-        opp = struct.pack("<Q", self.opp)
-        return me, opp
+    def to_bytes(self) -> bytes:
+        return struct.pack("<QQ", self.me, self.opp)
 
     def __repr__(self) -> str:
         return f"Position({hex(self.me)}, {hex(self.opp)})"
