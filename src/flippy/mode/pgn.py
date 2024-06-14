@@ -156,7 +156,7 @@ class PGNMode(BaseMode):
             self._process_recv_message(message)
 
     def _process_recv_message(self, message: EdaxResponse) -> None:
-        self.db.update(message.evaluations)
+        self.db.update_edax_evaluations(message.evaluations)
         self.evaluations.update(message.evaluations)
 
         source = message.request.source
@@ -277,7 +277,7 @@ class PGNMode(BaseMode):
         missing = self.evaluations.get_missing(positions)
 
         if missing:
-            db_evaluations = self.db.lookup_positions(missing)
+            db_evaluations = self.db.lookup_edax_positions(missing)
             self.evaluations.update(db_evaluations)
             db_missing = self.evaluations.get_missing(positions)
 

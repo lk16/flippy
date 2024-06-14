@@ -1,21 +1,22 @@
 import datetime
 import typer
 from math import ceil
-from typing import Annotated, Optional
 
 from flippy.config import config
-from flippy.db import DB, MIN_LEARN_LEVEL, is_savable_position
+from flippy.db import DB, MAX_SAVABLE_DISCS, MIN_LEARN_LEVEL, is_savable_position
 from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxEvaluations, EdaxRequest
 from flippy.othello.game import Game
 from flippy.othello.position import Position
+
+LEARN_CHUNK_SIZE = 20
 
 app = typer.Typer(pretty_exceptions_enable=False)
 
 
 @app.command()
 def info() -> None:
-    DB().print_stats()
+    DB().print_edax_stats()
 
 
 def get_normalized_pgn_positions() -> set[Position]:
@@ -37,32 +38,19 @@ def get_normalized_pgn_positions() -> set[Position]:
     return positions
 
 
-def learn_boards(
-    tuples: list[tuple[Position, int]], learn_level: int
-) -> EdaxEvaluations:
-    if learn_level % 2 == 1:
-        learn_level += 1
-
-    boards = [item[0] for item in tuples]
-
-    request = EdaxRequest(boards, learn_level, source=None)
+def learn_position(position: Position, level: int) -> tuple[EdaxEvaluations, float]:
+    request = EdaxRequest([position], level, source=None)
 
     before = datetime.datetime.now()
     evaluations = start_evaluation_sync(request)
     after = datetime.datetime.now()
 
-    level_before = set(item[1] for item in tuples)
-    seconds_per_board = (after - before).total_seconds() / len(tuples)
+    seconds_per_board = (after - before).total_seconds()
 
-    print(
-        ",".join(str(level) for level in sorted(level_before))
-        + f" -> {learn_level} | {seconds_per_board:7.3f} sec / board"
-    )
-
-    return evaluations
+    return evaluations, seconds_per_board
 
 
-def learn_pgn_boards(db: DB, chunk_size: int) -> None:
+def learn_pgn_boards(db: DB) -> None:
     pgn_positions = get_normalized_pgn_positions()
 
     # Remove positions that we won't save in DB.
@@ -71,15 +59,15 @@ def learn_pgn_boards(db: DB, chunk_size: int) -> None:
     }
 
     print("Looking up positions in DB")
-    evaluations = db.lookup_positions(pgn_positions)
+    evaluations = db.lookup_edax_positions(pgn_positions)
 
     found_pgn_positions = set(evaluations.values.keys())
 
     learn_positions = list(pgn_positions - found_pgn_positions)
 
-    for chunk_id in range(ceil(len(learn_positions) / chunk_size)):
-        chunk_start = chunk_size * chunk_id
-        chunk_end = chunk_size * (chunk_id + 1)
+    for chunk_id in range(ceil(len(learn_positions) / LEARN_CHUNK_SIZE)):
+        chunk_start = LEARN_CHUNK_SIZE * chunk_id
+        chunk_end = LEARN_CHUNK_SIZE * (chunk_id + 1)
         chunk = learn_positions[chunk_start:chunk_end]
         request = EdaxRequest(chunk, MIN_LEARN_LEVEL, source=None)
 
@@ -89,44 +77,39 @@ def learn_pgn_boards(db: DB, chunk_size: int) -> None:
 
         seconds_per_board = (after - before).total_seconds() / len(chunk)
 
-        db.update(learned_evaluations)
+        db.update_edax_evaluations(learned_evaluations)
 
         print(f"0 -> {MIN_LEARN_LEVEL} | {seconds_per_board:7.3f} sec / board")
 
 
+def get_learn_level(disc_count: int) -> int:
+    if disc_count <= 10:
+        return 36
+
+    if disc_count <= 16:
+        return 34
+
+    return 32
+
+
 @app.command()
-def learn(
-    chunk_size: Annotated[int, typer.Option("-c", "--chunk-size")] = 100,
-    min_learn_level: Annotated[
-        Optional[int],
-        typer.Option("-l", "--min-learn-level", min=MIN_LEARN_LEVEL, max=32),
-    ] = None,
-) -> None:
+def learn() -> None:
     db = DB()
 
-    learn_pgn_boards(db, chunk_size)
+    learn_pgn_boards(db)
 
-    if min_learn_level is not None:
-        while True:
-            tuples = db.get_learning_boards_below_level(chunk_size, min_learn_level)
+    for disc_count in range(4, MAX_SAVABLE_DISCS + 1):
+        learn_level = get_learn_level(disc_count)
 
-            if not tuples:
-                break
+        positions = db.get_boards_with_disc_count_below_level(disc_count, learn_level)
 
-            evaluations = learn_boards(tuples, min_learn_level)
-            db.update(evaluations)
+        for i, position in enumerate(positions):
+            evaluations, seconds = learn_position(position, learn_level)
+            db.update_edax_evaluations(evaluations)
 
-    while True:
-        tuples = db.get_learning_boards(chunk_size)
-
-        if not tuples:
-            break
-
-        min_level = min([item[1] for item in tuples])
-        tuples = [item for item in tuples if item[1] == min_level]
-
-        evaluations = learn_boards(tuples, min_level + 2)
-        db.update(evaluations)
+            print(
+                f"learned {i+1}/{len(positions)} with {disc_count} discs at level {learn_level} | {seconds:7.3f} sec / board"
+            )
 
 
 if __name__ == "__main__":
