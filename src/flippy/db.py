@@ -243,44 +243,22 @@ class DB:
         cursor.execute(query)
         return cursor.fetchall()
 
-    def get_learning_boards_below_level(
-        self, count: int, level: int
-    ) -> list[tuple[Position, int]]:
+    def get_boards_with_disc_count_below_level(
+        self, disc_count: int, level_below: int
+    ) -> list[Position]:
         cursor = self.conn.cursor()
 
         query = """
-        SELECT position, level
+        SELECT position
         FROM edax
-        WHERE level < %s
-        AND confidence < 100
-        ORDER BY level, disc_count
-        LIMIT %s;
+        WHERE disc_count = %s
+        AND level < %s
+        ORDER BY level
         """
 
-        cursor.execute(query, (level, count))
-        rows: list[tuple[bytes, int]] = cursor.fetchall()
-        return [
-            (Position.from_bytes(position_bytes), depth)
-            for position_bytes, depth in rows
-        ]
-
-    def get_learning_boards(self, count: int) -> list[tuple[Position, int]]:
-        cursor = self.conn.cursor()
-
-        query = """
-        SELECT position, level
-        FROM edax
-        WHERE confidence < 100
-        ORDER BY learn_priority
-        LIMIT %s;
-        """
-
-        cursor.execute(query, (count,))
-        rows: list[tuple[bytes, int]] = cursor.fetchall()
-        return [
-            (Position.from_bytes(position_bytes), depth)
-            for position_bytes, depth in rows
-        ]
+        cursor.execute(query, (disc_count, level_below))
+        rows: list[tuple[bytes]] = cursor.fetchall()
+        return [(Position.from_bytes(position_bytes)) for (position_bytes,) in rows]
 
     def print_edax_stats(self) -> None:
         stats = self._get_edax_stats()
