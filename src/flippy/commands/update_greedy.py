@@ -96,10 +96,7 @@ class GreedyUpdater:
         best_child = position.do_normalized_move(best_move)
         child_score = self.learn_greedy(best_child)
 
-        if position.has_moves():
-            score = -child_score
-        else:
-            score = child_score
+        score = -child_score
 
         self.greedy[position] = GreedyEvaluation(score, best_move)
         return score
