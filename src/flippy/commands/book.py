@@ -103,12 +103,22 @@ def learn() -> None:
 
         positions = db.get_boards_with_disc_count_below_level(disc_count, learn_level)
 
+        total_seconds = 0.0
+
         for i, position in enumerate(positions):
             evaluations, seconds = learn_position(position, learn_level)
             db.update_edax_evaluations(evaluations)
 
+            total_seconds += seconds
+            average = total_seconds / (i + 1)
+
+            eta = datetime.datetime.now() + datetime.timedelta(
+                seconds=average * (len(positions) - (i + 1))
+            )
+
             print(
-                f"learned {i+1}/{len(positions)} with {disc_count} discs at level {learn_level} | {seconds:7.3f} sec / board"
+                f"{disc_count} discs @ lvl {learn_level} | {i+1}/{len(positions)} | {seconds:7.3f} sec "
+                + f"| ETA {eta.strftime('%Y-%m-%d %H:%M:%S')}"
             )
 
 
