@@ -1,5 +1,6 @@
 import psycopg2
 from math import ceil
+from typing import Optional
 
 from flippy.config import config
 from flippy.edax.types import EdaxEvaluation, EdaxEvaluations
@@ -15,7 +16,7 @@ MIN_UI_SEARCH_LEVEL = 8
 MAX_UI_SEARCH_LEVEL = 32
 
 # Maxmium number of discs for a board to be potentially saved in DB.
-MAX_SAVABLE_DISCS = 35
+MAX_SAVABLE_DISCS = 40
 
 
 def is_savable_evaluation(evaluation: EdaxEvaluation) -> bool:
@@ -43,19 +44,46 @@ class DB:
         dsn = config.get_db_dsn()
         self.conn = psycopg2.connect(dsn)
 
-    def update(self, evaluations: EdaxEvaluations) -> None:
+    def update_edax_evaluations(self, evaluations: EdaxEvaluations) -> None:
         for evaluation in evaluations.values.values():
-            self.save(evaluation)
+            self.save_edax(evaluation)
 
-    def lookup_position(self, position: Position) -> EdaxEvaluation:
-        evaluations = self.lookup_positions({position})
+    def lookup_edax_position(self, position: Position) -> EdaxEvaluation:
+        evaluations = self.lookup_edax_positions({position})
 
         try:
             return evaluations.lookup(position)
         except KeyError as e:
             raise PositionNotFound from e
 
-    def lookup_positions(self, positions: set[Position]) -> EdaxEvaluations:
+    def get_edax_evaluations_sorted_by_disc_count(self) -> EdaxEvaluations:
+        evaluations = EdaxEvaluations()
+
+        query = """
+        SELECT position, level, depth, confidence, score, best_moves
+        FROM edax
+        ORDER BY disc_count
+        """
+
+        cursor = self.conn.cursor()
+        cursor.execute(query)
+
+        rows: list[tuple[memoryview, int, int, int, int, list[int]]] = cursor.fetchall()
+        for position_bytes, level, depth, confidence, score, best_moves in rows:
+            position = Position.from_bytes(position_bytes)
+            evaluation = EdaxEvaluation(
+                position=position,
+                level=level,
+                depth=depth,
+                confidence=confidence,
+                score=score,
+                best_moves=best_moves,
+            )
+            evaluations.add(position, evaluation)
+
+        return evaluations
+
+    def lookup_edax_positions(self, positions: set[Position]) -> EdaxEvaluations:
         evaluations = EdaxEvaluations()
 
         query_positions: list[Position] = []
@@ -65,7 +93,7 @@ class DB:
 
             if normalized.is_game_end():
                 try:
-                    evaluation = self._lookup_game_end(normalized)
+                    evaluation = self._lookup_edax_game_end(normalized)
                 except PositionNotFound:
                     pass
                 else:
@@ -74,7 +102,7 @@ class DB:
 
             if not position.has_moves():
                 try:
-                    evaluation = self._lookup_passed(normalized)
+                    evaluation = self._lookup_edax_passed(normalized)
                 except PositionNotFound:
                     pass
                 else:
@@ -120,7 +148,7 @@ class DB:
 
         return evaluations
 
-    def _lookup_game_end(self, position: Position) -> EdaxEvaluation:
+    def _lookup_edax_game_end(self, position: Position) -> EdaxEvaluation:
         return EdaxEvaluation(
             position=position,
             depth=position.count_empties(),
@@ -130,20 +158,20 @@ class DB:
             best_moves=[],
         )
 
-    def _lookup_passed(self, position: Position) -> EdaxEvaluation:
+    def _lookup_edax_passed(self, position: Position) -> EdaxEvaluation:
         passed = position.pass_move()
-        return self.lookup_position(passed).pass_move()
+        return self.lookup_edax_position(passed).pass_move()
 
-    def save(self, evaluation: EdaxEvaluation) -> None:
+    def save_edax(self, evaluation: EdaxEvaluation) -> None:
         if not is_savable_evaluation(evaluation):
             return
 
-        inserted = self._insert(evaluation)
+        inserted = self._insert_edax(evaluation)
 
         if not inserted:
-            self._update(evaluation)
+            self._update_edax(evaluation)
 
-    def _insert(self, evaluation: EdaxEvaluation) -> int:
+    def _insert_edax(self, evaluation: EdaxEvaluation) -> int:
         """
         Tries to insert, returns True if succcess, False if conflict occured.
         """
@@ -179,7 +207,7 @@ class DB:
 
         return cursor.rowcount == 1
 
-    def _update(self, evaluation: EdaxEvaluation) -> None:
+    def _update_edax(self, evaluation: EdaxEvaluation) -> None:
         query = """
         UPDATE edax
         SET disc_count=%s, level=%s, depth=%s, confidence=%s, score=%s, learn_priority=%s, best_moves=%s
@@ -205,7 +233,7 @@ class DB:
         cursor.execute(query, params)
         self.conn.commit()
 
-    def _get_stats(self) -> list[tuple[int, int, int]]:
+    def _get_edax_stats(self) -> list[tuple[int, int, int]]:
         query = """
         SELECT disc_count, level, COUNT(*)
         FROM edax
@@ -215,47 +243,25 @@ class DB:
         cursor.execute(query)
         return cursor.fetchall()
 
-    def get_learning_boards_below_level(
-        self, count: int, level: int
-    ) -> list[tuple[Position, int]]:
+    def get_boards_with_disc_count_below_level(
+        self, disc_count: int, level_below: int
+    ) -> list[Position]:
         cursor = self.conn.cursor()
 
         query = """
-        SELECT position, level
+        SELECT position
         FROM edax
-        WHERE level < %s
-        AND confidence < 100
-        ORDER BY level, disc_count
-        LIMIT %s;
+        WHERE disc_count = %s
+        AND level < %s
+        ORDER BY level
         """
 
-        cursor.execute(query, (level, count))
-        rows: list[tuple[bytes, int]] = cursor.fetchall()
-        return [
-            (Position.from_bytes(position_bytes), depth)
-            for position_bytes, depth in rows
-        ]
+        cursor.execute(query, (disc_count, level_below))
+        rows: list[tuple[bytes]] = cursor.fetchall()
+        return [(Position.from_bytes(position_bytes)) for (position_bytes,) in rows]
 
-    def get_learning_boards(self, count: int) -> list[tuple[Position, int]]:
-        cursor = self.conn.cursor()
-
-        query = """
-        SELECT position, level
-        FROM edax
-        WHERE confidence < 100
-        ORDER BY learn_priority
-        LIMIT %s;
-        """
-
-        cursor.execute(query, (count,))
-        rows: list[tuple[bytes, int]] = cursor.fetchall()
-        return [
-            (Position.from_bytes(position_bytes), depth)
-            for position_bytes, depth in rows
-        ]
-
-    def print_stats(self) -> None:
-        stats = self._get_stats()
+    def print_edax_stats(self) -> None:
+        stats = self._get_edax_stats()
         table: dict[int, dict[int, int]] = {}
         level_totals: dict[int, int] = {}
 
@@ -292,3 +298,57 @@ class DB:
                 f"{level_totals[total]:>6}" for total in sorted(level_totals.keys())
             )
         )
+
+    def get_greedy_evaluations(self) -> list[tuple[Position, int, int]]:
+        query = """
+        SELECT position, score, best_move
+        FROM greedy
+        """
+
+        cursor = self.conn.cursor()
+        cursor.execute(query)
+
+        rows: list[tuple[memoryview, int, int]] = cursor.fetchall()
+
+        evaluations: list[tuple[Position, int, int]] = []
+
+        for position_bytes, score, best_move in rows:
+            evaluations.append((Position.from_bytes(position_bytes), score, best_move))
+
+        return evaluations
+
+    def save_greedy(self, position: Position, score: int, best_move: int) -> None:
+        assert position.is_normalized()
+        assert -64 <= score <= 64
+        assert score % 2 == 0
+
+        query = """
+        INSERT INTO greedy (position, score, best_move)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (position)
+        DO UPDATE SET score = EXCLUDED.score;
+        """
+
+        cursor = self.conn.cursor()
+        cursor.execute(query, [position.to_bytes(), score, best_move])
+        self.conn.commit()
+
+    def lookup_greedy_evaluation(self, position: Position) -> Optional[tuple[int, int]]:
+        # For greedy we support getting unnormalized positions, since it doesn't matter for the result
+        position = position.normalized()
+
+        query = """
+        SELECT score, best_move
+        FROM greedy
+        WHERE position = %s
+        """
+
+        cursor = self.conn.cursor()
+        cursor.execute(query, [position.to_bytes()])
+
+        rows: list[tuple[int, int]] = cursor.fetchall()
+
+        if not rows:
+            return None
+
+        return rows[0]
