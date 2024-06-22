@@ -1,6 +1,8 @@
+import datetime
 import typer
 from typing import Optional
 
+from flippy.commands.book import get_learn_level
 from flippy.db import DB
 from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxEvaluation, EdaxEvaluations, EdaxRequest
@@ -33,25 +35,35 @@ class GreedyUpdater:
             for position, score, best_move in self.db.get_greedy_evaluations()
         }
 
-        positions = [evaluation.position for evaluation in self.edax.values.values()]
+        for disc_count in range(4, 64):
+            positions = [
+                position
+                for position in self.edax.values
+                if position.count_discs() == disc_count
+            ]
 
-        for offset, position in enumerate(positions):
-            percentage = 100.0 * ((offset + 1) / len(positions))
-            print(
-                f"Greedy learning position {offset+1}/{len(positions)} ({percentage:6.2f}%)"
-            )
+            total_seconds = 0.0
 
-            self.learn_greedy(position)
-            # TODO update preceding positions
-            self.save_learned_greedy()
+            for i, position in enumerate(positions):
+                before = datetime.datetime.now()
+                self.learn_greedy(position)
+                # TODO update preceding positions
+                self.save_learned_greedy()
 
-    def get_learn_level(self, position: Position) -> int:
-        discs = position.count_discs()
+                after = datetime.datetime.now()
+                seconds = (after - before).total_seconds()
 
-        if discs <= 20:
-            return 32
+                total_seconds += seconds
+                average = total_seconds / (i + 1)
 
-        return 24
+                eta = datetime.datetime.now() + datetime.timedelta(
+                    seconds=average * (len(positions) - (i + 1))
+                )
+
+                print(
+                    f"greedy learning | {i+1}/{len(positions)} | {disc_count:>2} discs | {seconds:7.3f} sec "
+                    + f"| ETA {eta.strftime('%Y-%m-%d %H:%M:%S')}"
+                )
 
     def find_evaluation(self, position: Position) -> Optional[EdaxEvaluation]:
         try:
@@ -59,13 +71,13 @@ class GreedyUpdater:
         except KeyError:
             return None  # Not found
 
-        if edax_evaluation.level >= self.get_learn_level(position):
+        if edax_evaluation.level >= get_learn_level(position.count_discs()):
             return edax_evaluation
 
         return None  # Evaluation not reliable enough
 
     def compute_evaluation(self, position: Position) -> EdaxEvaluation:
-        level = self.get_learn_level(position)
+        level = get_learn_level(position.count_discs())
         request = EdaxRequest([position], level=level, source=None)
 
         print(f"Computing position with discs={position.count_discs()} level={level}")
@@ -89,7 +101,8 @@ class GreedyUpdater:
 
         best_move = evaluation.best_moves[0]
 
-        if evaluation.confidence == 100:  # Exact score
+        # Compute until first estimate of exact score
+        if evaluation.depth + position.count_discs() == 64:
             self.greedy[position] = GreedyEvaluation(evaluation.score, best_move)
             return evaluation.score
 
