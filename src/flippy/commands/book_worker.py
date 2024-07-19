@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import pika
 import typer
 from pika.adapters.blocking_connection import BlockingChannel
 from pika.spec import PERSISTENT_DELIVERY_MODE, Basic, BasicProperties
 from typing import Any, Dict
 
-from flippy.commands.book import get_learn_level
+from flippy.book import get_learn_level
 from flippy.db import DB, MAX_SAVABLE_DISCS
 from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxRequest
@@ -15,11 +16,11 @@ from flippy.othello.position import Position
 
 app = typer.Typer()
 
-# TODO use env vars
-RABBITMQ_USER = "user"
-RABBITMQ_PASS = "password"
-RABBITMQ_HOST = "localhost"
-RABBITMQ_QUEUE = "my_queue"
+RABBITMQ_USER = os.environ["RABBITMQ_USER"]
+RABBITMQ_PORT = int(os.environ["RABBITMQ_PORT"])
+RABBITMQ_PASS = os.environ["RABBITMQ_PASS"]
+RABBITMQ_HOST = os.environ["RABBITMQ_HOST"]
+RABBITMQ_QUEUE = os.environ["RABBITMQ_QUEUE"]
 
 
 class Message:
@@ -48,7 +49,9 @@ class BookWorker:
 
     def get_connection(self) -> pika.BlockingConnection:
         credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
-        params = pika.ConnectionParameters(host=RABBITMQ_HOST, credentials=credentials)
+        params = pika.ConnectionParameters(
+            host=RABBITMQ_HOST, port=RABBITMQ_PORT, credentials=credentials
+        )
         return pika.BlockingConnection(params)
 
     def declare_channel(self, connection: pika.BlockingConnection) -> BlockingChannel:

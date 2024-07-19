@@ -3,6 +3,7 @@ import typer
 from math import ceil
 from pathlib import Path
 
+from flippy.book import get_learn_level
 from flippy.config import config
 from flippy.db import DB, MAX_SAVABLE_DISCS, MIN_LEARN_LEVEL, is_savable_position
 from flippy.edax.process import start_evaluation_sync
@@ -93,16 +94,6 @@ def learn_new_positions(db: DB, positions: set[Position]) -> None:
             + f"| {seconds:7.3f} sec "
             + f"| ETA {eta.strftime('%Y-%m-%d %H:%M:%S')}"
         )
-
-
-def get_learn_level(disc_count: int) -> int:
-    if disc_count <= 12:
-        return 36
-
-    if disc_count <= 20:
-        return 34
-
-    return 32
 
 
 @app.command()
