@@ -1,6 +1,7 @@
 import datetime
 import typer
 from math import ceil
+from pathlib import Path
 
 from flippy.config import config
 from flippy.db import DB, MAX_SAVABLE_DISCS, MIN_LEARN_LEVEL, is_savable_position
@@ -8,8 +9,9 @@ from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxEvaluations, EdaxRequest
 from flippy.othello.game import Game
 from flippy.othello.position import Position
+from flippy.othello.wthor import Wthor
 
-LEARN_CHUNK_SIZE = 20
+LEARN_CHUNK_SIZE = 100
 
 app = typer.Typer(pretty_exceptions_enable=False)
 
@@ -22,11 +24,10 @@ def info() -> None:
 def get_normalized_pgn_positions() -> set[Position]:
     positions: set[Position] = set()
     pgn_files = list((config.pgn_target_folder() / "normal").rglob("*.pgn"))
+
     for offset, file in enumerate(pgn_files):
         game = Game.from_pgn(file)
-        for board in game.boards:
-            position = board.position
-            positions.add(position.normalized())
+        positions.update(game.get_normalized_positions())
 
         percentage = 100.0 * (offset + 1) / len(pgn_files)
         print(
@@ -50,12 +51,10 @@ def learn_position(position: Position, level: int) -> tuple[EdaxEvaluations, flo
     return evaluations, seconds_per_board
 
 
-def learn_pgn_boards(db: DB) -> None:
-    pgn_positions = get_normalized_pgn_positions()
-
+def learn_new_positions(db: DB, positions: set[Position]) -> None:
     # Remove positions that we won't save in DB.
     pgn_positions = {
-        position for position in pgn_positions if is_savable_position(position)
+        position for position in positions if is_savable_position(position)
     }
 
     print("Looking up positions in DB")
@@ -64,6 +63,8 @@ def learn_pgn_boards(db: DB) -> None:
     found_pgn_positions = set(evaluations.values.keys())
 
     learn_positions = list(pgn_positions - found_pgn_positions)
+
+    total_seconds = 0.0
 
     for chunk_id in range(ceil(len(learn_positions) / LEARN_CHUNK_SIZE)):
         chunk_start = LEARN_CHUNK_SIZE * chunk_id
@@ -75,11 +76,23 @@ def learn_pgn_boards(db: DB) -> None:
         learned_evaluations = start_evaluation_sync(request)
         after = datetime.datetime.now()
 
-        seconds_per_board = (after - before).total_seconds() / len(chunk)
+        seconds = (after - before).total_seconds()
+        total_seconds += seconds
+
+        computed_positions = min(chunk_end, len(learn_positions))
+        average = total_seconds / computed_positions
+
+        eta = datetime.datetime.now() + datetime.timedelta(
+            seconds=average * (len(learn_positions) - computed_positions)
+        )
 
         db.update_edax_evaluations(learned_evaluations)
 
-        print(f"0 -> {MIN_LEARN_LEVEL} | {seconds_per_board:7.3f} sec / board")
+        print(
+            f"new positions @ lvl {MIN_LEARN_LEVEL} | {min(chunk_end, len(learn_positions))}/{len(learn_positions)} "
+            + f"| {seconds:7.3f} sec "
+            + f"| ETA {eta.strftime('%Y-%m-%d %H:%M:%S')}"
+        )
 
 
 def get_learn_level(disc_count: int) -> int:
@@ -96,7 +109,8 @@ def get_learn_level(disc_count: int) -> int:
 def learn() -> None:
     db = DB()
 
-    learn_pgn_boards(db)
+    pgn_positions = get_normalized_pgn_positions()
+    learn_new_positions(db, pgn_positions)
 
     for disc_count in range(4, MAX_SAVABLE_DISCS + 1):
         learn_level = get_learn_level(disc_count)
@@ -120,6 +134,23 @@ def learn() -> None:
                 f"{disc_count} discs @ lvl {learn_level} | {i+1}/{len(positions)} | {seconds:7.3f} sec "
                 + f"| ETA {eta.strftime('%Y-%m-%d %H:%M:%S')}"
             )
+
+
+@app.command()
+def import_wthor(filenames: list[Path]) -> None:
+    positions: set[Position] = set()
+    games: list[Game] = []
+
+    for filename in filenames:
+        games += Wthor(filename).get_games()
+
+    for game in games:
+        positions.update(game.get_normalized_positions())
+
+    print(f"Found {len(games)} games with {len(positions)} unique positions.")
+
+    db = DB()
+    learn_new_positions(db, positions)
 
 
 if __name__ == "__main__":

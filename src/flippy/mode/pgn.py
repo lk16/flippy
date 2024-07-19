@@ -31,7 +31,7 @@ class PGNMode(BaseMode):
         if self.args.pgn_file:
             self.game = Game.from_pgn(self.args.pgn_file)
             self.lookup_or_search(
-                self.game.get_normalized_positions(), source=self.game
+                self.game.get_normalized_positions(add_children=True), source=self.game
             )
 
     def on_frame(self, event: Event) -> None:
