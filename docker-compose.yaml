@@ -1,5 +1,3 @@
-version: '3'
-
 services:
   postgres:
     image: postgres:latest
@@ -7,9 +5,9 @@ services:
     ports:
       - "12321:5432"
     environment:
-      POSTGRES_USER: book_user
-      POSTGRES_PASSWORD: book_pass
-      POSTGRES_DB: flippy
+      POSTGRES_USER: ${FLIPPY_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${FLIPPY_POSTGRES_PASS}
+      POSTGRES_DB: ${FLIPPY_POSTGRES_DB}
     volumes:
       - ./db_data:/var/lib/postgresql/data
   rabbitmq:
@@ -19,10 +17,7 @@ services:
       - "${RABBITMQ_PORT}:5672"
       - "${RABBITMQ_UI_PORT}:15672"
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS}
+      RABBITMQ_DEFAULT_USER: ${FLIPPY_RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${FLIPPY_RABBITMQ_PASS}
     volumes:
       - ./rabbitmq_data:/var/lib/rabbitmq
-
-volumes:
-  rabbitmq_data:

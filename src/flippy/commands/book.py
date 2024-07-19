@@ -4,7 +4,7 @@ from math import ceil
 from pathlib import Path
 
 from flippy.book import get_learn_level
-from flippy.config import config
+from flippy.config import PGN_TARGET_FOLDER
 from flippy.db import DB, MAX_SAVABLE_DISCS, MIN_LEARN_LEVEL, is_savable_position
 from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxEvaluations, EdaxRequest
@@ -24,7 +24,7 @@ def info() -> None:
 
 def get_normalized_pgn_positions() -> set[Position]:
     positions: set[Position] = set()
-    pgn_files = list((config.pgn_target_folder() / "normal").rglob("*.pgn"))
+    pgn_files = list((PGN_TARGET_FOLDER / "normal").rglob("*.pgn"))
 
     for offset, file in enumerate(pgn_files):
         game = Game.from_pgn(file)

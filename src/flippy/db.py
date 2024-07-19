@@ -2,7 +2,7 @@ import psycopg2
 from math import ceil
 from typing import Optional
 
-from flippy.config import config
+from flippy.config import POSTGRES_DSN
 from flippy.edax.types import EdaxEvaluation, EdaxEvaluations
 from flippy.othello.position import Position
 
@@ -41,8 +41,7 @@ class PositionNotFound(Exception):
 
 class DB:
     def __init__(self) -> None:
-        dsn = config.get_db_dsn()
-        self.conn = psycopg2.connect(dsn)
+        self.conn = psycopg2.connect(POSTGRES_DSN)
 
     def update_edax_evaluations(self, evaluations: EdaxEvaluations) -> None:
         for evaluation in evaluations.values.values():

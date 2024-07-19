@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import pika
 import typer
 from pika.adapters.blocking_connection import BlockingChannel
@@ -9,18 +8,19 @@ from pika.spec import PERSISTENT_DELIVERY_MODE, Basic, BasicProperties
 from typing import Any, Dict
 
 from flippy.book import get_learn_level
+from flippy.config import (
+    RABBITMQ_HOST,
+    RABBITMQ_PASS,
+    RABBITMQ_PORT,
+    RABBITMQ_QUEUE,
+    RABBITMQ_USER,
+)
 from flippy.db import DB, MAX_SAVABLE_DISCS
 from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxRequest
 from flippy.othello.position import Position
 
 app = typer.Typer()
-
-RABBITMQ_USER = os.environ["RABBITMQ_USER"]
-RABBITMQ_PORT = int(os.environ["RABBITMQ_PORT"])
-RABBITMQ_PASS = os.environ["RABBITMQ_PASS"]
-RABBITMQ_HOST = os.environ["RABBITMQ_HOST"]
-RABBITMQ_QUEUE = os.environ["RABBITMQ_QUEUE"]
 
 
 class Message:
