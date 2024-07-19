@@ -86,17 +86,11 @@ class EvaluateMode(GameMode):
         for move in board.get_moves_as_set():
             child = board.do_move(move)
 
-            greedy_value = self.db.lookup_greedy_evaluation(child.position)
+            try:
+                evaluation = self.evaluations.lookup(child.position)
+            except KeyError:
+                continue
 
-            if greedy_value is not None:
-                score = greedy_value[0]
-                evaluations[move] = -score
-
-            # try:
-            #     evaluation = self.evaluations.lookup(child.position)
-            # except KeyError:
-            #     continue
-        #
-        # evaluations[move] = -evaluation.score
+            evaluations[move] = -evaluation.score
 
         return {"evaluations": evaluations}
