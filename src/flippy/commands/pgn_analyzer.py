@@ -26,7 +26,7 @@ class PgnAnanlyzer:
             try:
                 evaluation = self.evaluations.lookup(child.position)
             except KeyError:
-                evaluation = self.db.lookup_position(child.position)
+                evaluation = self.db.lookup_edax_position(child.position)
 
             child_scores.append((move, evaluation.score))
 
@@ -91,14 +91,14 @@ class PgnAnanlyzer:
         all_positions = self._get_all_positions()
 
         # Lookup evaluations in the DB.
-        self.evaluations = self.db.lookup_positions(all_positions)
+        self.evaluations = self.db.lookup_edax_positions(all_positions)
 
         # Compute evaluations for other positions.
         computed_evaluations = self._evaluate_positions(all_positions)
         self.evaluations.update(computed_evaluations)
 
         # Save newly computed evaluations in DB.
-        self.db.update(computed_evaluations)
+        self.db.update_edax_evaluations(computed_evaluations)
 
         for move_offset in range(len(self.game.moves)):
             output_line = self._get_move_evaluation_line(move_offset)
