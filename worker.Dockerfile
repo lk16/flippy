@@ -31,5 +31,20 @@ COPY src/ /app/src/
 # Install the dependencies using PDM
 RUN pdm install
 
+WORKDIR /
+
+# TODO don't clone in build
+RUN apt-get update && \
+    apt-get install -y git && \
+    git clone https://github.com/abulmo/edax-reversi
+
+# TODO use separate build image
+# TODO don't hardcode target OS
+RUN mkdir -p /edax-reversi/bin && \
+    cd /edax-reversi/src && \
+    make build ARCH=x64 COMP=gcc OS=linux
+
+WORKDIR /app
+
 # Set the entry point to run the book-worker using PDM
 ENTRYPOINT ["pdm", "run", "book-worker", "run"]

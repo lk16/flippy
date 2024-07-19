@@ -20,7 +20,7 @@ from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxRequest
 from flippy.othello.position import Position
 
-app = typer.Typer()
+app = typer.Typer(pretty_exceptions_enable=False)
 
 
 class Message:
