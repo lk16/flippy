@@ -173,3 +173,6 @@ config.json
 
 # postgres data
 db_data
+
+# wthor files
+wthor/*.wtb

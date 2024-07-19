@@ -27,6 +27,25 @@ class Game:
         return game
 
     @classmethod
+    def from_moves(cls, moves: list[int]) -> Game:
+        board = Board.start()
+        boards = [board]
+
+        for move in moves:
+            if not board.is_valid_move(move):
+                # Passed moves may not be present in moves list
+                board = board.do_move(PASS_MOVE)
+                boards.append(board)
+
+            board = board.do_move(move)
+            boards.append(board)
+
+        game = Game()
+        game.boards = boards
+        game.moves = copy(moves)
+        return game
+
+    @classmethod
     def from_string(cls, string: str) -> Game:
         game = Game()
 
@@ -154,13 +173,14 @@ class Game:
 
         return all_children
 
-    def get_normalized_positions(self) -> set[Position]:
+    def get_normalized_positions(self, add_children: bool = False) -> set[Position]:
         positions: set[Position] = set()
 
         for board in self.boards:
             positions.add(board.position.normalized())
 
-            for child_position in board.get_child_positions():
-                positions.add(child_position.normalized())
+            if add_children:
+                for child_position in board.get_child_positions():
+                    positions.add(child_position.normalized())
 
         return positions
