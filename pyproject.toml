@@ -9,6 +9,7 @@ dependencies = [
     "typer>=0.9.0",
     "requests>=2.31.0",
     "psycopg2>=2.9.9",
+    "pika>=1.3.2",
 ]
 requires-python = "==3.11.*"
 readme = "README.md"
@@ -22,6 +23,7 @@ recent-games = "python src/flippy/commands/recent_games.py"
 book = "python src/flippy/commands/book.py"
 unique-positions = "python src/flippy/commands/unique_positions.py"
 update-greedy = "python src/flippy/commands/update_greedy.py"
+book-worker = "python src/flippy/commands/book_worker.py"
 
 
 [tool.pdm]
@@ -36,6 +38,7 @@ dev = [
     "pytest-cov>=4.1.0",
     "types-requests>=2.31.0.20240311",
     "types-psycopg2>=2.9.21.20240417",
+    "types-pika>=1.2.0b1",
 ]
 
 [tool.ruff.lint]

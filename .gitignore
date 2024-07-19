@@ -176,3 +176,6 @@ db_data
 
 # wthor files
 wthor/*.wtb
+
+# rabbitmq data
+rabbitmq_data
