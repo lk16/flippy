@@ -28,7 +28,7 @@ RUN git clone https://github.com/abulmo/edax-reversi
 # TODO don't hardcode target OS
 RUN mkdir -p /edax-reversi/bin && \
     cd /edax-reversi/src && \
-    make build ARCH=x64 COMP=gcc OS=linux
+    make build ARCH=$EDAX_ARCH COMP=gcc OS=linux
 
 # Download edax weights. TODO don't do this in the future
 RUN cd /edax-reversi && \
