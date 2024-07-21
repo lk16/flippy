@@ -5,15 +5,36 @@ FROM python:3.12.2-slim
 ENV PDM_HOME=/root/.pdm \
     PDM_IGNORE_SAVED_PYTHON=1 \
     PIP_NO_CACHE_DIR=off \
-    PIP_DISABLE_PIP_VERSION_CHECK=on
+    PIP_DISABLE_PIP_VERSION_CHECK=on \
+    PYTHONUNBUFFERED=1
 
 # Install necessary build dependencies
+# TODO git and p7zip-full are only used to build edax-reversi
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
     curl \
-    && apt-get clean && \
+    git \
+    p7zip-full && \
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+
+WORKDIR /
+
+# TODO don't clone in build
+RUN git clone https://github.com/abulmo/edax-reversi
+
+# TODO use separate build image
+# TODO don't hardcode target OS
+RUN mkdir -p /edax-reversi/bin && \
+    cd /edax-reversi/src && \
+    make build ARCH=x64 COMP=gcc OS=linux
+
+# Download edax weights. TODO don't do this in the future
+RUN cd /edax-reversi && \
+    curl -OL https://github.com/abulmo/edax-reversi/releases/download/v4.4/eval.7z && \
+    7z x eval.7z && \
+    rm eval.7z
 
 # Install PDM
 RUN curl -sSL https://raw.githubusercontent.com/pdm-project/pdm/main/install-pdm.py | python3 -
@@ -26,23 +47,15 @@ WORKDIR /app
 
 # Copy the PDM project files
 COPY pyproject.toml pdm.lock /app/
-COPY src/ /app/src/
 
 # Install the dependencies using PDM
 RUN pdm install
 
-WORKDIR /
+# Copy app source
+COPY src/ /app/src/
 
-# TODO don't clone in build
-RUN apt-get update && \
-    apt-get install -y git && \
-    git clone https://github.com/abulmo/edax-reversi
-
-# TODO use separate build image
-# TODO don't hardcode target OS
-RUN mkdir -p /edax-reversi/bin && \
-    cd /edax-reversi/src && \
-    make build ARCH=x64 COMP=gcc OS=linux
+# Install commands
+RUN pdm install
 
 WORKDIR /app
 

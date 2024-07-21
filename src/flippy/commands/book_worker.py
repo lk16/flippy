@@ -85,6 +85,7 @@ class BookWorker:
                 on_message_callback=self.consume_callback,
                 auto_ack=False,
             )
+            print("Waiting for messages")
             channel.start_consuming()
 
     def consume_callback(
@@ -110,6 +111,8 @@ class BookWorker:
         self.db.update_edax_evaluations(learned_evaluations)
 
         assert method.delivery_tag is not None
+
+        # TODO this fails with pika.exceptions.StreamLostError sometimes
         channel.basic_ack(delivery_tag=method.delivery_tag)  # Acknowledge the message
 
     def purge(self) -> None:

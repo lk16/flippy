@@ -41,6 +41,7 @@ class PositionNotFound(Exception):
 
 class DB:
     def __init__(self) -> None:
+        print(f"Connecting to: {POSTGRES_DSN}")
         self.conn = psycopg2.connect(POSTGRES_DSN)
 
     def update_edax_evaluations(self, evaluations: EdaxEvaluations) -> None:
