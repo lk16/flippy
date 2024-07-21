@@ -26,9 +26,11 @@ RUN git clone https://github.com/abulmo/edax-reversi
 
 # TODO use separate build image
 # TODO don't hardcode target OS
+# Rename executable to get consistent name across architectures
 RUN mkdir -p /edax-reversi/bin && \
     cd /edax-reversi/src && \
-    make build ARCH=$EDAX_ARCH COMP=gcc OS=linux
+    make build ARCH=$EDAX_ARCH COMP=gcc OS=linux && \
+    mv $(ls /edax-reversi/bin/*Edax*) /edax-reversi/bin/edax
 
 # Download edax weights. TODO don't do this in the future
 RUN cd /edax-reversi && \

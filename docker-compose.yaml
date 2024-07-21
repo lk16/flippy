@@ -36,7 +36,7 @@ services:
       context: .
       dockerfile: worker.Dockerfile
     environment:
-      FLIPPY_EDAX_PATH: '/edax-reversi/bin/lEdax-x64'
+      FLIPPY_EDAX_PATH: '/edax-reversi/bin/edax'
       FLIPPY_PGN_SOURCE_FOLDERS: ''
       FLIPPY_PGN_TARGET_FOLDER: ''
       FLIPPY_PLAYOK_USERNAMES: ''
