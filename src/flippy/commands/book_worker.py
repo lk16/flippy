@@ -83,7 +83,7 @@ class BookWorker:
             channel.basic_consume(
                 queue=RABBITMQ_QUEUE,
                 on_message_callback=self.consume_callback,
-                auto_ack=False,
+                # auto_ack=False,  # TODO Disable automatic acknowledgement.
             )
             print("Waiting for messages")
             channel.start_consuming()
@@ -111,9 +111,6 @@ class BookWorker:
         self.db.update_edax_evaluations(learned_evaluations)
 
         assert method.delivery_tag is not None
-
-        # TODO this fails with pika.exceptions.StreamLostError sometimes
-        channel.basic_ack(delivery_tag=method.delivery_tag)  # Acknowledge the message
 
     def purge(self) -> None:
         with self.get_connection() as connection:
