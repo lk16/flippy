@@ -46,6 +46,8 @@ class Message:
 class BookWorker:
     def __init__(self) -> None:
         self.db = DB()
+        self.connection = self.get_connection()
+        self.channel = self.declare_channel()
 
     def get_connection(self) -> pika.BlockingConnection:
         credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
@@ -54,39 +56,33 @@ class BookWorker:
         )
         return pika.BlockingConnection(params)
 
-    def declare_channel(self, connection: pika.BlockingConnection) -> BlockingChannel:
-        channel = connection.channel()
+    def declare_channel(self) -> BlockingChannel:
+        channel = self.connection.channel()
         channel.queue_declare(queue=RABBITMQ_QUEUE, arguments={"x-max-priority": 100})
         return channel
 
     def send_many(self, messages: list[Message]) -> None:
-        with self.get_connection() as connection:
-            channel = self.declare_channel(connection)
-
-            for message in messages:
-                channel.basic_publish(
-                    exchange="",
-                    routing_key=RABBITMQ_QUEUE,
-                    body=message.to_json(),
-                    properties=pika.BasicProperties(
-                        delivery_mode=PERSISTENT_DELIVERY_MODE,
-                        priority=message.priority,
-                    ),
-                )
+        for message in messages:
+            self.channel.basic_publish(
+                exchange="",
+                routing_key=RABBITMQ_QUEUE,
+                body=message.to_json(),
+                properties=pika.BasicProperties(
+                    delivery_mode=PERSISTENT_DELIVERY_MODE,
+                    priority=message.priority,
+                ),
+            )
 
     def send(self, message: Message) -> None:
         self.send_many([message])
 
     def consume_loop(self) -> None:
-        with self.get_connection() as connection:
-            channel = self.declare_channel(connection)
-            channel.basic_consume(
-                queue=RABBITMQ_QUEUE,
-                on_message_callback=self.consume_callback,
-                # auto_ack=False,  # TODO Disable automatic acknowledgement.
-            )
-            print("Waiting for messages")
-            channel.start_consuming()
+        # TODO Disable automatic acknowledgement.
+        self.channel.basic_consume(
+            queue=RABBITMQ_QUEUE, on_message_callback=self.consume_callback
+        )
+        print("Waiting for messages")
+        self.channel.start_consuming()
 
     def consume_callback(
         self,
@@ -102,6 +98,13 @@ class BookWorker:
 
         position.show()
         print(f"{position!r}")
+
+        db_evaluation = self.db.lookup_edax_position(position)
+
+        if db_evaluation.level >= learn_level:
+            print("Board was already learned.")
+            return
+
         print(f"Learning at level {learn_level}")
         print()
 
@@ -110,12 +113,8 @@ class BookWorker:
 
         self.db.update_edax_evaluations(learned_evaluations)
 
-        assert method.delivery_tag is not None
-
     def purge(self) -> None:
-        with self.get_connection() as connection:
-            channel = self.declare_channel(connection)
-            channel.queue_purge(queue=RABBITMQ_QUEUE)
+        self.channel.queue_purge(queue=RABBITMQ_QUEUE)
 
 
 @app.command()
