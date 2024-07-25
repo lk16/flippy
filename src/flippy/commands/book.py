@@ -132,11 +132,15 @@ def import_wthor(filenames: list[Path]) -> None:
     positions: set[Position] = set()
     games: list[Game] = []
 
-    for filename in filenames:
-        games += Wthor(filename).get_games()
+    print("Loading files.")
 
-    for game in games:
+    for i, filename in enumerate(filenames):
+        games += Wthor(filename).get_games()
+        print(f"Loaded {i+1}/{len(filenames)} files.")
+
+    for i, game in enumerate(games):
         positions.update(game.get_normalized_positions())
+        print(f"Loaded game {i+1}/{len(games)} | {len(positions)} unique positions.")
 
     print(f"Found {len(games)} games with {len(positions)} unique positions.")
 
