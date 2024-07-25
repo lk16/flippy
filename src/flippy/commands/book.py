@@ -140,7 +140,11 @@ def import_wthor(filenames: list[Path]) -> None:
 
     for i, game in enumerate(games):
         positions.update(game.get_normalized_positions())
-        print(f"Loaded game {i+1}/{len(games)} | {len(positions)} unique positions.")
+
+        if i % 100 == 0 or i == len(games) - 1:
+            print(
+                f"Loaded game {i+1}/{len(games)} | {len(positions)} unique positions."
+            )
 
     print(f"Found {len(games)} games with {len(positions)} unique positions.")
 

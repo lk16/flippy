@@ -278,24 +278,24 @@ class DB:
 
         levels = set(row[1] for row in stats)
 
-        print("   level: " + " ".join(f"{level:>6}" for level in sorted(levels)))
-        print("----------" + "-".join("------" for _ in levels))
+        print("   level: " + " ".join(f"{level:>7}" for level in sorted(levels)))
+        print("----------" + "-".join("-------" for _ in levels))
 
         for discs in sorted(table.keys()):
             print(f"{discs:>2} discs: ", end="")
             for level in sorted(levels):
                 if level not in table[discs]:
-                    print("       ", end="")
+                    print("        ", end="")
                 else:
-                    print(f"{table[discs][level]:>6} ", end="")
+                    print(f"{table[discs][level]:>7} ", end="")
             print()
 
-        print("----------" + "-".join("------" for _ in levels))
+        print("----------" + "-".join("-------" for _ in levels))
 
         print(
             "   total: "
             + " ".join(
-                f"{level_totals[total]:>6}" for total in sorted(level_totals.keys())
+                f"{level_totals[total]:>7}" for total in sorted(level_totals.keys())
             )
         )
 
