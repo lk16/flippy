@@ -2,7 +2,7 @@ from collections import defaultdict
 from typing import Any
 
 from flippy.arguments import Arguments
-from flippy.config import config
+from flippy.config import ALL_USERNAMES, PGN_TARGET_FOLDER
 from flippy.mode.game import GameMode
 from flippy.othello.board import Board
 from flippy.othello.game import Game
@@ -16,8 +16,8 @@ class FrequencyMode(GameMode):
 
     def _load_frequencies(self) -> defaultdict[Board, int]:
         frequencies: defaultdict[Board, int] = defaultdict(lambda: 0)
-        pgn_files = list((config.pgn_target_folder() / "normal").rglob("*.pgn"))
-        usernames = config.all_usernames()
+        pgn_files = list((PGN_TARGET_FOLDER / "normal").rglob("*.pgn"))
+        usernames = ALL_USERNAMES
 
         games = [Game.from_pgn(file) for file in pgn_files]
 

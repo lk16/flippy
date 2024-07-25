@@ -1,4 +1,6 @@
-version: '3'
+networks:
+  flippy-network:
+    driver: bridge
 
 services:
   postgres:
@@ -7,8 +9,47 @@ services:
     ports:
       - "12321:5432"
     environment:
-      POSTGRES_USER: book_user
-      POSTGRES_PASSWORD: book_pass
-      POSTGRES_DB: flippy
+      POSTGRES_USER: ${FLIPPY_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${FLIPPY_POSTGRES_PASS}
+      POSTGRES_DB: ${FLIPPY_POSTGRES_DB}
     volumes:
       - ./db_data:/var/lib/postgresql/data
+    networks:
+      - flippy-network
+  rabbitmq:
+    image: rabbitmq:3-management
+    restart: always
+    container_name: rabbitmq
+    ports:
+      - "${FLIPPY_RABBITMQ_PORT}:5672"
+      - "${FLIPPY_RABBITMQ_UI_PORT}:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${FLIPPY_RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${FLIPPY_RABBITMQ_PASS}
+    volumes:
+      - ./rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - flippy-network
+  book-worker:
+    restart: always
+    build:
+      context: .
+      dockerfile: worker.Dockerfile
+    environment:
+      FLIPPY_EDAX_PATH: '/edax-reversi/bin/edax'
+      FLIPPY_PGN_SOURCE_FOLDERS: ''
+      FLIPPY_PGN_TARGET_FOLDER: ''
+      FLIPPY_PLAYOK_USERNAMES: ''
+      FLIPPY_POSTGRES_DB: ${FLIPPY_POSTGRES_DB}
+      FLIPPY_POSTGRES_HOST: ${FLIPPY_LOCAL_POSTGRES_HOST:-${FLIPPY_POSTGRES_HOST}}
+      FLIPPY_POSTGRES_PASS: ${FLIPPY_POSTGRES_PASS}
+      FLIPPY_POSTGRES_PORT: ${FLIPPY_LOCAL_POSTGRES_PORT:-${FLIPPY_POSTGRES_PORT}}
+      FLIPPY_POSTGRES_USER: ${FLIPPY_POSTGRES_USER}
+      FLIPPY_RABBITMQ_HOST: ${FLIPPY_LOCAL_RABBITMQ_HOST:-${FLIPPY_RABBITMQ_HOST}}
+      FLIPPY_RABBITMQ_PASS: ${FLIPPY_RABBITMQ_PASS}
+      FLIPPY_RABBITMQ_PORT: ${FLIPPY_LOCAL_RABBITMQ_PORT:-${FLIPPY_RABBITMQ_PORT}}
+      FLIPPY_RABBITMQ_QUEUE: ${FLIPPY_RABBITMQ_QUEUE}
+      FLIPPY_RABBITMQ_USER: ${FLIPPY_RABBITMQ_USER}
+      FLIPPY_USERNAMES: ''
+    networks:
+      - flippy-network

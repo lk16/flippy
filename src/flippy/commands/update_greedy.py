@@ -2,7 +2,7 @@ import datetime
 import typer
 from typing import Optional
 
-from flippy.commands.book import get_learn_level
+from flippy.book import get_learn_level
 from flippy.db import DB
 from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxEvaluation, EdaxEvaluations, EdaxRequest

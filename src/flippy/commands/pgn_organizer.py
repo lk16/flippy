@@ -5,15 +5,15 @@ from datetime import datetime
 from itertools import count
 from pathlib import Path
 
-from flippy.config import config
+from flippy.config import PGN_SOURCE_FOLDERS, PGN_TARGET_FOLDER, PLAYOK_USERNAMES
 from flippy.othello.game import Game
 
 
 class PgnOrganizer:
     def __init__(self) -> None:
-        self.source_folders = config.pgn_source_folders()
-        self.target_folder = config.pgn_target_folder()
-        self.playok_usernames = config.playok_usernames()
+        self.source_folders = PGN_SOURCE_FOLDERS
+        self.target_folder = PGN_TARGET_FOLDER
+        self.playok_usernames = PLAYOK_USERNAMES
 
     def __call__(self) -> None:
         moved = self.move_from_source_folders()
