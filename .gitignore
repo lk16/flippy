@@ -176,7 +176,8 @@ config.json
 db_data
 
 # wthor files
-wthor/*.wtb
+wthor/
+
 
 # rabbitmq data
 rabbitmq_data
