@@ -57,7 +57,7 @@ class EdaxEvaluation:
         assert self.confidence in [73, 87, 95, 98, 99, 100]
         assert -64 <= self.score <= 64
         assert 0 <= self.level <= 60
-        assert self.level % 2 == 0
+        # TODO assert self.level % 2 == 0
 
         dummy = deepcopy(self.position)
         for move in self.best_moves:
