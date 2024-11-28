@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from flippy.othello.board import BLACK, WHITE, Board
-from flippy.othello.position import PASS_MOVE, InvalidMove, Position
+from flippy.othello.position import InvalidMove, Position
 
 metadata_regex = re.compile('\[(.*) "(.*)"\]')
 
@@ -80,7 +80,7 @@ class Game:
                     board.do_move(move)
                 except InvalidMove:
                     # Some PGN's don't mark passed moves properly
-                    board = board.do_move(PASS_MOVE)
+                    board = board.pass_move()
                     game.boards.append(board)
 
                 board = board.do_move(move)
