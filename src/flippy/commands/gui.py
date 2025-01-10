@@ -6,6 +6,8 @@ import typer
 from pathlib import Path
 from typing import Annotated, Optional, Type
 
+from flippy.mode.challenge import ChallengeMode
+
 # Disable pygame start-up text.
 # This needs to be before first pygame import.
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
@@ -34,6 +36,7 @@ MODES = {
     "game": GameMode,
     "pgn": PGNMode,
     "watch": WatchMode,
+    "challenge": ChallengeMode,
 }
 
 
