@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from flippy.arguments import Arguments
-from flippy.db import DB
+from flippy.db import DB, PositionNotFound
 from flippy.mode.base import BaseMode
 from flippy.othello.board import Board
 
@@ -34,6 +34,18 @@ class ChallengeMode(BaseMode):
     def get_ui_details(self) -> dict[str, Any]:
         return {"move_mistakes": self.move_mistakes}
 
+    def is_ok_board(self, board: Board) -> bool:
+        if len(board.get_children()) < 2:
+            return False
+
+        for child in board.get_children():
+            try:
+                self.db.lookup_edax_position(child.position)
+            except PositionNotFound:
+                return False
+
+        return True
+
     def on_move(self, move: int) -> None:
         try:
             board = self.get_board()
@@ -49,7 +61,11 @@ class ChallengeMode(BaseMode):
 
         for m in board.get_moves_as_set():
             child = board.do_move(m)
-            evaluation = self.db.lookup_edax_position(child.position)
+            try:
+                evaluation = self.db.lookup_edax_position(child.position)
+            except PositionNotFound:
+                continue
+
             score = -evaluation.score
             if score > best_score:
                 best_score = score
@@ -60,7 +76,14 @@ class ChallengeMode(BaseMode):
             self.move_mistakes.add(move)
             return
 
+        if not self.move_mistakes:
+            self.excercises.extend(board.get_children())
+
         self.move_mistakes = set()
 
-        self.excercises.extend(board.get_children())
+        # Pop board we just solved.
         self.excercises.pop(0)
+
+        # Pop boring boards and boards that are not in the opening book, so we don't pollute the db.
+        while self.excercises and not self.is_ok_board(self.excercises[0]):
+            self.excercises.pop(0)

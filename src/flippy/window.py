@@ -159,7 +159,11 @@ class Window:
                 self.draw_number(index, turn_color, evaluations[index])
                 if evaluations[index] == max(evaluations.values()):
                     self.draw_best_move_marker(index, turn_color)
-            elif board.is_valid_move(index) and not child_frequencies:
+            elif (
+                board.is_valid_move(index)
+                and not child_frequencies
+                and index not in move_mistakes
+            ):
                 self.draw_move_indicator(index, turn_color)
 
         self.draw_graph(graph_data, graph_current_move)
