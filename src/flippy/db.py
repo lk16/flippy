@@ -2,7 +2,7 @@ import psycopg2
 from math import ceil
 from typing import Optional
 
-from flippy.config import config
+from flippy.config import POSTGRES_DSN
 from flippy.edax.types import EdaxEvaluation, EdaxEvaluations
 from flippy.othello.position import Position
 
@@ -41,8 +41,8 @@ class PositionNotFound(Exception):
 
 class DB:
     def __init__(self) -> None:
-        dsn = config.get_db_dsn()
-        self.conn = psycopg2.connect(dsn)
+        print(f"Connecting to: {POSTGRES_DSN}")
+        self.conn = psycopg2.connect(POSTGRES_DSN)
 
     def update_edax_evaluations(self, evaluations: EdaxEvaluations) -> None:
         for evaluation in evaluations.values.values():
@@ -278,24 +278,24 @@ class DB:
 
         levels = set(row[1] for row in stats)
 
-        print("   level: " + " ".join(f"{level:>6}" for level in sorted(levels)))
-        print("----------" + "-".join("------" for _ in levels))
+        print("   level: " + " ".join(f"{level:>7}" for level in sorted(levels)))
+        print("----------" + "-".join("-------" for _ in levels))
 
         for discs in sorted(table.keys()):
             print(f"{discs:>2} discs: ", end="")
             for level in sorted(levels):
                 if level not in table[discs]:
-                    print("       ", end="")
+                    print("        ", end="")
                 else:
-                    print(f"{table[discs][level]:>6} ", end="")
+                    print(f"{table[discs][level]:>7} ", end="")
             print()
 
-        print("----------" + "-".join("------" for _ in levels))
+        print("----------" + "-".join("-------" for _ in levels))
 
         print(
             "   total: "
             + " ".join(
-                f"{level_totals[total]:>6}" for total in sorted(level_totals.keys())
+                f"{level_totals[total]:>7}" for total in sorted(level_totals.keys())
             )
         )
 

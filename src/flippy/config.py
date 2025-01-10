@@ -1,49 +1,42 @@
-import json
+import os
+from dotenv import load_dotenv
 from pathlib import Path
-from typing import cast
 
 from flippy import PROJECT_ROOT
 
-
-class Config:
-    def __init__(self) -> None:
-        config_path = PROJECT_ROOT / "config.json"
-        self.__raw = json.loads(config_path.read_text())
-
-    @staticmethod
-    def resolve_path(string: str) -> Path:
-        string = string.replace("$PROJECT_ROOT", str(PROJECT_ROOT))
-        string = string.replace("~", str(Path.home()))
-        return Path(string).resolve()
-
-    def pgn_source_folders(self) -> list[Path]:
-        return [
-            self.resolve_path(item)
-            for item in self.__raw["pgn_organizer"]["source_folders"]
-        ]
-
-    def pgn_target_folder(self) -> Path:
-        return self.resolve_path(self.__raw["pgn_organizer"]["target_folder"])
-
-    def playok_usernames(self) -> list[str]:
-        return cast(list[str], self.__raw["pgn_organizer"]["playok_usernames"])
-
-    def usernames(self) -> list[str]:
-        return cast(list[str], self.__raw["usernames"])
-
-    def all_usernames(self) -> set[str]:
-        return {*self.playok_usernames(), *self.usernames()}
-
-    def edax_path(self) -> Path:
-        return self.resolve_path(self.__raw["edax_path"])
-
-    def get_db_dsn(self) -> str:
-        user = self.__raw["db"]["user"]
-        password = self.__raw["db"]["password"]
-        host = self.__raw["db"]["host"]
-        port = self.__raw["db"]["port"]
-        db = self.__raw["db"]["db"]
-        return f"postgres://{user}:{password}@{host}:{port}/{db}"
+load_dotenv()
 
 
-config = Config()
+def resolve_path(string: str) -> Path:
+    string = string.replace("PROJECT_ROOT", str(PROJECT_ROOT))
+    string = string.replace("~", str(Path.home()))
+    return Path(string).resolve()
+
+
+def resolve_paths(string: str) -> list[Path]:
+    return [resolve_path(part) for part in string.split(",")]
+
+
+PGN_SOURCE_FOLDERS = resolve_paths(os.environ["FLIPPY_PGN_SOURCE_FOLDERS"])
+PGN_TARGET_FOLDER = resolve_path(os.environ["FLIPPY_PGN_TARGET_FOLDER"])
+
+PLAYOK_USERNAMES = os.environ["FLIPPY_PLAYOK_USERNAMES"].split(",")
+USERNAMES = os.environ["FLIPPY_USERNAMES"].split(",")
+
+ALL_USERNAMES = {*PLAYOK_USERNAMES, *USERNAMES}
+
+EDAX_PATH = resolve_path(os.environ["FLIPPY_EDAX_PATH"])
+
+POSTGRES_USER = os.environ["FLIPPY_POSTGRES_USER"]
+POSTGRES_PASS = os.environ["FLIPPY_POSTGRES_PASS"]
+POSTGRES_HOST = os.environ["FLIPPY_POSTGRES_HOST"]
+POSTGRES_PORT = int(os.environ["FLIPPY_POSTGRES_PORT"])
+POSTGRES_DB = os.environ["FLIPPY_POSTGRES_DB"]
+
+POSTGRES_DSN = f"postgres://{POSTGRES_USER}:{POSTGRES_PASS}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+
+RABBITMQ_USER = os.environ["FLIPPY_RABBITMQ_USER"]
+RABBITMQ_PASS = os.environ["FLIPPY_RABBITMQ_PASS"]
+RABBITMQ_PORT = int(os.environ["FLIPPY_RABBITMQ_PORT"])
+RABBITMQ_HOST = os.environ["FLIPPY_RABBITMQ_HOST"]
+RABBITMQ_QUEUE = os.environ["FLIPPY_RABBITMQ_QUEUE"]

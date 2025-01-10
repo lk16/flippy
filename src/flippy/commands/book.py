@@ -3,7 +3,8 @@ import typer
 from math import ceil
 from pathlib import Path
 
-from flippy.config import config
+from flippy.book import get_learn_level
+from flippy.config import PGN_TARGET_FOLDER
 from flippy.db import DB, MAX_SAVABLE_DISCS, MIN_LEARN_LEVEL, is_savable_position
 from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxEvaluations, EdaxRequest
@@ -23,7 +24,7 @@ def info() -> None:
 
 def get_normalized_pgn_positions() -> set[Position]:
     positions: set[Position] = set()
-    pgn_files = list((config.pgn_target_folder() / "normal").rglob("*.pgn"))
+    pgn_files = list((PGN_TARGET_FOLDER / "normal").rglob("*.pgn"))
 
     for offset, file in enumerate(pgn_files):
         game = Game.from_pgn(file)
@@ -95,16 +96,6 @@ def learn_new_positions(db: DB, positions: set[Position]) -> None:
         )
 
 
-def get_learn_level(disc_count: int) -> int:
-    if disc_count <= 12:
-        return 36
-
-    if disc_count <= 20:
-        return 34
-
-    return 32
-
-
 @app.command()
 def learn() -> None:
     db = DB()
@@ -141,11 +132,19 @@ def import_wthor(filenames: list[Path]) -> None:
     positions: set[Position] = set()
     games: list[Game] = []
 
-    for filename in filenames:
-        games += Wthor(filename).get_games()
+    print("Loading files.")
 
-    for game in games:
+    for i, filename in enumerate(filenames):
+        games += Wthor(filename).get_games()
+        print(f"Loaded {i+1}/{len(filenames)} files.")
+
+    for i, game in enumerate(games):
         positions.update(game.get_normalized_positions())
+
+        if (i + 1) % 100 == 0 or i == len(games) - 1:
+            print(
+                f"Loaded game {i+1}/{len(games)} | {len(positions)} unique positions."
+            )
 
     print(f"Found {len(games)} games with {len(positions)} unique positions.")
 
