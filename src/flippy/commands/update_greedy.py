@@ -47,7 +47,7 @@ class GreedyUpdater:
             for i, position in enumerate(positions):
                 before = datetime.datetime.now()
                 self.learn_greedy(position)
-                # TODO update preceding positions
+                # TODO #47 update preceding positions
                 self.save_learned_greedy()
 
                 after = datetime.datetime.now()

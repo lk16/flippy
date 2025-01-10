@@ -77,7 +77,7 @@ class BookWorker:
         self.send_many([message])
 
     def consume_loop(self) -> None:
-        # TODO Disable automatic acknowledgement.
+        # TODO #47 Disable automatic acknowledgement.
         self.channel.basic_consume(
             queue=RABBITMQ_QUEUE, on_message_callback=self.consume_callback
         )

@@ -9,7 +9,7 @@ ENV PDM_HOME=/root/.pdm \
     PYTHONUNBUFFERED=1
 
 # Install necessary build dependencies
-# TODO git and p7zip-full are only used to build edax-reversi
+# TODO #47 git and p7zip-full are only used to build edax-reversi
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
@@ -21,18 +21,19 @@ RUN apt-get update && \
 
 WORKDIR /
 
-# TODO don't clone in build
+# TODO #47 don't clone in build
 RUN git clone https://github.com/abulmo/edax-reversi
 
-# TODO use separate build image
-# TODO don't hardcode target OS
+# TODO #47 use separate build image
+# TODO #47 don't hardcode target OS
 # Rename executable to get consistent name across architectures
 RUN mkdir -p /edax-reversi/bin && \
     cd /edax-reversi/src && \
     make build ARCH=$EDAX_ARCH COMP=gcc OS=linux && \
     mv $(ls /edax-reversi/bin/*Edax*) /edax-reversi/bin/edax
 
-# Download edax weights. TODO don't do this in the future
+# Download edax weights.
+# TODO #47 don't do this in the future
 RUN cd /edax-reversi && \
     curl -OL https://github.com/abulmo/edax-reversi/releases/download/v4.4/eval.7z && \
     7z x eval.7z && \
