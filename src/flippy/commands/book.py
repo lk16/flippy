@@ -28,7 +28,7 @@ def get_normalized_pgn_positions() -> set[Position]:
 
     for offset, file in enumerate(pgn_files):
         game = Game.from_pgn(file)
-        positions.update(game.get_normalized_positions())
+        positions.update(game.get_normalized_positions(add_children=True))
 
         percentage = 100.0 * (offset + 1) / len(pgn_files)
         print(

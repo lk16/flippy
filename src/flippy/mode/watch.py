@@ -11,7 +11,7 @@ FOD_LEFT_TOP_MARKER = (53, 144, 103)
 FOD_RIGHT_TOP_MARKER = (64, 134, 169)
 FOD_WHITE = (223, 225, 227)
 FOD_BLACK = (48, 48, 48)
-FOD_EMPTIES = [(41, 91, 25), (51, 111, 31)]
+FOD_EMPTIES = [(41, 91, 25), (51, 111, 31), (0, 92, 0), (6, 113, 0)]
 FOD_TURN_HIGHLIGHTER = (182, 170, 65)
 
 
@@ -164,6 +164,8 @@ class WatchMode(BaseMode):
 
         if is_similar_color(pixel, FOD_WHITE, 20):
             return WHITE
+
+        print(pixel)
 
         raise UnknownSquare
 

@@ -231,16 +231,27 @@ class PGNMode(BaseMode):
                 graph_data.append(None)
                 continue
 
-            try:
-                evaluation = self.evaluations.lookup(board.position)
-            except KeyError:
+            # Child score is the score of the opponent.
+            # We want to find the minimum score of the opponent.
+            min_child_score: int | None = None
+
+            for child in board.get_children():
+                try:
+                    evaluation = self.evaluations.lookup(child.position)
+                except KeyError:
+                    continue
+
+                if min_child_score is None or evaluation.score < min_child_score:
+                    min_child_score = evaluation.score
+
+            if min_child_score is None:
                 graph_data.append(None)
                 continue
 
             if board.turn == BLACK:
-                score = evaluation.score
+                score = -min_child_score
             else:
-                score = -evaluation.score
+                score = min_child_score
 
             graph_data.append((board.turn, score))
 
