@@ -1,9 +1,11 @@
 import datetime
 import typer
+import uvicorn
 from math import ceil
 from pathlib import Path
 
 from flippy.book import get_learn_level
+from flippy.book.client import BookLearningClient
 from flippy.config import PGN_TARGET_FOLDER
 from flippy.db import DB, MAX_SAVABLE_DISCS, MIN_LEARN_LEVEL, is_savable_position
 from flippy.edax.process import start_evaluation_sync
@@ -20,6 +22,21 @@ app = typer.Typer(pretty_exceptions_enable=False)
 @app.command()
 def info() -> None:
     DB().print_edax_stats()
+
+
+@app.command()
+def server() -> None:
+    uvicorn.run("flippy.book.server:app", host="0.0.0.0", port=7777)
+
+
+@app.command()
+def client() -> None:
+    BookLearningClient().run()
+
+
+# TODO add separate command for loading PGN files
+
+# TODO remove most code below
 
 
 def get_normalized_pgn_positions() -> set[Position]:
