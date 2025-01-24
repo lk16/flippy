@@ -177,3 +177,6 @@ db_data
 
 # wthor files
 wthor/
+
+# flippy app data
+.flippy/
