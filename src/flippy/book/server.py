@@ -30,7 +30,8 @@ class ServerState:
         self.job_queue: list[Job] = []
         self.disc_count = 0
         self.db = DB()
-        self.last_check_time = datetime.now()
+        self.last_new_boards_check_time = datetime.now()
+        self.last_prune_time = datetime.now()
 
     def _load_jobs_for_disc_count(self, disc_count: int) -> list[Job]:
         """Load jobs for positions with the specified disc count that need to be learned."""
@@ -52,10 +53,10 @@ class ServerState:
         current_time = datetime.now()
         check_interval = timedelta(minutes=10)
 
-        if current_time - self.last_check_time < check_interval:
+        if current_time - self.last_new_boards_check_time < check_interval:
             return
 
-        self.last_check_time = current_time
+        self.last_new_boards_check_time = current_time
         print("Checking for new boards to learn...")
 
         # Check all disc counts up to current disc_count
@@ -90,8 +91,14 @@ class ServerState:
 
     def prune_inactive_clients(self) -> None:
         current_time = datetime.now()
-        inactive_threshold = timedelta(minutes=5)
+        check_interval = timedelta(minutes=1)
 
+        if current_time - self.last_prune_time < check_interval:
+            return
+
+        self.last_prune_time = current_time
+
+        inactive_threshold = timedelta(minutes=5)
         min_heartbeat_time = current_time - inactive_threshold
 
         inactive_client_ids: list[str] = []
@@ -100,7 +107,7 @@ class ServerState:
             if client.last_heartbeat < min_heartbeat_time:
                 inactive_client_ids.append(client_id)
 
-            # Restore job from dead clients
+            # Restore job from inactive clients
             if client.job:
                 self.job_queue.append(client.job)
 
@@ -133,6 +140,10 @@ async def register_client(
 async def get_job(
     client_id: str = Header(...), state: ServerState = Depends(get_server_state)
 ) -> JobResponse:
+    # We prune clients here, because we don't have to add some timing logic.
+    # If nobody asks for work, we don't risk losing any work handed out to inactive clients.
+    state.prune_inactive_clients()
+
     if client_id not in state.active_clients:
         raise HTTPException(status_code=401)
 
@@ -173,9 +184,6 @@ async def submit_result(
 
 @app.get("/stats")
 async def get_stats(state: ServerState = Depends(get_server_state)) -> StatsResponse:
-    # TODO clients will not be pruned until this endpoint is called
-    state.prune_inactive_clients()
-
     clients = state.active_clients.values()
 
     return StatsResponse(
