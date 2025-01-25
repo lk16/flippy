@@ -11,14 +11,14 @@ from flippy.book.models import (
     RegisterResponse,
     SerializedEvaluation,
 )
-from flippy.config import BOOK_LEARNING_SERVER_URL
+from flippy.config import get_book_server_url
 from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxRequest
 
 
 class BookLearningClient:
     def __init__(self) -> None:
-        self.server_url = BOOK_LEARNING_SERVER_URL
+        self.server_url = get_book_server_url()
         self.client_id: str | None = None
 
         threading.Thread(target=self._heartbeat_loop, daemon=True).start()

@@ -17,22 +17,30 @@ def resolve_paths(string: str) -> list[Path]:
     return [resolve_path(part) for part in string.split(",")]
 
 
-PGN_SOURCE_FOLDERS = resolve_paths(os.environ["FLIPPY_PGN_SOURCE_FOLDERS"])
-PGN_TARGET_FOLDER = resolve_path(os.environ["FLIPPY_PGN_TARGET_FOLDER"])
+def get_db_dsn() -> str:
+    user = os.environ["FLIPPY_POSTGRES_USER"]
+    pass_ = os.environ["FLIPPY_POSTGRES_PASS"]
+    host = os.environ["FLIPPY_POSTGRES_HOST"]
+    port = int(os.environ["FLIPPY_POSTGRES_PORT"])
+    db = os.environ["FLIPPY_POSTGRES_DB"]
 
-PLAYOK_USERNAMES = os.environ["FLIPPY_PLAYOK_USERNAMES"].split(",")
-USERNAMES = os.environ["FLIPPY_USERNAMES"].split(",")
+    return f"postgres://{user}:{pass_}@{host}:{port}/{db}"
 
-ALL_USERNAMES = {*PLAYOK_USERNAMES, *USERNAMES}
 
-EDAX_PATH = resolve_path(os.environ["FLIPPY_EDAX_PATH"])
+class PgnConfig:
+    def __init__(self) -> None:
+        self.source_folders = resolve_paths(os.environ["FLIPPY_PGN_SOURCE_FOLDERS"])
+        self.target_folder = resolve_path(os.environ["FLIPPY_PGN_TARGET_FOLDER"])
 
-POSTGRES_USER = os.environ["FLIPPY_POSTGRES_USER"]
-POSTGRES_PASS = os.environ["FLIPPY_POSTGRES_PASS"]
-POSTGRES_HOST = os.environ["FLIPPY_POSTGRES_HOST"]
-POSTGRES_PORT = int(os.environ["FLIPPY_POSTGRES_PORT"])
-POSTGRES_DB = os.environ["FLIPPY_POSTGRES_DB"]
+        self.playok_usernames = os.environ["FLIPPY_PLAYOK_USERNAMES"].split(",")
+        self.usernames = os.environ["FLIPPY_USERNAMES"].split(",")
 
-POSTGRES_DSN = f"postgres://{POSTGRES_USER}:{POSTGRES_PASS}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+        self.all_usernames = {*self.playok_usernames, *self.usernames}
 
-BOOK_LEARNING_SERVER_URL = os.environ["FLIPPY_BOOK_LEARNING_SERVER_URL"]
+
+def get_edax_path() -> Path:
+    return resolve_path(os.environ["FLIPPY_EDAX_PATH"])
+
+
+def get_book_server_url() -> str:
+    return os.environ["FLIPPY_BOOK_SERVER_URL"]

@@ -6,7 +6,7 @@ import subprocess
 from multiprocessing import Queue
 from typing import Optional
 
-from flippy.config import EDAX_PATH
+from flippy.config import get_edax_path
 from flippy.edax.types import EdaxEvaluation, EdaxEvaluations, EdaxRequest, EdaxResponse
 from flippy.othello.position import Position
 
@@ -31,7 +31,7 @@ class EdaxProcess:
     def __init__(self, request: EdaxRequest, send_queue: Queue[EdaxResponse]) -> None:
         self.request = request
         self.send_queue = send_queue
-        self.edax_path = EDAX_PATH
+        self.edax_path = get_edax_path()
 
         searchable: set[Position] = set()
 

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from math import ceil
 
 from flippy import PROJECT_ROOT
-from flippy.config import PGN_TARGET_FOLDER
+from flippy.config import PgnConfig
 from flippy.db import DB, MIN_LEARN_LEVEL, is_savable_position
 from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxRequest
@@ -17,10 +17,11 @@ PGN_JSON_PATH = PROJECT_ROOT / ".flippy/pgn.json"
 
 def load_pgn() -> None:
     db = DB()
+    pgn_config = PgnConfig()
 
     positions: set[Position] = set()
 
-    prefix = PGN_TARGET_FOLDER / "normal"
+    prefix = pgn_config.target_folder / "normal"
     pgn_files = sorted(prefix.rglob("*.pgn"))
 
     last_read_pgn: str | None = None
