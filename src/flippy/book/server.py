@@ -55,6 +55,27 @@ class ServerState:
 
         return self.job_queue.pop(0)
 
+    def prune_inactive_clients(self) -> None:
+        current_time = datetime.now()
+        inactive_threshold = timedelta(minutes=5)
+
+        min_heartbeat_time = current_time - inactive_threshold
+
+        inactive_client_ids: list[str] = []
+
+        for client_id, client in self.active_clients.items():
+            if client.last_heartbeat < min_heartbeat_time:
+                inactive_client_ids.append(client_id)
+
+            # Restore job from dead clients
+            if client.job:
+                self.job_queue.append(client.job)
+
+        for client_id in inactive_client_ids:
+            del self.active_clients[client_id]
+
+        print(f"Pruned {len(inactive_client_ids)} inactive clients")
+
 
 def get_server_state() -> ServerState:
     """Dependency that provides the server state"""
@@ -119,18 +140,10 @@ async def submit_result(
 
 @app.get("/stats")
 async def get_stats(state: ServerState = Depends(get_server_state)) -> StatsResponse:
-    current_time = datetime.now()
-    inactive_threshold = timedelta(minutes=5)
-
-    clients = {
-        cid: client
-        for cid, client in state.active_clients.items()
-        if current_time - client.last_heartbeat < inactive_threshold
-    }
-
     # TODO clients will not be pruned until this endpoint is called
+    state.prune_inactive_clients()
 
-    # TODO restore jobs from dead clients
+    clients = state.active_clients.values()
 
     return StatsResponse(
         active_clients=len(clients),
@@ -140,6 +153,6 @@ async def get_stats(state: ServerState = Depends(get_server_state)) -> StatsResp
                 positions_computed=client.jobs_completed,
                 last_active=client.last_heartbeat,
             )
-            for client in clients.values()
+            for client in clients
         ],
     )
