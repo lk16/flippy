@@ -29,6 +29,7 @@ class ServerState:
         self.active_clients: dict[str, Client] = {}
         self.job_queue: list[Job] = []
         self.disc_count = 0
+        self.db = DB()
 
     def get_next_job(self) -> Optional[Job]:
         while not self.job_queue:
@@ -40,7 +41,7 @@ class ServerState:
             print(f"Loading jobs for positions with {self.disc_count} discs")
 
             learn_level = get_learn_level(self.disc_count)
-            positions = DB().get_boards_with_disc_count_below_level(
+            positions = self.db.get_boards_with_disc_count_below_level(
                 self.disc_count, learn_level
             )
 
@@ -133,7 +134,7 @@ async def submit_result(
     completed = state.active_clients[client_id].jobs_completed
     print(f"Client {client_id} has now completed {completed} positions")
 
-    DB().save_edax(result.evaluation.to_evaluation())
+    state.db.save_edax(result.evaluation.to_evaluation())
 
     return Response()
 
