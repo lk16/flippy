@@ -9,6 +9,7 @@ from flippy.book.models import (
     Job,
     JobResponse,
     JobResult,
+    RegisterRequest,
     RegisterResponse,
     SerializedPosition,
     StatsResponse,
@@ -17,8 +18,10 @@ from flippy.db import DB, MAX_SAVABLE_DISCS, is_savable_position
 
 
 class Client:
-    def __init__(self, client_id: str):
+    def __init__(self, client_id: str, hostname: str, git_commit: str):
         self.id = client_id
+        self.hostname = hostname
+        self.git_commit = git_commit
         self.last_heartbeat = datetime.now()
         self.job: Optional[Job] = None
         self.jobs_completed = 0
@@ -128,10 +131,13 @@ server_state = ServerState()
 
 @app.post("/register")
 async def register_client(
+    payload: RegisterRequest,
     state: ServerState = Depends(get_server_state),
 ) -> RegisterResponse:
     client_id = str(uuid4())
-    state.active_clients[client_id] = Client(client_id)
+    state.active_clients[client_id] = Client(
+        client_id, payload.hostname, payload.git_commit
+    )
     print(f"Registered client {client_id}")
     return RegisterResponse(client_id=client_id)
 
@@ -191,6 +197,8 @@ async def get_stats(state: ServerState = Depends(get_server_state)) -> StatsResp
         client_stats=[
             ClientStats(
                 id=client.id,
+                hostname=client.hostname,
+                git_commit=client.git_commit,
                 positions_computed=client.jobs_completed,
                 last_active=client.last_heartbeat,
             )

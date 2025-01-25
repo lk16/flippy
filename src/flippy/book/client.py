@@ -1,4 +1,6 @@
 import requests
+import socket
+import subprocess
 import threading
 import time
 from datetime import datetime
@@ -8,6 +10,7 @@ from flippy.book.models import (
     Job,
     JobResponse,
     JobResult,
+    RegisterRequest,
     RegisterResponse,
     SerializedEvaluation,
 )
@@ -20,11 +23,24 @@ class BookLearningClient:
     def __init__(self) -> None:
         self.server_url = get_book_server_url()
         self.client_id: str | None = None
+        self.hostname = socket.gethostname()
+        try:
+            self.git_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"]
+            ).decode("ascii")[:8]
+        except (subprocess.SubprocessError, FileNotFoundError):
+            self.git_commit = "unknown"
 
         threading.Thread(target=self._heartbeat_loop, daemon=True).start()
 
     def _register(self) -> str:
-        response = requests.post(f"{self.server_url}/register")
+        response = requests.post(
+            f"{self.server_url}/register",
+            json=RegisterRequest(
+                hostname=self.hostname,
+                git_commit=self.git_commit,
+            ).model_dump(),
+        )
         response.raise_for_status()
 
         parsed = RegisterResponse.model_validate_json(response.text)

@@ -63,6 +63,11 @@ class JobResponse(BaseModel):
     job: Job | None
 
 
+class RegisterRequest(BaseModel):
+    hostname: str
+    git_commit: str
+
+
 class RegisterResponse(BaseModel):
     client_id: str
 
@@ -74,5 +79,7 @@ class StatsResponse(BaseModel):
 
 class ClientStats(BaseModel):
     id: str
+    hostname: str
+    git_commit: str
     positions_computed: int
     last_active: datetime
