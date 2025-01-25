@@ -56,6 +56,7 @@ class BookLearningClient:
                 self.heartbeat()
             except Exception as e:
                 print(f"Heartbeat error: {e}")
+                # We don't handle HTTP 401 here, we only do that in the main thread.
             time.sleep(60)  # Sleep for 1 minute
 
     def run(self) -> None:
@@ -71,6 +72,15 @@ class BookLearningClient:
 
                 self.submit_result(job_result)
                 print("Submitted result")
+
+            except requests.HTTPError as e:
+                if e.response.status_code == 401:
+                    # Server restarted, so we need to re-register
+                    print("Server restarted, re-registering")
+                    self.client_id = self._register()
+                    self.headers = {"client-id": self.client_id}
+                else:
+                    raise e
 
             except Exception as e:
                 print(f"Error: {e}")
