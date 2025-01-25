@@ -30,8 +30,53 @@ class ServerState:
         self.job_queue: list[Job] = []
         self.disc_count = 0
         self.db = DB()
+        self.last_check_time = datetime.now()
+
+    def _load_jobs_for_disc_count(self, disc_count: int) -> list[Job]:
+        """Load jobs for positions with the specified disc count that need to be learned."""
+        learn_level = get_learn_level(disc_count)
+        positions = self.db.get_boards_with_disc_count_below_level(
+            disc_count, learn_level
+        )
+
+        return [
+            Job(
+                position=SerializedPosition.from_position(position),
+                level=learn_level,
+            )
+            for position in positions
+            if is_savable_position(position)
+        ]
+
+    def check_for_new_boards(self) -> None:
+        current_time = datetime.now()
+        check_interval = timedelta(minutes=10)
+
+        if current_time - self.last_check_time < check_interval:
+            return
+
+        self.last_check_time = current_time
+        print("Checking for new boards to learn...")
+
+        # Check all disc counts up to current disc_count
+        for disc_count in range(4, self.disc_count + 1):
+            new_jobs = self._load_jobs_for_disc_count(disc_count)
+
+            if new_jobs:
+                if disc_count == self.disc_count and len(new_jobs) == len(
+                    self.job_queue
+                ):
+                    # No new jobs found
+                    continue
+
+                print(f"Found {len(new_jobs)} new positions with {disc_count} discs")
+                self.disc_count = disc_count
+                self.job_queue = new_jobs
+                return
 
     def get_next_job(self) -> Optional[Job]:
+        self.check_for_new_boards()
+
         while not self.job_queue:
             self.disc_count = max(4, self.disc_count + 1)
 
@@ -39,20 +84,7 @@ class ServerState:
                 return None
 
             print(f"Loading jobs for positions with {self.disc_count} discs")
-
-            learn_level = get_learn_level(self.disc_count)
-            positions = self.db.get_boards_with_disc_count_below_level(
-                self.disc_count, learn_level
-            )
-
-            self.job_queue = [
-                Job(
-                    position=SerializedPosition.from_position(position),
-                    level=learn_level,
-                )
-                for position in positions
-                if is_savable_position(position)
-            ]
+            self.job_queue = self._load_jobs_for_disc_count(self.disc_count)
 
         return self.job_queue.pop()
 
