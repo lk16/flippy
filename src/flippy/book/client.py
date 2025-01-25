@@ -14,7 +14,7 @@ from flippy.book.models import (
     RegisterResponse,
     SerializedEvaluation,
 )
-from flippy.config import get_book_server_url
+from flippy.config import get_book_server_token, get_book_server_url
 from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxRequest
 
@@ -24,6 +24,7 @@ class BookLearningClient:
         self.server_url = get_book_server_url()
         self.client_id: str | None = None
         self.hostname = socket.gethostname()
+        self.token = get_book_server_token()
         try:
             self.git_commit = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"]
@@ -40,6 +41,7 @@ class BookLearningClient:
                 hostname=self.hostname,
                 git_commit=self.git_commit,
             ).model_dump(),
+            headers={"x-token": self.token},
         )
         response.raise_for_status()
 

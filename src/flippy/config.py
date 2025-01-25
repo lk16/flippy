@@ -54,3 +54,9 @@ class BookServerConfig:
     def __init__(self) -> None:
         self.host = os.environ["FLIPPY_BOOK_SERVER_HOST"]
         self.port = int(os.environ["FLIPPY_BOOK_SERVER_PORT"])
+        self.basic_auth_user = os.environ["FLIPPY_BOOK_SERVER_BASIC_AUTH_USER"]
+        self.basic_auth_pass = os.environ["FLIPPY_BOOK_SERVER_BASIC_AUTH_PASS"]
+
+
+def get_book_server_token() -> str:
+    return os.environ["FLIPPY_BOOK_SERVER_TOKEN"]

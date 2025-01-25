@@ -1,6 +1,8 @@
+import secrets
 from datetime import datetime, timedelta
-from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from fastapi.responses import HTMLResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from typing import Optional
@@ -17,6 +19,7 @@ from flippy.book.models import (
     SerializedPosition,
     StatsResponse,
 )
+from flippy.config import BookServerConfig, get_book_server_token
 from flippy.db import DB, MAX_SAVABLE_DISCS, is_savable_position
 
 
@@ -38,6 +41,7 @@ class ServerState:
         self.db = DB()
         self.last_new_boards_check_time = datetime.now()
         self.last_prune_time = datetime.now()
+        self.token = get_book_server_token()
 
     def _load_jobs_for_disc_count(self, disc_count: int) -> list[Job]:
         """Load jobs for positions with the specified disc count that need to be learned."""
@@ -135,11 +139,37 @@ static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
+def verify_credentials(
+    credentials: HTTPBasicCredentials = Depends(HTTPBasic()),
+) -> None:
+    config = BookServerConfig()
+    correct_username = config.basic_auth_user
+    correct_password = config.basic_auth_pass
+
+    is_correct_username = secrets.compare_digest(
+        credentials.username.encode("utf8"), correct_username.encode("utf8")
+    )
+    is_correct_password = secrets.compare_digest(
+        credentials.password.encode("utf8"), correct_password.encode("utf8")
+    )
+
+    if not (is_correct_username and is_correct_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+
 @app.post("/register")
 async def register_client(
     payload: RegisterRequest,
     state: ServerState = Depends(get_server_state),
+    x_token: str = Header(...),
 ) -> RegisterResponse:
+    if x_token != state.token:
+        raise HTTPException(status_code=403)
+
     client_id = str(uuid4())
     state.active_clients[client_id] = Client(
         client_id, payload.hostname, payload.git_commit
@@ -195,7 +225,10 @@ async def submit_result(
 
 
 @app.get("/stats")
-async def get_stats(state: ServerState = Depends(get_server_state)) -> StatsResponse:
+async def get_stats(
+    credentials: HTTPBasicCredentials = Depends(verify_credentials),
+    state: ServerState = Depends(get_server_state),
+) -> StatsResponse:
     clients = state.active_clients.values()
 
     return StatsResponse(
@@ -214,5 +247,7 @@ async def get_stats(state: ServerState = Depends(get_server_state)) -> StatsResp
 
 
 @app.get("/", response_class=HTMLResponse)
-async def show_clients() -> str:
+async def show_clients(
+    credentials: HTTPBasicCredentials = Depends(verify_credentials),
+) -> str:
     return (static_dir / "clients.html").read_text()
