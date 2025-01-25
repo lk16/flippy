@@ -42,6 +42,10 @@ def get_edax_path() -> Path:
     return resolve_path(os.environ["FLIPPY_EDAX_PATH"])
 
 
+def get_edax_verbose() -> bool:
+    return os.getenv("FLIPPY_EDAX_VERBOSE", "0") != "0"
+
+
 def get_book_server_url() -> str:
     return os.environ["FLIPPY_BOOK_SERVER_URL"]
 

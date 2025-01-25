@@ -6,7 +6,7 @@ import subprocess
 from multiprocessing import Queue
 from typing import Optional
 
-from flippy.config import get_edax_path
+from flippy.config import get_edax_path, get_edax_verbose
 from flippy.edax.types import EdaxEvaluation, EdaxEvaluations, EdaxRequest, EdaxResponse
 from flippy.othello.position import Position
 
@@ -32,6 +32,7 @@ class EdaxProcess:
         self.request = request
         self.send_queue = send_queue
         self.edax_path = get_edax_path()
+        self.verbose = get_edax_verbose()
 
         searchable: set[Position] = set()
 
@@ -50,12 +51,17 @@ class EdaxProcess:
         self.searchable_positions = searchable
 
     def _search_sync(self) -> EdaxEvaluations:
+        command = (
+            f"{self.edax_path} -solve /dev/stdin -level {self.request.level} -verbose 3"
+        )
+        cwd = self.edax_path.parent.parent
+
         proc = subprocess.Popen(
-            f"{self.edax_path} -solve /dev/stdin -level {self.request.level} -verbose 3".split(),
+            command.split(),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            cwd=self.edax_path.parent.parent,
+            cwd=cwd,
         )
 
         assert proc.stdin
@@ -65,6 +71,11 @@ class EdaxProcess:
         proc.stdin.write(proc_input.encode())
         proc.stdin.close()
 
+        if self.verbose:
+            print(f"Running command: {command}")
+            print(f"CWD: {cwd}")
+            print(f"Input: {proc_input}")
+
         lines: list[str] = []
 
         while True:
@@ -73,6 +84,10 @@ class EdaxProcess:
                 break
             line = raw_line.decode()
             lines.append(line)
+
+        if self.verbose:
+            for line in lines:
+                print(f"Output: {line.rstrip()}")
 
         evaluations = EdaxEvaluations()
         total_read_lines = 0
