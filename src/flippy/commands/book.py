@@ -5,6 +5,7 @@ from pathlib import Path
 from flippy.book.client import BookLearningClient
 from flippy.book.load_pgn import load_pgn as load_pgn_
 from flippy.book.load_wthor import load_wthor as load_wthor_
+from flippy.config import BookServerConfig
 from flippy.db import DB
 
 app = typer.Typer(pretty_exceptions_enable=False)
@@ -17,7 +18,8 @@ def info() -> None:
 
 @app.command()
 def server() -> None:
-    uvicorn.run("flippy.book.server:app", host="0.0.0.0", port=7777)
+    config = BookServerConfig()
+    uvicorn.run("flippy.book.server:app", host=config.host, port=config.port)
 
 
 @app.command()

@@ -44,3 +44,9 @@ def get_edax_path() -> Path:
 
 def get_book_server_url() -> str:
     return os.environ["FLIPPY_BOOK_SERVER_URL"]
+
+
+class BookServerConfig:
+    def __init__(self) -> None:
+        self.host = os.environ["FLIPPY_BOOK_SERVER_HOST"]
+        self.port = int(os.environ["FLIPPY_BOOK_SERVER_PORT"])
