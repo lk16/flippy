@@ -53,7 +53,7 @@ class ServerState:
                 if is_savable_position(position)
             ]
 
-        return self.job_queue.pop(0)
+        return self.job_queue.pop()
 
     def prune_inactive_clients(self) -> None:
         current_time = datetime.now()
