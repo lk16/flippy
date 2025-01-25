@@ -1,5 +1,8 @@
 from datetime import datetime, timedelta
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
@@ -128,6 +131,9 @@ def get_server_state() -> ServerState:
 app = FastAPI()
 server_state = ServerState()
 
+static_dir = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
 
 @app.post("/register")
 async def register_client(
@@ -205,3 +211,8 @@ async def get_stats(state: ServerState = Depends(get_server_state)) -> StatsResp
             for client in clients
         ],
     )
+
+
+@app.get("/", response_class=HTMLResponse)
+async def show_clients() -> str:
+    return (static_dir / "clients.html").read_text()
