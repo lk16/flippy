@@ -3,15 +3,16 @@ from pathlib import Path
 from typing import Annotated
 
 from flippy import PROJECT_ROOT
-from flippy.config import ALL_USERNAMES, PGN_TARGET_FOLDER
+from flippy.config import PgnConfig
 from flippy.othello.game import Game
 
 
 class RecentGames:
     def __init__(self, count: int) -> None:
+        self.pgn_config = PgnConfig()
         self.count = count
-        self.pgn_folder = PGN_TARGET_FOLDER / "normal"
-        self.all_usernames = ALL_USERNAMES
+        self.pgn_folder = self.pgn_config.target_folder / "normal"
+        self.all_usernames = self.pgn_config.all_usernames
 
     def find_recent_game_files(self) -> list[Path]:
         all_pgn_files = list(self.pgn_folder.rglob("*.pgn"))

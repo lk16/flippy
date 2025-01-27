@@ -178,6 +178,5 @@ db_data
 # wthor files
 wthor/
 
-
-# rabbitmq data
-rabbitmq_data
+# flippy app data
+.flippy/

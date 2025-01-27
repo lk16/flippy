@@ -1,8 +1,7 @@
 import psycopg2
 from math import ceil
-from typing import Optional
 
-from flippy.config import POSTGRES_DSN
+from flippy.config import get_db_dsn
 from flippy.edax.types import EdaxEvaluation, EdaxEvaluations
 from flippy.othello.position import Position
 
@@ -41,8 +40,8 @@ class PositionNotFound(Exception):
 
 class DB:
     def __init__(self) -> None:
-        print(f"Connecting to: {POSTGRES_DSN}")
-        self.conn = psycopg2.connect(POSTGRES_DSN)
+        dsn = get_db_dsn()
+        self.conn = psycopg2.connect(dsn)
 
     def update_edax_evaluations(self, evaluations: EdaxEvaluations) -> None:
         for evaluation in evaluations.values.values():
@@ -298,57 +297,3 @@ class DB:
                 f"{level_totals[total]:>7}" for total in sorted(level_totals.keys())
             )
         )
-
-    def get_greedy_evaluations(self) -> list[tuple[Position, int, int]]:
-        query = """
-        SELECT position, score, best_move
-        FROM greedy
-        """
-
-        cursor = self.conn.cursor()
-        cursor.execute(query)
-
-        rows: list[tuple[memoryview, int, int]] = cursor.fetchall()
-
-        evaluations: list[tuple[Position, int, int]] = []
-
-        for position_bytes, score, best_move in rows:
-            evaluations.append((Position.from_bytes(position_bytes), score, best_move))
-
-        return evaluations
-
-    def save_greedy(self, position: Position, score: int, best_move: int) -> None:
-        assert position.is_normalized()
-        assert -64 <= score <= 64
-        assert score % 2 == 0
-
-        query = """
-        INSERT INTO greedy (position, score, best_move)
-        VALUES (%s, %s, %s)
-        ON CONFLICT (position)
-        DO UPDATE SET score = EXCLUDED.score;
-        """
-
-        cursor = self.conn.cursor()
-        cursor.execute(query, [position.to_bytes(), score, best_move])
-        self.conn.commit()
-
-    def lookup_greedy_evaluation(self, position: Position) -> Optional[tuple[int, int]]:
-        # For greedy we support getting unnormalized positions, since it doesn't matter for the result
-        position = position.normalized()
-
-        query = """
-        SELECT score, best_move
-        FROM greedy
-        WHERE position = %s
-        """
-
-        cursor = self.conn.cursor()
-        cursor.execute(query, [position.to_bytes()])
-
-        rows: list[tuple[int, int]] = cursor.fetchall()
-
-        if not rows:
-            return None
-
-        return rows[0]
