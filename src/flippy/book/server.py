@@ -46,6 +46,7 @@ class ServerState:
     def _load_jobs_for_disc_count(self, disc_count: int) -> list[Job]:
         """Load jobs for positions with the specified disc count that need to be learned."""
         learn_level = get_learn_level(disc_count)
+        # TODO use async db call
         positions = self.db.get_boards_with_disc_count_below_level(
             disc_count, learn_level
         )
@@ -219,6 +220,7 @@ async def submit_result(
     completed = state.active_clients[client_id].jobs_completed
     print(f"Client {client_id} has now completed {completed} positions")
 
+    # TODO use async db call
     state.db.save_edax(result.evaluation.to_evaluation())
 
     return Response()
@@ -250,6 +252,7 @@ async def get_stats(
 async def get_book_stats(
     state: ServerState = Depends(get_server_state),
 ) -> list[list[str]]:
+    # TODO use async db call
     stats = state.db._get_edax_stats()
 
     disc_counts = sorted(set(row[0] for row in stats))
