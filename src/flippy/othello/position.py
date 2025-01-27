@@ -34,6 +34,9 @@ class Position:
         assert me == me & 0xFFFFFFFFFFFFFFFF
         assert opp == opp & 0xFFFFFFFFFFFFFFFF
 
+        if me & opp:
+            raise ValueError("me and opp must not overlap")
+
         # Bitset of discs of player to move
         self.me = me
 
@@ -64,8 +67,8 @@ class Position:
     def is_valid_move(self, move: int) -> bool:
         moves = self.get_moves()
 
-        if moves == 0:
-            return move == PASS_MOVE
+        if move == PASS_MOVE:
+            return moves == 0
 
         assert move in range(64)
 
