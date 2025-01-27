@@ -246,6 +246,54 @@ async def get_stats(
     )
 
 
+@app.get("/stats/book")
+async def get_book_stats(
+    state: ServerState = Depends(get_server_state),
+) -> list[list[str]]:
+    stats = state.db._get_edax_stats()
+
+    disc_counts = sorted(set(row[0] for row in stats))
+    levels = sorted(set(row[1] for row in stats))
+
+    lookup: dict[tuple[int, int], int] = {}
+    level_totals: dict[int, int] = {}
+    disc_totals: dict[int, int] = {}
+
+    for discs, level, count in stats:
+        lookup[(discs, level)] = count
+
+        if level not in level_totals:
+            level_totals[level] = 0
+        level_totals[level] += count
+
+        if discs not in disc_totals:
+            disc_totals[discs] = 0
+        disc_totals[discs] += count
+
+    table = [[""] + [f"level {level}" for level in levels] + ["Total"]]
+
+    for discs in disc_counts:
+        row = [f"{discs} discs"]
+        for level in levels:
+            row.append(str(lookup.get((discs, level), 0)))
+        row.append(str(disc_totals.get(discs, 0)))
+        table.append(row)
+
+    table.append(
+        ["Total"]
+        + [str(level_totals.get(level, 0)) for level in levels]
+        + [str(sum(level_totals.values()))]
+    )
+    return table
+
+
+@app.get("/book", response_class=HTMLResponse)
+async def show_book_stats(
+    credentials: HTTPBasicCredentials = Depends(verify_credentials),
+) -> str:
+    return (static_dir / "book.html").read_text()
+
+
 @app.get("/", response_class=HTMLResponse)
 async def show_clients(
     credentials: HTTPBasicCredentials = Depends(verify_credentials),
