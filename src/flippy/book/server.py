@@ -161,7 +161,7 @@ def verify_credentials(
         )
 
 
-@app.post("/register")
+@app.post("/api/register")
 async def register_client(
     payload: RegisterRequest,
     state: ServerState = Depends(get_server_state),
@@ -178,7 +178,7 @@ async def register_client(
     return RegisterResponse(client_id=client_id)
 
 
-@app.get("/job")
+@app.get("/api/job")
 async def get_job(
     client_id: str = Header(...), state: ServerState = Depends(get_server_state)
 ) -> JobResponse:
@@ -194,7 +194,7 @@ async def get_job(
     return JobResponse(job=job)
 
 
-@app.post("/heartbeat")
+@app.post("/api/heartbeat")
 async def heartbeat(
     client_id: str = Header(...), state: ServerState = Depends(get_server_state)
 ) -> Response:
@@ -205,7 +205,7 @@ async def heartbeat(
     return Response()
 
 
-@app.post("/job/result")
+@app.post("/api/job/result")
 async def submit_result(
     result: JobResult,
     client_id: str = Header(...),
@@ -224,7 +224,7 @@ async def submit_result(
     return Response()
 
 
-@app.get("/stats")
+@app.get("/api/stats/clients")
 async def get_stats(
     credentials: HTTPBasicCredentials = Depends(verify_credentials),
     state: ServerState = Depends(get_server_state),
@@ -246,7 +246,7 @@ async def get_stats(
     )
 
 
-@app.get("/stats/book")
+@app.get("/api/stats/book")
 async def get_book_stats(
     state: ServerState = Depends(get_server_state),
 ) -> list[list[str]]:

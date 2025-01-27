@@ -36,7 +36,7 @@ class BookLearningClient:
 
     def _register(self) -> str:
         response = requests.post(
-            f"{self.server_url}/register",
+            f"{self.server_url}/api/register",
             json=RegisterRequest(
                 hostname=self.hostname,
                 git_commit=self.git_commit,
@@ -53,7 +53,7 @@ class BookLearningClient:
             return
 
         response = requests.post(
-            f"{self.server_url}/heartbeat", headers={"client-id": self.client_id}
+            f"{self.server_url}/api/heartbeat", headers={"client-id": self.client_id}
         )
         response.raise_for_status()
 
@@ -61,7 +61,7 @@ class BookLearningClient:
         assert self.client_id is not None
 
         response = requests.get(
-            f"{self.server_url}/job", headers={"client-id": self.client_id}
+            f"{self.server_url}/api/job", headers={"client-id": self.client_id}
         )
         response.raise_for_status()
         parsed = JobResponse.model_validate_json(response.text)
@@ -72,7 +72,7 @@ class BookLearningClient:
 
         payload = result.model_dump()
         response = requests.post(
-            f"{self.server_url}/job/result",
+            f"{self.server_url}/api/job/result",
             headers={"client-id": self.client_id},
             json=payload,
         )
