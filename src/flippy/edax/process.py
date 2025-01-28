@@ -4,7 +4,6 @@ import multiprocessing
 import re
 import subprocess
 from multiprocessing import Queue
-from typing import Optional
 
 from flippy.config import get_edax_path, get_edax_verbose
 from flippy.edax.types import EdaxEvaluation, EdaxEvaluations, EdaxRequest, EdaxResponse
@@ -29,6 +28,7 @@ def start_evaluation_sync(request: EdaxRequest) -> EdaxEvaluations:
 
 class EdaxProcess:
     def __init__(self, request: EdaxRequest, send_queue: Queue[EdaxResponse]) -> None:
+        # TODO make request argument of search()
         self.request = request
         self.send_queue = send_queue
         self.edax_path = get_edax_path()
@@ -36,6 +36,7 @@ class EdaxProcess:
 
         searchable: set[Position] = set()
 
+        # TODO move validation out of __init__()
         for position in request.positions:
             if position.is_game_end():
                 # Discard if the game is over.
@@ -50,6 +51,9 @@ class EdaxProcess:
 
         self.searchable_positions = searchable
 
+    # TODO have one search function:
+    # - make sync function on top of this file handle waiting for the process to finish
+    # - make async function on top of this file just call this in sub process
     def _search_sync(self) -> EdaxEvaluations:
         command = (
             f"{self.edax_path} -solve /dev/stdin -level {self.request.level} -verbose 3"
@@ -66,38 +70,38 @@ class EdaxProcess:
 
         assert proc.stdin
         assert proc.stdout
-
-        proc_input = "".join(board.to_problem() for board in self.searchable_positions)
-        proc.stdin.write(proc_input.encode())
-        proc.stdin.close()
+        evaluations = EdaxEvaluations()
 
         if self.verbose:
             print(f"Running command: {command}")
             print(f"CWD: {cwd}")
-            print(f"Input: {proc_input}")
 
-        lines: list[str] = []
+        for board in self.searchable_positions:
+            problem = board.to_problem()
 
-        while True:
-            raw_line = proc.stdout.readline()
-            if raw_line == b"":
-                break
-            line = raw_line.decode()
-            lines.append(line)
+            print(f"Input: {problem}")
+            proc.stdin.write(problem.encode())
+            proc.stdin.flush()
 
-        if self.verbose:
-            for line in lines:
+            lines: list[str] = []
+            dash_prefixes_found = 0
+
+            while True:
+                line = proc.stdout.readline().decode()
                 print(f"Output: {line.rstrip()}")
+                lines.append(line)
 
-        evaluations = EdaxEvaluations()
-        total_read_lines = 0
-        for position in self.searchable_positions:
-            remaining_lines = lines[total_read_lines:]
-            evaluation, read_lines = self.__parse_output_lines(
-                remaining_lines, position
-            )
-            total_read_lines += read_lines
-            evaluations.add(position, evaluation)
+                if line.startswith("-----"):
+                    dash_prefixes_found += 1
+
+                if dash_prefixes_found == 2:
+                    break
+
+            eval_line = lines[-3]
+            evaluation = self.__parse_output_line(eval_line, board)
+            evaluations.add(board, evaluation)
+
+        proc.kill()
 
         return evaluations
 
@@ -110,41 +114,12 @@ class EdaxProcess:
         except KeyboardInterrupt:
             pass
 
-    # TODO #26 write tests for Edax output parser
-    def __parse_output_lines(
-        self, lines: list[str], position: Position
-    ) -> tuple[EdaxEvaluation, int]:
-        evaluation: Optional[EdaxEvaluation] = None
-
-        for read_lines, line in enumerate(lines):
-            if line.startswith("*** problem") and read_lines > 2:
-                break
-
-            line_evaluation = self.__parse_output_line(line, position)
-            if line_evaluation is not None:
-                evaluation = line_evaluation
-
-        assert evaluation
-        return evaluation, read_lines
-
-    # TODO #26 write tests for Edax output parser
-    def __parse_output_line(
-        self, line: str, position: Position
-    ) -> Optional[EdaxEvaluation]:
-        if (
-            line == "\n"
-            or "positions;" in line
-            or "/dev/stdin" in line
-            or "-----" in line
-        ):
-            return None
-
+    # TODO write tests for Edax output parser
+    # TODO this fails for 100% confidence
+    def __parse_output_line(self, line: str, position: Position) -> EdaxEvaluation:
         columns = re.sub(r"\s+", " ", line).strip().split(" ")
 
-        try:
-            score = int(columns[1].strip("<>"))
-        except ValueError:
-            return None
+        score = int(columns[1].strip("<>"))
 
         best_fields = line[53:].strip().split(" ")
         best_moves = Position.fields_to_indexes(best_fields)

@@ -308,7 +308,7 @@ class PGNMode(BaseMode):
             if evaluation.level == min_level
         ]
 
-        if learn_level >= MAX_UI_SEARCH_LEVEL:
+        if learn_level > MAX_UI_SEARCH_LEVEL:
             return
 
         request = EdaxRequest(search_positions, learn_level, source=source)

@@ -103,8 +103,12 @@ class BookLearningClient:
                 print("Got a job")
                 job_result = self.do_job(job)
 
-                self.submit_result(job_result)
-                print("Submitted result")
+                # TODO: Remove this
+                print("DISCARDING RESULT!")
+                _ = job_result
+                continue
+                # self.submit_result(job_result)
+                # print("Submitted result")
 
             except requests.HTTPError as e:
                 if e.response.status_code == 401:
