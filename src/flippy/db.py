@@ -22,7 +22,7 @@ def is_savable_evaluation(evaluation: EdaxEvaluation) -> bool:
     """
     Checks whether an evaluation qualifies to be saved in the DB.
     """
-    return evaluation.depth >= MIN_LEARN_LEVEL and is_savable_position(
+    return evaluation.level >= MIN_LEARN_LEVEL and is_savable_position(
         evaluation.position
     )
 
