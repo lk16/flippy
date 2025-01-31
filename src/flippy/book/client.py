@@ -8,7 +8,6 @@ from typing import Optional
 
 from flippy.book.models import (
     Job,
-    JobResponse,
     JobResult,
     RegisterRequest,
     RegisterResponse,
@@ -64,8 +63,11 @@ class BookLearningClient:
             f"{self.server_url}/api/job", headers={"client-id": self.client_id}
         )
         response.raise_for_status()
-        parsed = JobResponse.model_validate_json(response.text)
-        return parsed.job
+
+        if response.text == "null":
+            return None
+
+        return Job.model_validate_json(response.text)
 
     def submit_result(self, result: JobResult) -> None:
         assert self.client_id is not None

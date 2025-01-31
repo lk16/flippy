@@ -17,9 +17,11 @@ def info() -> None:
 
 
 @app.command()
-def server() -> None:
+def server(reload: bool = typer.Option(False)) -> None:
     config = BookServerConfig()
-    uvicorn.run("flippy.book.server:app", host=config.host, port=config.port)
+    uvicorn.run(
+        "flippy.book.server:app", host=config.host, port=config.port, reload=reload
+    )
 
 
 @app.command()

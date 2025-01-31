@@ -59,10 +59,6 @@ class JobResult(BaseModel):
     computation_time: float
 
 
-class JobResponse(BaseModel):
-    job: Job | None
-
-
 class RegisterRequest(BaseModel):
     hostname: str
     git_commit: str

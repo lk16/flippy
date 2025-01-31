@@ -1,3 +1,4 @@
+import asyncpg  # type:ignore[import-untyped]
 import secrets
 from datetime import datetime, timedelta
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
@@ -12,15 +13,15 @@ from flippy.book import get_learn_level
 from flippy.book.models import (
     ClientStats,
     Job,
-    JobResponse,
     JobResult,
     RegisterRequest,
     RegisterResponse,
     SerializedPosition,
     StatsResponse,
 )
-from flippy.config import BookServerConfig, get_book_server_token
-from flippy.db import DB, MAX_SAVABLE_DISCS, is_savable_position
+from flippy.config import BookServerConfig, get_book_server_token, get_db_dsn
+from flippy.db import MAX_SAVABLE_DISCS, is_savable_evaluation
+from flippy.othello.position import Position
 
 
 class Client:
@@ -35,92 +36,28 @@ class Client:
 
 class ServerState:
     def __init__(self) -> None:
+        # TODO move active clients into DB and remove this
         self.active_clients: dict[str, Client] = {}
-        self.job_queue: list[Job] = []
-        self.disc_count = 0
-        self.db = DB()
-        self.last_new_boards_check_time = datetime.now()
-        self.last_prune_time = datetime.now()
+
         self.token = get_book_server_token()
 
-    def _load_jobs_for_disc_count(self, disc_count: int) -> list[Job]:
-        """Load jobs for positions with the specified disc count that need to be learned."""
-        learn_level = get_learn_level(disc_count)
-        # TODO use async db call
-        positions = self.db.get_boards_with_disc_count_below_level(
-            disc_count, learn_level
-        )
+        # Initialize as None, will connect lazily
+        self.db: asyncpg.Connection | None = None
 
-        return [
-            Job(
-                position=SerializedPosition.from_position(position),
-                level=learn_level,
-            )
-            for position in positions
-            if is_savable_position(position)
-        ]
-
-    def check_for_new_boards(self) -> None:
-        current_time = datetime.now()
-        check_interval = timedelta(minutes=10)
-
-        if current_time - self.last_new_boards_check_time < check_interval:
-            return
-
-        self.last_new_boards_check_time = current_time
-        print("Checking for new boards to learn...")
-
-        # Check all disc counts up to current disc_count
-        for disc_count in range(4, self.disc_count + 1):
-            new_jobs = self._load_jobs_for_disc_count(disc_count)
-
-            if new_jobs:
-                if disc_count == self.disc_count and len(new_jobs) == len(
-                    self.job_queue
-                ):
-                    # No new jobs found
-                    continue
-
-                print(f"Found {len(new_jobs)} new positions with {disc_count} discs")
-                self.disc_count = disc_count
-                self.job_queue = new_jobs
-                return
-
-    def get_next_job(self) -> Optional[Job]:
-        self.check_for_new_boards()
-
-        while not self.job_queue:
-            self.disc_count = max(4, self.disc_count + 1)
-
-            if self.disc_count > MAX_SAVABLE_DISCS:
-                return None
-
-            print(f"Loading jobs for positions with {self.disc_count} discs")
-            self.job_queue = self._load_jobs_for_disc_count(self.disc_count)
-
-        return self.job_queue.pop()
+    async def get_db(self) -> asyncpg.Connection:
+        if self.db is None:
+            self.db = await asyncpg.connect(get_db_dsn())
+        return self.db
 
     def prune_inactive_clients(self) -> None:
-        current_time = datetime.now()
-        check_interval = timedelta(minutes=1)
-
-        if current_time - self.last_prune_time < check_interval:
-            return
-
-        self.last_prune_time = current_time
-
         inactive_threshold = timedelta(minutes=5)
-        min_heartbeat_time = current_time - inactive_threshold
+        min_heartbeat_time = datetime.now() - inactive_threshold
 
         inactive_client_ids: list[str] = []
 
         for client_id, client in self.active_clients.items():
             if client.last_heartbeat < min_heartbeat_time:
                 inactive_client_ids.append(client_id)
-
-            # Restore job from inactive clients
-            if client.job:
-                self.job_queue.append(client.job)
 
         for client_id in inactive_client_ids:
             del self.active_clients[client_id]
@@ -162,37 +99,32 @@ def verify_credentials(
         )
 
 
+def verify_token(
+    x_token: str = Header(...),
+    state: ServerState = Depends(get_server_state),
+) -> None:
+    if x_token != state.token:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid token",
+        )
+
+
+# TODO unify auth, we have verify_credentials, verify_token and BasicAuth
+
+
 @app.post("/api/register")
 async def register_client(
     payload: RegisterRequest,
     state: ServerState = Depends(get_server_state),
-    x_token: str = Header(...),
+    _: None = Depends(verify_token),
 ) -> RegisterResponse:
-    if x_token != state.token:
-        raise HTTPException(status_code=403)
-
     client_id = str(uuid4())
     state.active_clients[client_id] = Client(
         client_id, payload.hostname, payload.git_commit
     )
     print(f"Registered client {client_id}")
     return RegisterResponse(client_id=client_id)
-
-
-@app.get("/api/job")
-async def get_job(
-    client_id: str = Header(...), state: ServerState = Depends(get_server_state)
-) -> JobResponse:
-    # We prune clients here, because we don't have to add some timing logic.
-    # If nobody asks for work, we don't risk losing any work handed out to inactive clients.
-    state.prune_inactive_clients()
-
-    if client_id not in state.active_clients:
-        raise HTTPException(status_code=401)
-
-    job = state.get_next_job()
-    state.active_clients[client_id].job = job
-    return JobResponse(job=job)
 
 
 @app.post("/api/heartbeat")
@@ -220,15 +152,52 @@ async def submit_result(
     completed = state.active_clients[client_id].jobs_completed
     print(f"Client {client_id} has now completed {completed} positions")
 
-    # TODO use async db call
-    state.db.save_edax(result.evaluation.to_evaluation())
+    evaluation = result.evaluation.to_evaluation()
+    if not is_savable_evaluation(evaluation):
+        return Response(status_code=400, content="Evaluation is not savable")
+
+    conn = await state.get_db()
+
+    evaluation._validate()
+    assert evaluation.position.is_normalized()
+
+    disc_count = evaluation.position.count_discs()
+
+    # TODO remove column learn_priority from DB
+    priority = 3 * evaluation.level + disc_count
+
+    query = """
+    INSERT INTO edax (position, disc_count, level, depth, confidence, score, learn_priority, best_moves)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    ON CONFLICT (position)
+    DO UPDATE SET
+        level = EXCLUDED.level,
+        depth = EXCLUDED.depth,
+        confidence = EXCLUDED.confidence,
+        score = EXCLUDED.score,
+        learn_priority = EXCLUDED.learn_priority,
+        best_moves = EXCLUDED.best_moves
+    WHERE edax.level < EXCLUDED.level
+    """
+
+    await conn.execute(
+        query,
+        evaluation.position.to_bytes(),
+        evaluation.position.count_discs(),
+        evaluation.level,
+        evaluation.depth,
+        evaluation.confidence,
+        evaluation.score,
+        priority,
+        evaluation.best_moves,
+    )
 
     return Response()
 
 
 @app.get("/api/stats/clients")
 async def get_stats(
-    credentials: HTTPBasicCredentials = Depends(verify_credentials),
+    _: None = Depends(verify_credentials),
     state: ServerState = Depends(get_server_state),
 ) -> StatsResponse:
     clients = state.active_clients.values()
@@ -252,8 +221,14 @@ async def get_stats(
 async def get_book_stats(
     state: ServerState = Depends(get_server_state),
 ) -> list[list[str]]:
-    # TODO use async db call
-    stats = state.db._get_edax_stats()
+    query = """
+    SELECT disc_count, level, COUNT(*)
+    FROM edax
+    GROUP BY disc_count, level;
+    """
+
+    conn = await state.get_db()
+    stats = await conn.fetch(query)
 
     disc_counts = sorted(set(row[0] for row in stats))
     levels = sorted(set(row[1] for row in stats))
@@ -288,6 +263,49 @@ async def get_book_stats(
         + [str(sum(level_totals.values()))]
     )
     return table
+
+
+async def get_job_for_disc_count(
+    conn: asyncpg.Connection, disc_count: int
+) -> Optional[Job]:
+    query = """
+        SELECT position
+        FROM edax
+        WHERE disc_count = $1
+        AND level < $2
+        ORDER BY level
+        LIMIT 1
+    """
+
+    learn_level = get_learn_level(disc_count)
+    row = await conn.fetchrow(query, disc_count, learn_level)
+
+    if not row:
+        return None
+
+    position = SerializedPosition.from_position(Position.from_bytes(row["position"]))
+    return Job(position=position, level=learn_level)
+
+
+@app.get("/api/job")
+async def get_job(
+    state: ServerState = Depends(get_server_state), client_id: str = Header(...)
+) -> Optional[Job]:
+    if client_id not in state.active_clients:
+        raise HTTPException(status_code=401)
+
+    # We prune clients here, because we don't have to add some timing logic.
+    # If nobody asks for work, we don't risk losing any work handed out to inactive clients.
+    state.prune_inactive_clients()
+
+    conn = await state.get_db()
+    # TODO this is inefficient, once we keep track of items in `edax` table per disc count and level, we can just query the first item
+    for disc_count in range(4, MAX_SAVABLE_DISCS + 1):
+        job = await get_job_for_disc_count(conn, disc_count)
+        if job:
+            return job
+
+    return None
 
 
 @app.get("/book", response_class=HTMLResponse)
