@@ -16,6 +16,7 @@ from flippy.book.models import (
     JobResult,
     RegisterRequest,
     RegisterResponse,
+    SerializedEvaluation,
     SerializedPosition,
     StatsResponse,
 )
@@ -62,7 +63,8 @@ class ServerState:
         for client_id in inactive_client_ids:
             del self.active_clients[client_id]
 
-        print(f"Pruned {len(inactive_client_ids)} inactive clients")
+        if len(inactive_client_ids) > 0:
+            print(f"Pruned {len(inactive_client_ids)} inactive clients")
 
 
 def get_server_state() -> ServerState:
@@ -77,47 +79,40 @@ static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
-def verify_credentials(
-    credentials: HTTPBasicCredentials = Depends(HTTPBasic()),
-) -> None:
-    config = BookServerConfig()
-    correct_username = config.basic_auth_user
-    correct_password = config.basic_auth_pass
-
-    is_correct_username = secrets.compare_digest(
-        credentials.username.encode("utf8"), correct_username.encode("utf8")
-    )
-    is_correct_password = secrets.compare_digest(
-        credentials.password.encode("utf8"), correct_password.encode("utf8")
-    )
-
-    if not (is_correct_username and is_correct_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-
-
-def verify_token(
-    x_token: str = Header(...),
+def verify_auth(
+    credentials: Optional[HTTPBasicCredentials] = Depends(HTTPBasic(auto_error=False)),
+    x_token: Optional[str] = Header(None),
     state: ServerState = Depends(get_server_state),
 ) -> None:
-    if x_token != state.token:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid token",
+    # Try token auth first
+    if x_token is not None:
+        if x_token == state.token:
+            return
+
+    # Fall back to basic auth
+    if credentials is not None:
+        config = BookServerConfig()
+        is_correct_username = secrets.compare_digest(
+            credentials.username.encode("utf8"), config.basic_auth_user.encode("utf8")
         )
+        is_correct_password = secrets.compare_digest(
+            credentials.password.encode("utf8"), config.basic_auth_pass.encode("utf8")
+        )
+        if is_correct_username and is_correct_password:
+            return
 
-
-# TODO unify auth, we have verify_credentials, verify_token and BasicAuth
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid authentication",
+        headers={"WWW-Authenticate": "Basic"},
+    )
 
 
 @app.post("/api/register")
 async def register_client(
     payload: RegisterRequest,
     state: ServerState = Depends(get_server_state),
-    _: None = Depends(verify_token),
+    _: None = Depends(verify_auth),
 ) -> RegisterResponse:
     client_id = str(uuid4())
     state.active_clients[client_id] = Client(
@@ -138,6 +133,15 @@ async def heartbeat(
     return Response()
 
 
+@app.post("/api/evaluation")
+async def submit_evaluation(
+    evaluation: SerializedEvaluation,
+    _: None = Depends(verify_auth),
+    state: ServerState = Depends(get_server_state),
+) -> Response:
+    return await upsert_evaluation(evaluation, state)
+
+
 @app.post("/api/job/result")
 async def submit_result(
     result: JobResult,
@@ -152,7 +156,14 @@ async def submit_result(
     completed = state.active_clients[client_id].jobs_completed
     print(f"Client {client_id} has now completed {completed} positions")
 
-    evaluation = result.evaluation.to_evaluation()
+    return await upsert_evaluation(result.evaluation, state)
+
+
+async def upsert_evaluation(
+    serialized_evaluation: SerializedEvaluation, state: ServerState
+) -> Response:
+    evaluation = serialized_evaluation.to_evaluation()
+
     if not is_savable_evaluation(evaluation):
         return Response(status_code=400, content="Evaluation is not savable")
 
@@ -197,7 +208,7 @@ async def submit_result(
 
 @app.get("/api/stats/clients")
 async def get_stats(
-    _: None = Depends(verify_credentials),
+    _: None = Depends(verify_auth),
     state: ServerState = Depends(get_server_state),
 ) -> StatsResponse:
     clients = state.active_clients.values()
@@ -310,13 +321,13 @@ async def get_job(
 
 @app.get("/book", response_class=HTMLResponse)
 async def show_book_stats(
-    credentials: HTTPBasicCredentials = Depends(verify_credentials),
+    credentials: HTTPBasicCredentials = Depends(verify_auth),
 ) -> str:
     return (static_dir / "book.html").read_text()
 
 
 @app.get("/", response_class=HTMLResponse)
 async def show_clients(
-    credentials: HTTPBasicCredentials = Depends(verify_credentials),
+    credentials: HTTPBasicCredentials = Depends(verify_auth),
 ) -> str:
     return (static_dir / "clients.html").read_text()

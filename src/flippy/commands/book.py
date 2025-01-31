@@ -6,14 +6,8 @@ from flippy.book.client import BookLearningClient
 from flippy.book.load_pgn import load_pgn as load_pgn_
 from flippy.book.load_wthor import load_wthor as load_wthor_
 from flippy.config import BookServerConfig
-from flippy.db import DB
 
 app = typer.Typer(pretty_exceptions_enable=False)
-
-
-@app.command()
-def info() -> None:
-    DB().print_edax_stats()
 
 
 @app.command()

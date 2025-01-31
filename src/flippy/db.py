@@ -55,33 +55,6 @@ class DB:
         except KeyError as e:
             raise PositionNotFound from e
 
-    def get_edax_evaluations_sorted_by_disc_count(self) -> EdaxEvaluations:
-        evaluations = EdaxEvaluations()
-
-        query = """
-        SELECT position, level, depth, confidence, score, best_moves
-        FROM edax
-        ORDER BY disc_count
-        """
-
-        cursor = self.conn.cursor()
-        cursor.execute(query)
-
-        rows: list[tuple[memoryview, int, int, int, int, list[int]]] = cursor.fetchall()
-        for position_bytes, level, depth, confidence, score, best_moves in rows:
-            position = Position.from_bytes(position_bytes)
-            evaluation = EdaxEvaluation(
-                position=position,
-                level=level,
-                depth=depth,
-                confidence=confidence,
-                score=score,
-                best_moves=best_moves,
-            )
-            evaluations.add(position, evaluation)
-
-        return evaluations
-
     def lookup_edax_positions(self, positions: set[Position]) -> EdaxEvaluations:
         evaluations = EdaxEvaluations()
 
@@ -231,69 +204,3 @@ class DB:
         cursor = self.conn.cursor()
         cursor.execute(query, params)
         self.conn.commit()
-
-    def _get_edax_stats(self) -> list[tuple[int, int, int]]:
-        query = """
-        SELECT disc_count, level, COUNT(*)
-        FROM edax
-        GROUP BY disc_count, level;
-        """
-        cursor = self.conn.cursor()
-        cursor.execute(query)
-        return cursor.fetchall()
-
-    def get_boards_with_disc_count_below_level(
-        self, disc_count: int, level_below: int
-    ) -> list[Position]:
-        cursor = self.conn.cursor()
-
-        query = """
-        SELECT position
-        FROM edax
-        WHERE disc_count = %s
-        AND level < %s
-        ORDER BY level
-        """
-
-        cursor.execute(query, (disc_count, level_below))
-        rows: list[tuple[bytes]] = cursor.fetchall()
-        return [(Position.from_bytes(position_bytes)) for (position_bytes,) in rows]
-
-    def print_edax_stats(self) -> None:
-        stats = self._get_edax_stats()
-        table: dict[int, dict[int, int]] = {}
-        level_totals: dict[int, int] = {}
-
-        for discs, level, count in stats:
-            if discs not in table:
-                table[discs] = {}
-
-            table[discs][level] = count
-
-            if level not in level_totals:
-                level_totals[level] = 0
-
-            level_totals[level] += count
-
-        levels = set(row[1] for row in stats)
-
-        print("   level: " + " ".join(f"{level:>7}" for level in sorted(levels)))
-        print("----------" + "-".join("-------" for _ in levels))
-
-        for discs in sorted(table.keys()):
-            print(f"{discs:>2} discs: ", end="")
-            for level in sorted(levels):
-                if level not in table[discs]:
-                    print("        ", end="")
-                else:
-                    print(f"{table[discs][level]:>7} ", end="")
-            print()
-
-        print("----------" + "-".join("-------" for _ in levels))
-
-        print(
-            "   total: "
-            + " ".join(
-                f"{level_totals[total]:>7}" for total in sorted(level_totals.keys())
-            )
-        )
