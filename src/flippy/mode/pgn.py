@@ -1,5 +1,6 @@
 import pygame
 import queue
+import requests
 import tkinter as tk
 from multiprocessing import Queue
 from pathlib import Path
@@ -8,7 +9,9 @@ from tkinter import filedialog
 from typing import Any, Iterable, Optional
 
 from flippy.arguments import Arguments
-from flippy.db import DB, MAX_UI_SEARCH_LEVEL, MIN_UI_SEARCH_LEVEL
+from flippy.book import MAX_UI_SEARCH_LEVEL, MIN_UI_SEARCH_LEVEL, is_savable_evaluation
+from flippy.book.models import SerializedEvaluation
+from flippy.config import get_book_server_token, get_book_server_url
 from flippy.edax.process import start_evaluation
 from flippy.edax.types import EdaxEvaluations, EdaxRequest, EdaxResponse
 from flippy.mode.base import BaseMode
@@ -26,7 +29,8 @@ class PGNMode(BaseMode):
         self.recv_queue: Queue[EdaxResponse] = Queue()
         self.evaluations = EdaxEvaluations()
         self.show_all_move_evaluations = False
-        self.db = DB()
+        self.server_url = get_book_server_url()
+        self.token = get_book_server_token()
 
         if self.args.pgn_file:
             self.game = Game.from_pgn(self.args.pgn_file)
@@ -156,8 +160,22 @@ class PGNMode(BaseMode):
             self._process_recv_message(message)
 
     def _process_recv_message(self, message: EdaxResponse) -> None:
-        self.db.update_edax_evaluations(message.evaluations)
-        self.evaluations.update(message.evaluations)
+        self.evaluations.update(message.evaluations.values)
+
+        # Submit evaluations to server API
+        payload = [
+            SerializedEvaluation.from_evaluation(eval).model_dump()
+            for eval in message.evaluations.values.values()
+            if is_savable_evaluation(eval)
+        ]
+
+        if payload:
+            response = requests.post(
+                f"{self.server_url}/api/evaluations",
+                json=payload,
+                headers={"x-token": self.token},
+            )
+            response.raise_for_status()
 
         source = message.request.source
 
@@ -284,32 +302,70 @@ class PGNMode(BaseMode):
             return
 
         positions = set(positions)
-
         missing = self.evaluations.get_missing(positions)
 
         if missing:
-            db_evaluations = self.db.lookup_edax_positions(missing)
-            self.evaluations.update(db_evaluations)
-            db_missing = self.evaluations.get_missing(positions)
-
-            if db_missing:
-                request = EdaxRequest(db_missing, MIN_UI_SEARCH_LEVEL, source=source)
-                start_evaluation(request, self.recv_queue)
+            self._fetch_from_server(missing)
+            # Recheck missing positions after server fetch
+            missing = self.evaluations.get_missing(positions)
+            if missing:
+                self._start_initial_evaluation(missing, source)
                 return
 
-        evaluations = [self.evaluations.lookup(position) for position in positions]
+        self._start_deeper_evaluation(positions, source)
 
+    def _fetch_from_server(self, positions: set[Position]) -> None:
+        """Fetch evaluations from the server API and update local evaluations."""
+        # Convert positions to API format
+        positions_api = [pos.to_api() for pos in positions]
+
+        # Process in batches of 100
+        batch_size = 100
+        all_evaluations = {}
+
+        for i in range(0, len(positions_api), batch_size):
+            batch = positions_api[i : i + batch_size]
+            response = requests.get(
+                f"{self.server_url}/api/positions",
+                json=batch,
+                headers={"x-token": self.token},
+            )
+            response.raise_for_status()
+
+            server_evaluations = [
+                SerializedEvaluation.model_validate(item) for item in response.json()
+            ]
+            batch_evaluations = {
+                Position.from_api(e.position): e.to_evaluation()
+                for e in server_evaluations
+            }
+            all_evaluations.update(batch_evaluations)
+
+        self.evaluations.update(all_evaluations)
+
+    def _start_initial_evaluation(
+        self, positions: set[Position], source: Board | Game | None
+    ) -> None:
+        """Start initial evaluation for positions not found in server."""
+        request = EdaxRequest(positions, MIN_UI_SEARCH_LEVEL, source=source)
+        start_evaluation(request, self.recv_queue)
+
+    def _start_deeper_evaluation(
+        self, positions: set[Position], source: Board | Game | None
+    ) -> None:
+        """Start deeper evaluation for positions that have initial evaluations."""
+        evaluations = [self.evaluations.lookup(position) for position in positions]
         min_level = min(evaluation.level for evaluation in evaluations)
         learn_level = min_level + 2 + (min_level % 2)
+
+        if learn_level >= MAX_UI_SEARCH_LEVEL:
+            return
 
         search_positions = [
             evaluation.position
             for evaluation in evaluations
             if evaluation.level == min_level
         ]
-
-        if learn_level >= MAX_UI_SEARCH_LEVEL:
-            return
 
         request = EdaxRequest(search_positions, learn_level, source=source)
         start_evaluation(request, self.recv_queue)

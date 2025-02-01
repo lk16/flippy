@@ -7,20 +7,8 @@ from flippy.edax.types import EdaxEvaluation
 from flippy.othello.position import Position
 
 
-class SerializedPosition(BaseModel):
-    me: int
-    opp: int
-
-    def to_position(self) -> Position:
-        return Position(self.me, self.opp)
-
-    @classmethod
-    def from_position(cls, position: Position) -> SerializedPosition:
-        return cls(me=position.me, opp=position.opp)
-
-
 class SerializedEvaluation(BaseModel):
-    position: SerializedPosition
+    position: str
     level: int
     depth: int
     confidence: int
@@ -29,7 +17,7 @@ class SerializedEvaluation(BaseModel):
 
     def to_evaluation(self) -> EdaxEvaluation:
         return EdaxEvaluation(
-            position=self.position.to_position(),
+            position=Position.from_api(self.position),
             level=self.level,
             depth=self.depth,
             confidence=self.confidence,
@@ -40,7 +28,7 @@ class SerializedEvaluation(BaseModel):
     @classmethod
     def from_evaluation(cls, evaluation: EdaxEvaluation) -> SerializedEvaluation:
         return cls(
-            position=SerializedPosition.from_position(evaluation.position),
+            position=evaluation.position.to_api(),
             level=evaluation.level,
             depth=evaluation.depth,
             confidence=evaluation.confidence,
@@ -50,7 +38,7 @@ class SerializedEvaluation(BaseModel):
 
 
 class Job(BaseModel):
-    position: SerializedPosition
+    position: str
     level: int
 
 

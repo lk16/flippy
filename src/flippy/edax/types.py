@@ -136,13 +136,15 @@ class EdaxEvaluations:
         if evaluation.is_better_than(found):
             self.values[position] = evaluation
 
-    def update(self, other: EdaxEvaluations) -> None:
-        for board, evaluation in other.values.items():
-            self.add(board, evaluation)
+    def update(self, other: dict[Position, EdaxEvaluation]) -> None:
+        for position, evaluation in other.items():
+            self.add(position, evaluation)
 
-    def has_all_children(self, board: Board) -> bool:
-        children = {board.do_normalized_move(move) for move in board.get_moves_as_set()}
-        return all(child in self.values for child in children)
+    def get_missing_children(self, position: Position) -> set[Position]:
+        children = {
+            position.do_normalized_move(move) for move in position.get_moves_as_set()
+        }
+        return children - self.values.keys()
 
     def get_missing(self, positions: set[Position]) -> set[Position]:
         missing: set[Position] = set()

@@ -1,8 +1,11 @@
+import requests
 import typer
 from pathlib import Path
 from typing import Annotated
 
-from flippy.db import DB
+from flippy.book import is_savable_evaluation
+from flippy.book.models import SerializedEvaluation
+from flippy.config import get_book_server_token, get_book_server_url
 from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxEvaluations, EdaxRequest
 from flippy.othello.board import BLACK, WHITE, Board
@@ -16,7 +19,8 @@ class PgnAnanlyzer:
         self.level = level
         self.game = Game.from_pgn(file)
         self.evaluations = EdaxEvaluations()
-        self.db = DB()
+        self.server_url = get_book_server_url()
+        self.token = get_book_server_token()
 
     def _get_best(self, board: Board) -> tuple[list[int], int]:
         child_scores: list[tuple[int, int]] = []
@@ -26,9 +30,27 @@ class PgnAnanlyzer:
             try:
                 evaluation = self.evaluations.lookup(child.position)
             except KeyError:
-                evaluation = self.db.lookup_edax_position(child.position)
+                # Fetch from API if not found locally
+                response = requests.get(
+                    f"{self.server_url}/api/positions",
+                    json=[child.position.to_api()],
+                    headers={"x-token": self.token},
+                )
+                response.raise_for_status()
+                server_evaluations = [
+                    SerializedEvaluation.model_validate(item)
+                    for item in response.json()
+                ]
+                if server_evaluations:
+                    evaluation = server_evaluations[0].to_evaluation()
+                    self.evaluations.add(child.position, evaluation)
+                else:
+                    continue
 
             child_scores.append((move, evaluation.score))
+
+        if not child_scores:
+            return [], 0
 
         # Take minimum, because scores are from opponent's point of view
         best_score = min(score for _, score in child_scores)
@@ -90,15 +112,43 @@ class PgnAnanlyzer:
         # Get set of all positions and their children in game
         all_positions = self._get_all_positions()
 
-        # Lookup evaluations in the DB.
-        self.evaluations = self.db.lookup_edax_positions(all_positions)
+        # Fetch evaluations from server API in batches of 100
+        server_evaluations: list[SerializedEvaluation] = []
+        positions_list = list(all_positions)
+        for i in range(0, len(positions_list), 100):
+            batch = positions_list[i : i + 100]
+            response = requests.get(
+                f"{self.server_url}/api/positions",
+                json=[pos.to_api() for pos in batch],
+                headers={"x-token": self.token},
+            )
+            response.raise_for_status()
+            server_evaluations.extend(
+                SerializedEvaluation.model_validate(item) for item in response.json()
+            )
 
-        # Compute evaluations for other positions.
+        evaluations = {
+            Position.from_api(e.position): e.to_evaluation() for e in server_evaluations
+        }
+        self.evaluations.update(evaluations)
+
+        # Compute evaluations for missing positions
         computed_evaluations = self._evaluate_positions(all_positions)
-        self.evaluations.update(computed_evaluations)
+        self.evaluations.update(computed_evaluations.values)
 
-        # Save newly computed evaluations in DB.
-        self.db.update_edax_evaluations(computed_evaluations)
+        # Submit newly computed evaluations to server API
+        payload = [
+            SerializedEvaluation.from_evaluation(eval).model_dump()
+            for eval in computed_evaluations.values.values()
+            if is_savable_evaluation(eval)
+        ]
+        if payload:
+            response = requests.post(
+                f"{self.server_url}/api/evaluations",
+                json=payload,
+                headers={"x-token": self.token},
+            )
+            response.raise_for_status()
 
         for move_offset in range(len(self.game.moves)):
             output_line = self._get_move_evaluation_line(move_offset)

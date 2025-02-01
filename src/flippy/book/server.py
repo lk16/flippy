@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
-from flippy.book import get_learn_level
+from flippy.book import MAX_SAVABLE_DISCS, get_learn_level, is_savable_evaluation
 from flippy.book.models import (
     ClientStats,
     Job,
@@ -17,11 +17,9 @@ from flippy.book.models import (
     RegisterRequest,
     RegisterResponse,
     SerializedEvaluation,
-    SerializedPosition,
     StatsResponse,
 )
 from flippy.config import BookServerConfig, get_book_server_token, get_db_dsn
-from flippy.db import MAX_SAVABLE_DISCS, is_savable_evaluation
 from flippy.othello.position import Position
 
 
@@ -39,16 +37,11 @@ class ServerState:
     def __init__(self) -> None:
         # TODO move active clients into DB and remove this
         self.active_clients: dict[str, Client] = {}
-
         self.token = get_book_server_token()
 
-        # Initialize as None, will connect lazily
-        self.db: asyncpg.Connection | None = None
-
     async def get_db(self) -> asyncpg.Connection:
-        if self.db is None:
-            self.db = await asyncpg.connect(get_db_dsn())
-        return self.db
+        # Create a single connection instead of a pool
+        return await asyncpg.connect(get_db_dsn())
 
     def prune_inactive_clients(self) -> None:
         inactive_threshold = timedelta(minutes=5)
@@ -133,13 +126,19 @@ async def heartbeat(
     return Response()
 
 
-@app.post("/api/evaluation")
-async def submit_evaluation(
-    evaluation: SerializedEvaluation,
+@app.post("/api/evaluations")
+async def submit_evaluations(
+    evaluations: list[SerializedEvaluation],
     _: None = Depends(verify_auth),
     state: ServerState = Depends(get_server_state),
 ) -> Response:
-    return await upsert_evaluation(evaluation, state)
+    for evaluation in evaluations:
+        try:
+            await upsert_evaluation(evaluation, state)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    return Response()
 
 
 @app.post("/api/job/result")
@@ -156,20 +155,28 @@ async def submit_result(
     completed = state.active_clients[client_id].jobs_completed
     print(f"Client {client_id} has now completed {completed} positions")
 
-    return await upsert_evaluation(result.evaluation, state)
+    try:
+        await upsert_evaluation(result.evaluation, state)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return Response()
 
 
 async def upsert_evaluation(
     serialized_evaluation: SerializedEvaluation, state: ServerState
-) -> Response:
+) -> None:
     evaluation = serialized_evaluation.to_evaluation()
 
     if not is_savable_evaluation(evaluation):
-        return Response(status_code=400, content="Evaluation is not savable")
+        raise ValueError("Evaluation is not savable")
 
     conn = await state.get_db()
 
+    # TODO raise error if evaluation is not valid
     evaluation._validate()
+
+    # TODO raise error if position is not normalized
     assert evaluation.position.is_normalized()
 
     disc_count = evaluation.position.count_discs()
@@ -202,8 +209,6 @@ async def upsert_evaluation(
         priority,
         evaluation.best_moves,
     )
-
-    return Response()
 
 
 @app.get("/api/stats/clients")
@@ -294,8 +299,8 @@ async def get_job_for_disc_count(
     if not row:
         return None
 
-    position = SerializedPosition.from_position(Position.from_bytes(row["position"]))
-    return Job(position=position, level=learn_level)
+    position = Position.from_bytes(row["position"])
+    return Job(position=position.to_api(), level=learn_level)
 
 
 @app.get("/api/job")
@@ -331,3 +336,43 @@ async def show_clients(
     credentials: HTTPBasicCredentials = Depends(verify_auth),
 ) -> str:
     return (static_dir / "clients.html").read_text()
+
+
+@app.get("/api/positions")
+async def get_positions(
+    positions: list[str],
+    _: None = Depends(verify_auth),
+    state: ServerState = Depends(get_server_state),
+) -> list[SerializedEvaluation]:
+    if len(positions) > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot request more than 100 positions at once",
+        )
+
+    conn = await state.get_db()
+    position_bytes = [Position.from_api(pos).to_bytes() for pos in positions]
+
+    query = """
+    SELECT position, level, depth, confidence, score, best_moves
+    FROM edax
+    WHERE position = ANY($1)
+    """
+
+    rows = await conn.fetch(query, position_bytes)
+
+    results = []
+    for row in rows:
+        position = Position.from_bytes(row["position"])
+        results.append(
+            SerializedEvaluation(
+                position=position.to_api(),
+                level=row["level"],
+                depth=row["depth"],
+                confidence=row["confidence"],
+                score=row["score"],
+                best_moves=row["best_moves"],
+            )
+        )
+
+    return results

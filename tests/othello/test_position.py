@@ -315,3 +315,47 @@ def test_count_discs(position: Position, expected: int) -> None:
 )
 def test_count_empties(position: Position, expected: int) -> None:
     assert position.count_empties() == expected
+
+
+@pytest.mark.parametrize(
+    ["position", "expected"],
+    [
+        pytest.param(
+            Position(0x1, 0x2),
+            "0000000000000001" + "0000000000000002",
+            id="one-disc-each",
+        ),
+        pytest.param(
+            POSITION_EMPTY,
+            "0000000000000000" + "0000000000000000",
+            id="empty",
+        ),
+        pytest.param(
+            Position(0xAAAAAAAAAAAAAAAA, 0x5555555555555555),
+            "AAAAAAAAAAAAAAAA" + "5555555555555555",
+            id="all-discs",
+        ),
+    ],
+)
+def test_to_api(position: Position, expected: str) -> None:
+    assert position.to_api() == expected
+
+
+def test_from_api_error() -> None:
+    with pytest.raises(ValueError):
+        Position.from_api("invalid")
+
+
+@pytest.mark.parametrize(
+    ["position"],
+    [
+        pytest.param(POSITION_START, id="start"),
+        pytest.param(POSITION_EMPTY, id="empty"),
+        pytest.param(POSITION_AFTER_ONE_MOVE, id="after-one-move"),
+        pytest.param(POSITION_NO_MOVES_WIN, id="no-moves"),
+        pytest.param(POSITION_NEED_TO_PASS, id="need-to-pass"),
+    ],
+)
+def test_api_roundtrip(position: Position) -> None:
+    api_str = position.to_api()
+    assert Position.from_api(api_str) == position

@@ -1,7 +1,6 @@
 from pathlib import Path
 
 from flippy.book.load_pgn import learn_new_positions
-from flippy.db import DB
 from flippy.othello.game import Game
 from flippy.othello.position import Position
 from flippy.othello.wthor import Wthor
@@ -27,5 +26,4 @@ def load_wthor(filenames: list[Path]) -> None:
 
     print(f"Found {len(games)} games with {len(positions)} unique positions.")
 
-    db = DB()
-    learn_new_positions(db, positions)
+    learn_new_positions(positions)

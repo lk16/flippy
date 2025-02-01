@@ -1,14 +1,18 @@
 import queue
+import requests
 from multiprocessing import Queue
 from pygame.event import Event
 from typing import Any
 
 from flippy.arguments import Arguments
-from flippy.db import DB, MIN_UI_SEARCH_LEVEL
+from flippy.book import MIN_UI_SEARCH_LEVEL, is_savable_evaluation
+from flippy.book.models import SerializedEvaluation
+from flippy.config import get_book_server_token, get_book_server_url
 from flippy.edax.process import start_evaluation
 from flippy.edax.types import EdaxEvaluations, EdaxRequest, EdaxResponse
 from flippy.mode.game import GameMode
 from flippy.othello.board import Board
+from flippy.othello.position import Position
 
 
 class EvaluateMode(GameMode):
@@ -16,7 +20,8 @@ class EvaluateMode(GameMode):
         super().__init__(args)
         self.recv_queue: Queue[EdaxResponse] = Queue()
         self.evaluations = EdaxEvaluations()
-        self.db = DB()
+        self.server_url = get_book_server_url()
+        self.token = get_book_server_token()
 
         self.on_board_change()
 
@@ -34,19 +39,33 @@ class EvaluateMode(GameMode):
 
     def on_board_change(self) -> None:
         board = self.get_board()
-        if self.evaluations.has_all_children(board):
+
+        # Get positions that are missing and not currently being evaluated
+        missing_positions = self.evaluations.get_missing_children(board.position)
+        if not missing_positions:
             return
 
-        board = self.get_board()
-        child_positions = {child.position for child in board.get_children()}
+        # Fetch evaluations from server API only for positions not being evaluated
+        response = requests.get(
+            f"{self.server_url}/api/positions",
+            json=[pos.to_api() for pos in missing_positions],
+            headers={"x-token": self.token},
+        )
+        response.raise_for_status()
 
-        evaluations = self.db.lookup_edax_positions(child_positions)
+        server_evaluations = [
+            SerializedEvaluation.model_validate(item) for item in response.json()
+        ]
+        evaluations = {
+            Position.from_api(e.position): e.to_evaluation() for e in server_evaluations
+        }
         self.evaluations.update(evaluations)
 
-        request_positions = self.evaluations.get_missing(child_positions)
-
-        request = EdaxRequest(request_positions, MIN_UI_SEARCH_LEVEL, source=board)
-        start_evaluation(request, self.recv_queue)
+        # Check again for any positions still missing after server update
+        missing_positions = self.evaluations.get_missing_children(board.position)
+        if missing_positions:
+            request = EdaxRequest(missing_positions, MIN_UI_SEARCH_LEVEL, source=board)
+            start_evaluation(request, self.recv_queue)
 
     def _process_recv_messages(self) -> None:
         while True:
@@ -58,12 +77,24 @@ class EvaluateMode(GameMode):
             self._process_recv_message(message)
 
     def _process_recv_message(self, message: EdaxResponse) -> None:
-        self.evaluations.update(message.evaluations)
-        self.db.update_edax_evaluations(message.evaluations)
+        self.evaluations.update(message.evaluations.values)
+
+        # Submit evaluations to server API
+        payload = [
+            SerializedEvaluation.from_evaluation(eval).model_dump()
+            for eval in message.evaluations.values.values()
+            if is_savable_evaluation(eval)
+        ]
+
+        if payload:
+            response = requests.post(
+                f"{self.server_url}/api/evaluations",
+                json=payload,
+                headers={"x-token": self.token},
+            )
+            response.raise_for_status()
 
         positions = message.request.positions
-        # TODO #33 unify modes, especially searching with PGN Mode and move it back into Window
-
         level = message.request.level
         source = message.request.source
         next_level = level + 2

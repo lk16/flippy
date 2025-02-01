@@ -61,6 +61,19 @@ class Position:
     def to_bytes(self) -> bytes:
         return struct.pack("<QQ", self.me, self.opp)
 
+    @classmethod
+    def from_api(cls, api_str: str) -> Position:
+        """Create Position from a 32-character hex string (16 chars each for me and opp)."""
+        if len(api_str) != 32:
+            raise ValueError("API string must be exactly 32 characters")
+        me = int(api_str[:16], 16)
+        opp = int(api_str[16:], 16)
+        return cls(me, opp)
+
+    def to_api(self) -> str:
+        """Convert position to a 32-character hex string (16 chars each for me and opp)."""
+        return f"{self.me:016X}{self.opp:016X}"
+
     def __repr__(self) -> str:
         return f"Position({hex(self.me)}, {hex(self.opp)})"
 
