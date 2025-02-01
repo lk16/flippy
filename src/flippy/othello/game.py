@@ -9,7 +9,7 @@ from typing import Iterable, Optional
 from flippy.othello.board import BLACK, WHITE, Board
 from flippy.othello.position import PASS_MOVE, InvalidMove, Position
 
-metadata_regex = re.compile('\[(.*) "(.*)"\]')
+metadata_regex = re.compile(r'\[(.*) "(.*)"\]')
 
 
 class Game:

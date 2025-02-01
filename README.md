@@ -4,7 +4,7 @@ Tools for learning and playing the othello boardgame, currently using pygame.
 
 
 ### How to use GUI
-* Install python 3.11
+* Install python 3.12
 * Install dependencies with `pdm install`
 * Run with `pdm run gui`
 

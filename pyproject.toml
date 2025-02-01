@@ -9,13 +9,12 @@ dependencies = [
     "typer>=0.9.0",
     "requests>=2.31.0",
     "python-dotenv>=1.0.1",
-    "psycopg2-binary>=2.9.9",
     "fastapi>=0.115.7",
     "pydantic>=2.10.5",
     "uvicorn>=0.34.0",
     "asyncpg>=0.30.0",
 ]
-requires-python = "==3.11.*"
+requires-python = "==3.12.*"
 readme = "README.md"
 license = { text = "MIT" }
 
@@ -31,7 +30,7 @@ unique-positions = "python src/flippy/commands/unique_positions.py"
 [tool.pdm]
 [tool.pdm.dev-dependencies]
 dev = [
-    "mypy>=1.8.0",
+    "mypy>=1.14.1",
     "pre-commit>=3.6.1",
     "pdbpp>=0.10.3",
     "ruff>=0.2.1",

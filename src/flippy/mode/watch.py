@@ -34,6 +34,10 @@ class UnknownSquare(Exception):
     pass
 
 
+def get_pixel(screenshot: Image, x: int, y: int) -> tuple[int, int, int]:
+    return screenshot.getpixel((x, y))  # type: ignore[return-value]
+
+
 class FlyOrDieWatchCoords:
     def __init__(self, left_x: int, right_x: int, y: int) -> None:
         self.left_x = left_x
@@ -63,8 +67,8 @@ class FlyOrDieWatchCoords:
         return x, y
 
     def is_valid_coords(self, screenshot: Image) -> bool:
-        left_top_pixel = screenshot.getpixel((self.left_x, self.y))
-        right_top_pixel = screenshot.getpixel((self.right_x, self.y))
+        left_top_pixel = get_pixel(screenshot, self.left_x, self.y)
+        right_top_pixel = get_pixel(screenshot, self.right_x, self.y)
 
         return (
             is_similar_color(left_top_pixel, FOD_LEFT_TOP_MARKER, 20)
@@ -114,7 +118,7 @@ class WatchMode(BaseMode):
             left_x: Optional[int] = None
             right_x: Optional[int] = None
             for x in range(width):
-                pixel = self.screenshot.getpixel((x, y))
+                pixel = get_pixel(self.screenshot, x, y)
 
                 if is_similar_color(pixel, FOD_LEFT_TOP_MARKER, 20) and left_x is None:
                     left_x = x
@@ -153,7 +157,7 @@ class WatchMode(BaseMode):
         return board, unknown_squares
 
     def get_square_at_coords(self, coord: tuple[int, int]) -> int:
-        pixel = self.screenshot.getpixel(coord)
+        pixel = get_pixel(self.screenshot, coord[0], coord[1])
 
         for empty in FOD_EMPTIES:
             if is_similar_color(pixel, empty, 20):
@@ -165,13 +169,13 @@ class WatchMode(BaseMode):
         if is_similar_color(pixel, FOD_WHITE, 20):
             return WHITE
 
-        print(pixel)
-
         raise UnknownSquare
 
     def get_turn(self, coords: FlyOrDieWatchCoords) -> int:
         turn_highlighter_coords = coords.get_turn_highlighter_coords()
-        turn_highlighter = self.screenshot.getpixel(turn_highlighter_coords)
+        turn_highlighter = get_pixel(
+            self.screenshot, turn_highlighter_coords[0], turn_highlighter_coords[1]
+        )
 
         turn_color_coords = coords.get_turn_color_coords()
 

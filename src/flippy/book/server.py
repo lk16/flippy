@@ -40,7 +40,6 @@ class ServerState:
         self.token = get_book_server_token()
 
     async def get_db(self) -> asyncpg.Connection:
-        # Create a single connection instead of a pool
         return await asyncpg.connect(get_db_dsn())
 
     def prune_inactive_clients(self) -> None:
