@@ -212,6 +212,7 @@ class Position:
         return normalized, rotation
 
     def normalized(self) -> Position:
+        # TODO make this return a separate type
         return self.normalize()[0]
 
     def is_normalized(self) -> bool:

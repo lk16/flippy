@@ -30,7 +30,7 @@ class EdaxResponse:
             if position.is_game_end() or not position.has_moves():
                 continue
 
-            assert position.normalized() in evaluations.values
+            assert position.normalized() in self.evaluations
 
 
 class EdaxEvaluation:
@@ -110,22 +110,58 @@ class EdaxEvaluation:
         return self.level >= MIN_LEARN_LEVEL and self.position.is_db_savable()
 
 
-# TODO make this behave like a dict
-class EdaxEvaluations:
-    def __init__(self) -> None:
-        self.values: dict[Position, EdaxEvaluation] = {}
+# TODO add tests for EdaxEvaluations
 
-    def lookup(self, position: Position) -> EdaxEvaluation:
+
+class EdaxEvaluations:
+    """
+    This class represents a set of evaluated positions and exposes an interface
+    similar to a dictionary.
+    """
+
+    def __init__(self) -> None:
+        self.__data: dict[Position, EdaxEvaluation] = {}
+
+    # --- dict like interface ---
+
+    def keys(self) -> set[Position]:
+        return set(self.__data.keys())
+
+    def values(self) -> list[EdaxEvaluation]:
+        return list(self.__data.values())
+
+    def __getitem__(self, position: Position) -> EdaxEvaluation:
         if position.is_game_end():
-            return self._lookup_game_end(position)
+            return self.__lookup_game_end(position)
 
         if not position.has_moves():
-            return self._lookup_passed(position)
+            return self.__lookup_passed(position)
 
         key, rotation = position.normalize()
-        return deepcopy(self.values[key]).unrotate(rotation)
+        return deepcopy(self.__data[key]).unrotate(rotation)
 
-    def _lookup_game_end(self, position: Position) -> EdaxEvaluation:
+    def update(self, other: EdaxEvaluations) -> None:
+        for position, evaluation in other.__data.items():
+            self[position] = evaluation
+
+    def __setitem__(self, position: Position, evaluation: EdaxEvaluation) -> None:
+        assert position.is_normalized()
+        assert evaluation.position == position
+
+        if position not in self.__data:
+            self.__data[position] = evaluation
+
+        found = self.__data[position]
+
+        if evaluation.is_better_than(found):
+            self.__data[position] = evaluation
+
+    def __contains__(self, position: Position) -> bool:
+        return position in self.__data
+
+    # --- private helpers ---
+
+    def __lookup_game_end(self, position: Position) -> EdaxEvaluation:
         empties = position.count_empties()
         score = position.get_final_score()
         return EdaxEvaluation(
@@ -137,43 +173,29 @@ class EdaxEvaluations:
             best_moves=[],
         )
 
-    def _lookup_passed(self, position: Position) -> EdaxEvaluation:
+    def __lookup_passed(self, position: Position) -> EdaxEvaluation:
         passed = position.pass_move()
-        return deepcopy(self.lookup(passed)).pass_move()
+        return deepcopy(self[passed]).pass_move()
 
-    def add(self, position: Position, evaluation: EdaxEvaluation) -> None:
-        assert position.is_normalized()
-        assert evaluation.position == position
-
-        if position not in self.values:
-            self.values[position] = evaluation
-
-        found = self.values[position]
-
-        if evaluation.is_better_than(found):
-            self.values[position] = evaluation
-
-    def update(self, other: dict[Position, EdaxEvaluation]) -> None:
-        for position, evaluation in other.items():
-            self.add(position, evaluation)
+    # --- public helpers that don't modify self---
 
     def get_missing_children(self, position: Position) -> set[Position]:
         children = {
             position.do_normalized_move(move) for move in position.get_moves_as_set()
         }
-        return children - self.values.keys()
+        return children - self.__data.keys()
 
     def get_missing(self, positions: set[Position]) -> set[Position]:
         missing: set[Position] = set()
         for position in positions:
             try:
-                self.lookup(position)
+                self[position]
             except KeyError:
                 missing.add(position)
         return missing
 
-    def keys(self) -> set[Position]:
-        return set(self.values.keys())
-
-    def __getitem__(self, position: Position) -> EdaxEvaluation:
-        return self.lookup(position)
+    # --- helpers that modify self ---
+    # TODO find out where this is used and produce an EdaxEvaluations instead of a list[EdaxEvaluation]
+    def update_from_list(self, evaluations: list[EdaxEvaluation]) -> None:
+        for evaluation in evaluations:
+            self[evaluation.position] = evaluation

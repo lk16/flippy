@@ -90,8 +90,6 @@ class BookLearningClient:
         computation_time = (after - before).total_seconds()
 
         return JobResult(
-            evaluation=SerializedEvaluation.from_evaluation(
-                evaluations.lookup(position)
-            ),
+            evaluation=SerializedEvaluation.from_evaluation(evaluations[position]),
             computation_time=computation_time,
         )

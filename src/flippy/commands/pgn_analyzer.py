@@ -25,12 +25,12 @@ class PgnAnanlyzer:
             board.position.get_normalized_children()
         )
         found_evaluations = self.api_client.lookup_positions(list(missing_positions))
-        self.evaluations.update({eval.position: eval for eval in found_evaluations})
+        self.evaluations.update_from_list(found_evaluations)
 
         for move in board.get_moves_as_set():
             child = board.do_move(move)
             try:
-                evaluation = self.evaluations.lookup(child.position)
+                evaluation = self.evaluations[child.position]
             except KeyError:
                 continue
 
@@ -85,7 +85,7 @@ class PgnAnanlyzer:
         played_field = Position.index_to_field(played_move)
         played_child = board.do_move(played_move)
 
-        score = self.evaluations.lookup(played_child.position).score
+        score = self.evaluations[played_child.position].score
         score_str = self._get_colored_score(score, board)
 
         output_line = f"{move_offset + 1:>2}. {turn} {played_field} {score_str}"
@@ -100,21 +100,19 @@ class PgnAnanlyzer:
         all_positions = self._get_all_positions()
 
         found_evaluations = self.api_client.lookup_positions(list(all_positions))
-        self.evaluations.update({eval.position: eval for eval in found_evaluations})
+        self.evaluations.update_from_list(found_evaluations)
 
         # Compute evaluations for missing positions
         computed_evaluations = self._evaluate_positions(all_positions)
 
         savable_evaluations = [
-            eval
-            for eval in computed_evaluations.values.values()
-            if eval.is_db_savable()
+            eval for eval in computed_evaluations.values() if eval.is_db_savable()
         ]
 
         # Save computed evaluations to server API
         self.api_client.save_learned_evaluations(savable_evaluations)
 
-        self.evaluations.update(computed_evaluations.values)
+        self.evaluations.update(computed_evaluations)
 
         # Print move evaluations
         for move_offset in range(len(self.game.moves)):

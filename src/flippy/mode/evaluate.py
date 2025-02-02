@@ -42,7 +42,7 @@ class EvaluateMode(GameMode):
             return
 
         found_evaluations = self.api_client.lookup_positions(list(missing_positions))
-        self.evaluations.update({eval.position: eval for eval in found_evaluations})
+        self.evaluations.update_from_list(found_evaluations)
 
         # Check again for any positions still missing after server update
         missing_positions = self.evaluations.get_missing_children(position)
@@ -60,11 +60,11 @@ class EvaluateMode(GameMode):
             self._process_recv_message(message)
 
     def _process_recv_message(self, message: EdaxResponse) -> None:
-        self.evaluations.update(message.evaluations.values)
+        self.evaluations.update(message.evaluations)
 
         # Submit evaluations to server API
         savable_evaluations = [
-            eval for eval in message.evaluations.values.values() if eval.is_db_savable()
+            eval for eval in message.evaluations.values() if eval.is_db_savable()
         ]
 
         self.api_client.save_learned_evaluations(savable_evaluations)
@@ -93,7 +93,7 @@ class EvaluateMode(GameMode):
             child = board.do_move(move)
 
             try:
-                evaluation = self.evaluations.lookup(child.position)
+                evaluation = self.evaluations[child.position]
             except KeyError:
                 continue
 

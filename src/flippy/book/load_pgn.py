@@ -94,8 +94,7 @@ def learn_new_positions(positions: set[Position]) -> None:
             seconds=average * (len(learn_positions) - computed_positions)
         )
 
-        learned_evaluations = list(edax_evaluations.values.values())
-        api_client.save_learned_evaluations(learned_evaluations)
+        api_client.save_learned_evaluations(edax_evaluations.values())
 
         print(
             f"new positions @ lvl {MIN_LEARN_LEVEL} | {min(chunk_end, len(learn_positions))}/{len(learn_positions)} "

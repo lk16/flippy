@@ -97,7 +97,7 @@ class EdaxProcess:
                 remaining_lines, position
             )
             total_read_lines += read_lines
-            evaluations.add(position, evaluation)
+            evaluations[position] = evaluation
 
         return evaluations
 
