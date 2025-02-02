@@ -12,8 +12,10 @@ from uuid import uuid4
 from flippy.book import MAX_SAVABLE_DISCS, get_learn_level, is_savable_evaluation
 from flippy.book.models import (
     ClientStats,
+    EvaluationsPayload,
     Job,
     JobResult,
+    LookupPositionsPayload,
     RegisterRequest,
     RegisterResponse,
     SerializedEvaluation,
@@ -116,7 +118,9 @@ async def register_client(
 
 @app.post("/api/heartbeat")
 async def heartbeat(
-    client_id: str = Header(...), state: ServerState = Depends(get_server_state)
+    client_id: str = Header(...),
+    _: None = Depends(verify_auth),
+    state: ServerState = Depends(get_server_state),
 ) -> Response:
     if client_id not in state.active_clients:
         raise HTTPException(status_code=401)
@@ -127,11 +131,11 @@ async def heartbeat(
 
 @app.post("/api/evaluations")
 async def submit_evaluations(
-    evaluations: list[SerializedEvaluation],
+    payload: EvaluationsPayload,
     _: None = Depends(verify_auth),
     state: ServerState = Depends(get_server_state),
 ) -> Response:
-    for evaluation in evaluations:
+    for evaluation in payload.evaluations:
         try:
             await upsert_evaluation(evaluation, state)
         except ValueError as e:
@@ -144,6 +148,7 @@ async def submit_evaluations(
 async def submit_result(
     result: JobResult,
     client_id: str = Header(...),
+    _: None = Depends(verify_auth),
     state: ServerState = Depends(get_server_state),
 ) -> Response:
     if client_id not in state.active_clients:
@@ -170,13 +175,13 @@ async def upsert_evaluation(
     if not is_savable_evaluation(evaluation):
         raise ValueError("Evaluation is not savable")
 
-    conn = await state.get_db()
+    try:
+        evaluation.validate()
+    except ValueError as e:
+        raise ValueError(f"Evaluation is not valid: {e}") from e
 
-    # TODO raise error if evaluation is not valid
-    evaluation._validate()
-
-    # TODO raise error if position is not normalized
-    assert evaluation.position.is_normalized()
+    if not evaluation.position.is_normalized():
+        raise ValueError("Position is not normalized")
 
     disc_count = evaluation.position.count_discs()
 
@@ -196,6 +201,8 @@ async def upsert_evaluation(
         best_moves = EXCLUDED.best_moves
     WHERE edax.level < EXCLUDED.level
     """
+
+    conn = await state.get_db()
 
     await conn.execute(
         query,
@@ -235,6 +242,7 @@ async def get_stats(
 @app.get("/api/stats/book")
 async def get_book_stats(
     state: ServerState = Depends(get_server_state),
+    _: None = Depends(verify_auth),
 ) -> list[list[str]]:
     query = """
     SELECT disc_count, level, COUNT(*)
@@ -304,12 +312,14 @@ async def get_job_for_disc_count(
 
 @app.get("/api/job")
 async def get_job(
-    state: ServerState = Depends(get_server_state), client_id: str = Header(...)
+    state: ServerState = Depends(get_server_state),
+    _: None = Depends(verify_auth),
+    client_id: str = Header(...),
 ) -> Optional[Job]:
     if client_id not in state.active_clients:
         raise HTTPException(status_code=401)
 
-    # We prune clients here, because we don't have to add some timing logic.
+    # We prune clients here, because otherwise we have to call this periodically and setup timing logic.
     # If nobody asks for work, we don't risk losing any work handed out to inactive clients.
     state.prune_inactive_clients()
 
@@ -325,28 +335,33 @@ async def get_job(
 
 @app.get("/book", response_class=HTMLResponse)
 async def show_book_stats(
-    credentials: HTTPBasicCredentials = Depends(verify_auth),
+    _: None = Depends(verify_auth),
 ) -> str:
     return (static_dir / "book.html").read_text()
 
 
 @app.get("/", response_class=HTMLResponse)
 async def show_clients(
-    credentials: HTTPBasicCredentials = Depends(verify_auth),
+    _: None = Depends(verify_auth),
 ) -> str:
     return (static_dir / "clients.html").read_text()
 
 
-@app.get("/api/positions")
+MAX_POSITION_LOOKUP_SIZE = 1000
+
+
+@app.post("/api/positions/lookup")
 async def get_positions(
-    positions: list[str],
+    payload: LookupPositionsPayload,
     _: None = Depends(verify_auth),
     state: ServerState = Depends(get_server_state),
 ) -> list[SerializedEvaluation]:
-    if len(positions) > 100:
+    positions = payload.positions
+
+    if len(positions) > MAX_POSITION_LOOKUP_SIZE:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot request more than 100 positions at once",
+            detail=f"Cannot request more than {MAX_POSITION_LOOKUP_SIZE} positions at once",
         )
 
     conn = await state.get_db()

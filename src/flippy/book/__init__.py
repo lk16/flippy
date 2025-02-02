@@ -14,6 +14,7 @@ MAX_UI_SEARCH_LEVEL = 32
 MAX_SAVABLE_DISCS = 40
 
 
+# TODO make member function
 def is_savable_evaluation(evaluation: EdaxEvaluation) -> bool:
     """
     Checks whether an evaluation qualifies to be saved in the DB.
@@ -23,6 +24,7 @@ def is_savable_evaluation(evaluation: EdaxEvaluation) -> bool:
     )
 
 
+# TODO make member function
 def is_savable_position(position: Position) -> bool:
     """
     Checks whether a position qualifies to be saved in the DB.

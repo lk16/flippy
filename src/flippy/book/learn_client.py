@@ -1,19 +1,15 @@
 import requests
-import socket
-import subprocess
 import threading
 import time
 from datetime import datetime
 from typing import Optional
 
+from flippy.book.api_client import APIClient
 from flippy.book.models import (
     Job,
     JobResult,
-    RegisterRequest,
-    RegisterResponse,
     SerializedEvaluation,
 )
-from flippy.config import get_book_server_token, get_book_server_url
 from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxRequest
 from flippy.othello.position import Position
@@ -21,65 +17,28 @@ from flippy.othello.position import Position
 
 class BookLearningClient:
     def __init__(self) -> None:
-        self.server_url = get_book_server_url()
+        self.api_client = APIClient()
         self.client_id: str | None = None
-        self.hostname = socket.gethostname()
-        self.token = get_book_server_token()
-        try:
-            self.git_commit = subprocess.check_output(
-                ["git", "rev-parse", "HEAD"]
-            ).decode("ascii")[:8]
-        except (subprocess.SubprocessError, FileNotFoundError):
-            self.git_commit = "unknown"
 
         threading.Thread(target=self._heartbeat_loop, daemon=True).start()
 
     def _register(self) -> str:
-        response = requests.post(
-            f"{self.server_url}/api/register",
-            json=RegisterRequest(
-                hostname=self.hostname,
-                git_commit=self.git_commit,
-            ).model_dump(),
-            headers={"x-token": self.token},
-        )
-        response.raise_for_status()
-
-        parsed = RegisterResponse.model_validate_json(response.text)
-        return parsed.client_id
+        return self.api_client.register_learn_client()
 
     def heartbeat(self) -> None:
         if self.client_id is None:
+            print("No client ID, skipping heartbeat.")
             return
 
-        response = requests.post(
-            f"{self.server_url}/api/heartbeat", headers={"client-id": self.client_id}
-        )
-        response.raise_for_status()
+        self.api_client.heartbeat(self.client_id)
 
     def get_job(self) -> Optional[Job]:
         assert self.client_id is not None
-
-        response = requests.get(
-            f"{self.server_url}/api/job", headers={"client-id": self.client_id}
-        )
-        response.raise_for_status()
-
-        if response.text == "null":
-            return None
-
-        return Job.model_validate_json(response.text)
+        return self.api_client.get_learn_job(self.client_id)
 
     def submit_result(self, result: JobResult) -> None:
         assert self.client_id is not None
-
-        payload = result.model_dump()
-        response = requests.post(
-            f"{self.server_url}/api/job/result",
-            headers={"client-id": self.client_id},
-            json=payload,
-        )
-        response.raise_for_status()
+        self.api_client.submit_job_result(self.client_id, result)
 
     def _heartbeat_loop(self) -> None:
         while True:
@@ -92,12 +51,11 @@ class BookLearningClient:
 
     def run(self) -> None:
         while True:
-            if self.client_id is None:
-                print("Getting new client ID")
-                self.client_id = self._register()
-                self.headers = {"client-id": self.client_id}
-
             try:
+                if self.client_id is None:
+                    print("Getting new client ID")
+                    self.client_id = self._register()
+
                 job = self.get_job()
                 if job is None:
                     # No more positions to compute

@@ -49,18 +49,31 @@ class EdaxEvaluation:
         self.confidence = confidence
         self.score = score
         self.best_moves = best_moves
-        self._validate()
+        self.validate()
 
-    def _validate(self) -> None:
-        assert 0 <= self.depth <= 60
-        assert self.confidence in [73, 87, 95, 98, 99, 100]
-        assert -64 <= self.score <= 64
-        assert 0 <= self.level <= 60
-        assert self.level % 2 == 0
+    def validate(self) -> None:
+        if not (0 <= self.depth <= 60):
+            raise ValueError(f"Depth must be between 0 and 60, got {self.depth}")
+
+        if self.confidence not in [73, 87, 95, 98, 99, 100]:
+            raise ValueError(
+                f"Confidence must be one of [73, 87, 95, 98, 99, 100], got {self.confidence}"
+            )
+
+        if not (-64 <= self.score <= 64):
+            raise ValueError(f"Score must be between -64 and 64, got {self.score}")
+
+        if not (0 <= self.level <= 60):
+            raise ValueError(f"Level must be between 0 and 60, got {self.level}")
+
+        if self.level % 2 != 0:
+            raise ValueError(f"Level must be even, got {self.level}")
 
         dummy = deepcopy(self.position)
         for move in self.best_moves:
-            assert dummy.is_valid_move(move)
+            if not dummy.is_valid_move(move):
+                raise ValueError(f"Invalid move {move}")
+
             dummy = dummy.do_move(move)
 
     def is_better_than(self, other: EdaxEvaluation) -> bool:

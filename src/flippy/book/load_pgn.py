@@ -1,12 +1,11 @@
 import json
-import requests
 from datetime import datetime, timedelta
 from math import ceil
 
 from flippy import PROJECT_ROOT
 from flippy.book import MIN_LEARN_LEVEL, is_savable_position
-from flippy.book.models import SerializedEvaluation
-from flippy.config import PgnConfig, get_book_server_token, get_book_server_url
+from flippy.book.api_client import APIClient
+from flippy.config import PgnConfig
 from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxRequest
 from flippy.othello.game import Game
@@ -45,7 +44,7 @@ def load_pgn() -> None:
 
         percentage = 100.0 * (offset + 1) / len(pgn_files)
         print(
-            f"Loading PGN files: {offset+1}/{len(pgn_files)} ({percentage:6.2f}%)\r",
+            f"Loading PGN files: {offset + 1}/{len(pgn_files)} ({percentage:6.2f}%)\r",
             end="",
         )
 
@@ -66,33 +65,14 @@ def learn_new_positions(positions: set[Position]) -> None:
 
     print(f"Looking up {len(pgn_positions)} positions in DB")
 
-    # Convert positions to list for chunking
-    position_list = list(pgn_positions)
-    found_pgn_positions: set[Position] = set()
+    api_client = APIClient()
 
-    server_url = get_book_server_url()
-    token = get_book_server_token()
+    found_evaluations = api_client.lookup_positions(list(pgn_positions))
 
-    # Fetch evaluations in chunks of 100
-    for i in range(0, len(position_list), 100):
-        chunk = position_list[i : i + 100]
-        response = requests.get(
-            f"{server_url}/api/positions",
-            json=[pos.to_api() for pos in chunk],
-            headers={"x-token": token},
-        )
+    # TODO consider adding extra endpoint to get missing positions
+    found_positions = {eval.position for eval in found_evaluations}
 
-        response.raise_for_status()
-        parsed = [SerializedEvaluation.model_validate(item) for item in response.json()]
-
-        found_pgn_positions.update([Position.from_api(pos.position) for pos in parsed])
-
-        # Print progress
-        print(f"Fetched positions {i + len(chunk)}/{len(position_list)}\r", end="")
-
-    print()
-
-    learn_positions = list(pgn_positions - found_pgn_positions)
+    learn_positions = list(pgn_positions - set(found_positions))
 
     total_seconds = 0.0
 
@@ -103,7 +83,7 @@ def learn_new_positions(positions: set[Position]) -> None:
         request = EdaxRequest(chunk, MIN_LEARN_LEVEL, source=None)
 
         before = datetime.now()
-        learned_evaluations = start_evaluation_sync(request)
+        edax_evaluations = start_evaluation_sync(request)
         after = datetime.now()
 
         seconds = (after - before).total_seconds()
@@ -116,15 +96,8 @@ def learn_new_positions(positions: set[Position]) -> None:
             seconds=average * (len(learn_positions) - computed_positions)
         )
 
-        payload = [
-            SerializedEvaluation.from_evaluation(eval).model_dump()
-            for eval in learned_evaluations.values.values()
-        ]
-
-        response = requests.post(
-            f"{server_url}/api/evaluations", json=payload, headers={"x-token": token}
-        )
-        response.raise_for_status()
+        learned_evaluations = list(edax_evaluations.values.values())
+        api_client.save_learned_evaluations(learned_evaluations)
 
         print(
             f"new positions @ lvl {MIN_LEARN_LEVEL} | {min(chunk_end, len(learn_positions))}/{len(learn_positions)} "

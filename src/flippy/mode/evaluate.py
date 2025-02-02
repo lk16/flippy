@@ -1,13 +1,11 @@
 import queue
-import requests
 from multiprocessing import Queue
 from pygame.event import Event
 from typing import Any
 
 from flippy.arguments import Arguments
 from flippy.book import MAX_UI_SEARCH_LEVEL, MIN_UI_SEARCH_LEVEL, is_savable_evaluation
-from flippy.book.models import SerializedEvaluation
-from flippy.config import get_book_server_token, get_book_server_url
+from flippy.book.api_client import APIClient
 from flippy.edax.process import start_evaluation
 from flippy.edax.types import EdaxEvaluations, EdaxRequest, EdaxResponse
 from flippy.mode.game import GameMode
@@ -19,8 +17,7 @@ class EvaluateMode(GameMode):
         super().__init__(args)
         self.recv_queue: Queue[EdaxResponse] = Queue()
         self.evaluations = EdaxEvaluations()
-        self.server_url = get_book_server_url()
-        self.token = get_book_server_token()
+        self.api_client = APIClient()
 
         self.on_board_change()
 
@@ -44,21 +41,8 @@ class EvaluateMode(GameMode):
         if not missing_positions:
             return
 
-        # Fetch evaluations from server API only for positions not being evaluated
-        response = requests.get(
-            f"{self.server_url}/api/positions",
-            json=[pos.to_api() for pos in missing_positions],
-            headers={"x-token": self.token},
-        )
-        response.raise_for_status()
-
-        server_evaluations = [
-            SerializedEvaluation.model_validate(item) for item in response.json()
-        ]
-        evaluations = {
-            Position.from_api(e.position): e.to_evaluation() for e in server_evaluations
-        }
-        self.evaluations.update(evaluations)
+        found_evaluations = self.api_client.lookup_positions(list(missing_positions))
+        self.evaluations.update({eval.position: eval for eval in found_evaluations})
 
         # Check again for any positions still missing after server update
         missing_positions = self.evaluations.get_missing_children(position)
@@ -79,19 +63,13 @@ class EvaluateMode(GameMode):
         self.evaluations.update(message.evaluations.values)
 
         # Submit evaluations to server API
-        payload = [
-            SerializedEvaluation.from_evaluation(eval).model_dump()
+        savable_evaluations = [
+            eval
             for eval in message.evaluations.values.values()
             if is_savable_evaluation(eval)
         ]
 
-        if payload:
-            response = requests.post(
-                f"{self.server_url}/api/evaluations",
-                json=payload,
-                headers={"x-token": self.token},
-            )
-            response.raise_for_status()
+        self.api_client.save_learned_evaluations(savable_evaluations)
 
         positions = message.request.positions
         level = message.request.level

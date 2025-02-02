@@ -1,6 +1,5 @@
 import pygame
 import queue
-import requests
 import tkinter as tk
 from multiprocessing import Queue
 from pathlib import Path
@@ -10,8 +9,7 @@ from typing import Any, Optional
 
 from flippy.arguments import Arguments
 from flippy.book import MAX_UI_SEARCH_LEVEL, MIN_UI_SEARCH_LEVEL, is_savable_evaluation
-from flippy.book.models import SerializedEvaluation
-from flippy.config import get_book_server_token, get_book_server_url
+from flippy.book.api_client import APIClient
 from flippy.edax.process import start_evaluation
 from flippy.edax.types import EdaxEvaluations, EdaxRequest, EdaxResponse
 from flippy.mode.base import BaseMode
@@ -29,9 +27,9 @@ class PGNMode(BaseMode):
         self.recv_queue: Queue[EdaxResponse] = Queue()
         self.evaluations = EdaxEvaluations()
         self.show_all_move_evaluations = False
-        self.server_url = get_book_server_url()
-        self.token = get_book_server_token()
         self.show_level = False
+        self.api_client = APIClient()
+
         if self.args.pgn_file:
             self.game = Game.from_pgn(self.args.pgn_file)
             self.search_missing_game_positions(self.game, MIN_UI_SEARCH_LEVEL)
@@ -167,18 +165,12 @@ class PGNMode(BaseMode):
 
         # Submit evaluations to server API
         payload = [
-            SerializedEvaluation.from_evaluation(eval).model_dump()
+            eval
             for eval in message.evaluations.values.values()
             if is_savable_evaluation(eval)
         ]
 
-        if payload:
-            response = requests.post(
-                f"{self.server_url}/api/evaluations",
-                json=payload,
-                headers={"x-token": self.token},
-            )
-            response.raise_for_status()
+        self.api_client.save_learned_evaluations(payload)
 
         next_search_level = message.request.level + 2
 
@@ -311,28 +303,8 @@ class PGNMode(BaseMode):
     def search_missing_positions(
         self, positions: set[Position], level: int, source: Game | Position
     ) -> None:
-        # Fetch evaluations from server API in batches of 100
-        BATCH_SIZE = 100
-        positions_list = list(positions)
-        server_evaluations = []
-
-        for i in range(0, len(positions_list), BATCH_SIZE):
-            batch = positions_list[i : i + BATCH_SIZE]
-            response = requests.get(
-                f"{self.server_url}/api/positions",
-                json=[pos.to_api() for pos in batch],
-                headers={"x-token": self.token},
-            )
-            response.raise_for_status()
-            server_evaluations.extend(response.json())
-
-        evaluations = {
-            Position.from_api(e.position): e.to_evaluation()
-            for e in (
-                SerializedEvaluation.model_validate(item) for item in server_evaluations
-            )
-        }
-        self.evaluations.update(evaluations)
+        found_evaluations = self.api_client.lookup_positions(list(positions))
+        self.evaluations.update({eval.position: eval for eval in found_evaluations})
 
         learn_positions = set()
         for position in positions:

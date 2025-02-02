@@ -1,11 +1,9 @@
-import requests
 import typer
 from pathlib import Path
 from typing import Annotated
 
 from flippy.book import is_savable_evaluation
-from flippy.book.models import SerializedEvaluation
-from flippy.config import get_book_server_token, get_book_server_url
+from flippy.book.api_client import APIClient
 from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxEvaluations, EdaxRequest
 from flippy.othello.board import BLACK, WHITE, Board
@@ -15,37 +13,27 @@ from flippy.othello.position import PASS_MOVE, Position
 
 class PgnAnanlyzer:
     def __init__(self, file: Path, level: int) -> None:
+        self.api_client = APIClient()
         self.file = file
         self.level = level
         self.game = Game.from_pgn(file)
         self.evaluations = EdaxEvaluations()
-        self.server_url = get_book_server_url()
-        self.token = get_book_server_token()
 
     def _get_best(self, board: Board) -> tuple[list[int], int]:
         child_scores: list[tuple[int, int]] = []
+
+        missing_positions = self.evaluations.get_missing(
+            board.position.get_normalized_children()
+        )
+        found_evaluations = self.api_client.lookup_positions(list(missing_positions))
+        self.evaluations.update({eval.position: eval for eval in found_evaluations})
 
         for move in board.get_moves_as_set():
             child = board.do_move(move)
             try:
                 evaluation = self.evaluations.lookup(child.position)
             except KeyError:
-                # Fetch from API if not found locally
-                response = requests.get(
-                    f"{self.server_url}/api/positions",
-                    json=[child.position.to_api()],
-                    headers={"x-token": self.token},
-                )
-                response.raise_for_status()
-                server_evaluations = [
-                    SerializedEvaluation.model_validate(item)
-                    for item in response.json()
-                ]
-                if server_evaluations:
-                    evaluation = server_evaluations[0].to_evaluation()
-                    self.evaluations.add(child.position, evaluation)
-                else:
-                    continue
+                continue
 
             child_scores.append((move, evaluation.score))
 
@@ -89,7 +77,7 @@ class PgnAnanlyzer:
 
         if not possible_moves:
             assert played_move == PASS_MOVE
-            return f"{move_offset+1:>2}. {turn} --"
+            return f"{move_offset + 1:>2}. {turn} --"
 
         best_moves, best_score = self._get_best(board)
         best_score_str = self._get_colored_score(best_score, board)
@@ -101,7 +89,7 @@ class PgnAnanlyzer:
         score = self.evaluations.lookup(played_child.position).score
         score_str = self._get_colored_score(score, board)
 
-        output_line = f"{move_offset+1:>2}. {turn} {played_field} {score_str}"
+        output_line = f"{move_offset + 1:>2}. {turn} {played_field} {score_str}"
 
         if played_move not in best_moves:
             output_line += f" (best: {best_score_str} @ {best_fields})"
@@ -112,44 +100,24 @@ class PgnAnanlyzer:
         # Get set of all positions and their children in game
         all_positions = self._get_all_positions()
 
-        # Fetch evaluations from server API in batches of 100
-        server_evaluations: list[SerializedEvaluation] = []
-        positions_list = list(all_positions)
-        for i in range(0, len(positions_list), 100):
-            batch = positions_list[i : i + 100]
-            response = requests.get(
-                f"{self.server_url}/api/positions",
-                json=[pos.to_api() for pos in batch],
-                headers={"x-token": self.token},
-            )
-            response.raise_for_status()
-            server_evaluations.extend(
-                SerializedEvaluation.model_validate(item) for item in response.json()
-            )
-
-        evaluations = {
-            Position.from_api(e.position): e.to_evaluation() for e in server_evaluations
-        }
-        self.evaluations.update(evaluations)
+        found_evaluations = self.api_client.lookup_positions(list(all_positions))
+        self.evaluations.update({eval.position: eval for eval in found_evaluations})
 
         # Compute evaluations for missing positions
         computed_evaluations = self._evaluate_positions(all_positions)
-        self.evaluations.update(computed_evaluations.values)
 
-        # Submit newly computed evaluations to server API
-        payload = [
-            SerializedEvaluation.from_evaluation(eval).model_dump()
+        savable_evaluations = [
+            eval
             for eval in computed_evaluations.values.values()
             if is_savable_evaluation(eval)
         ]
-        if payload:
-            response = requests.post(
-                f"{self.server_url}/api/evaluations",
-                json=payload,
-                headers={"x-token": self.token},
-            )
-            response.raise_for_status()
 
+        # Save computed evaluations to server API
+        self.api_client.save_learned_evaluations(savable_evaluations)
+
+        self.evaluations.update(computed_evaluations.values)
+
+        # Print move evaluations
         for move_offset in range(len(self.game.moves)):
             output_line = self._get_move_evaluation_line(move_offset)
             print(output_line)

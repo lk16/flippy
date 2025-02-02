@@ -67,3 +67,11 @@ class ClientStats(BaseModel):
     git_commit: str
     positions_computed: int
     last_active: datetime
+
+
+class EvaluationsPayload(BaseModel):
+    evaluations: list[SerializedEvaluation]
+
+
+class LookupPositionsPayload(BaseModel):
+    positions: list[str]
