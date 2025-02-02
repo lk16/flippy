@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
-from flippy.book import MAX_SAVABLE_DISCS, get_learn_level, is_savable_evaluation
+from flippy.book import MAX_SAVABLE_DISCS, get_learn_level
 from flippy.book.models import (
     ClientStats,
     EvaluationsPayload,
@@ -172,7 +172,7 @@ async def upsert_evaluation(
 ) -> None:
     evaluation = serialized_evaluation.to_evaluation()
 
-    if not is_savable_evaluation(evaluation):
+    if not evaluation.is_db_savable():
         raise ValueError("Evaluation is not savable")
 
     try:
@@ -356,7 +356,7 @@ async def get_positions(
     _: None = Depends(verify_auth),
     state: ServerState = Depends(get_server_state),
 ) -> list[SerializedEvaluation]:
-    positions = payload.positions
+    positions = [Position.from_api(pos) for pos in payload.positions]
 
     if len(positions) > MAX_POSITION_LOOKUP_SIZE:
         raise HTTPException(
@@ -364,8 +364,15 @@ async def get_positions(
             detail=f"Cannot request more than {MAX_POSITION_LOOKUP_SIZE} positions at once",
         )
 
+    for position in positions:
+        if not position.is_normalized():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Positions must be normalized",
+            )
+
     conn = await state.get_db()
-    position_bytes = [Position.from_api(pos).to_bytes() for pos in positions]
+    position_bytes = [pos.to_bytes() for pos in positions]
 
     query = """
     SELECT position, level, depth, confidence, score, best_moves

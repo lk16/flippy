@@ -4,6 +4,7 @@ import struct
 from copy import copy
 from typing import Iterable
 
+from flippy.book import MAX_SAVABLE_DISCS
 from flippy.othello.bitset import bits_rotate, bits_unrotate
 
 PASS_MOVE = -1
@@ -361,3 +362,6 @@ class Position:
 
     def count_empties(self) -> int:
         return 64 - self.count_discs()
+
+    def is_db_savable(self) -> bool:
+        return self.has_moves() and self.count_discs() <= MAX_SAVABLE_DISCS

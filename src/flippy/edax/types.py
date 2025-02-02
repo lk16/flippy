@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Iterable
 
+from flippy.book import MIN_LEARN_LEVEL
 from flippy.othello.game import Game
 from flippy.othello.position import PASS_MOVE, Position
 
@@ -104,6 +105,9 @@ class EdaxEvaluation:
             score=-self.score,
             best_moves=[PASS_MOVE] + self.best_moves,
         )
+
+    def is_db_savable(self) -> bool:
+        return self.level >= MIN_LEARN_LEVEL and self.position.is_db_savable()
 
 
 # TODO make this behave like a dict

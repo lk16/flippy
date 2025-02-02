@@ -8,7 +8,7 @@ from tkinter import filedialog
 from typing import Any, Optional
 
 from flippy.arguments import Arguments
-from flippy.book import MAX_UI_SEARCH_LEVEL, MIN_UI_SEARCH_LEVEL, is_savable_evaluation
+from flippy.book import MAX_UI_SEARCH_LEVEL, MIN_UI_SEARCH_LEVEL
 from flippy.book.api_client import APIClient
 from flippy.edax.process import start_evaluation
 from flippy.edax.types import EdaxEvaluations, EdaxRequest, EdaxResponse
@@ -165,9 +165,7 @@ class PGNMode(BaseMode):
 
         # Submit evaluations to server API
         payload = [
-            eval
-            for eval in message.evaluations.values.values()
-            if is_savable_evaluation(eval)
+            eval for eval in message.evaluations.values.values() if eval.is_db_savable()
         ]
 
         self.api_client.save_learned_evaluations(payload)

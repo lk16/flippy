@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from math import ceil
 
 from flippy import PROJECT_ROOT
-from flippy.book import MIN_LEARN_LEVEL, is_savable_position
+from flippy.book import MIN_LEARN_LEVEL
 from flippy.book.api_client import APIClient
 from flippy.config import PgnConfig
 from flippy.edax.process import start_evaluation_sync
@@ -59,9 +59,7 @@ def load_pgn() -> None:
 
 def learn_new_positions(positions: set[Position]) -> None:
     # Remove positions that we won't save in DB.
-    pgn_positions = {
-        position for position in positions if is_savable_position(position)
-    }
+    pgn_positions = {position for position in positions if position.is_db_savable()}
 
     print(f"Looking up {len(pgn_positions)} positions in DB")
 

@@ -2,7 +2,6 @@ import typer
 from pathlib import Path
 from typing import Annotated
 
-from flippy.book import is_savable_evaluation
 from flippy.book.api_client import APIClient
 from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxEvaluations, EdaxRequest
@@ -109,7 +108,7 @@ class PgnAnanlyzer:
         savable_evaluations = [
             eval
             for eval in computed_evaluations.values.values()
-            if is_savable_evaluation(eval)
+            if eval.is_db_savable()
         ]
 
         # Save computed evaluations to server API
