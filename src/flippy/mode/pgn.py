@@ -342,6 +342,8 @@ class PGNMode(BaseMode):
                 learn_positions.add(position)
                 continue
 
+            # TODO prevent re-evaluating positions with 100% confidence
+
             if evaluation.level < level:
                 learn_positions.add(position)
 

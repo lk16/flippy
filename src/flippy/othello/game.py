@@ -184,3 +184,9 @@ class Game:
                     positions.add(child_position.normalized())
 
         return positions
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Game):
+            raise TypeError("Cannot compare Game with non-Game object")
+
+        return self.metadata == other.metadata and self.boards == other.boards
