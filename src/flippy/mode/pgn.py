@@ -302,7 +302,7 @@ class PGNMode(BaseMode):
         self, positions: set[Position], level: int, source: Game | Position
     ) -> None:
         found_evaluations = self.api_client.lookup_positions(list(positions))
-        self.evaluations.update_from_list(found_evaluations)
+        self.evaluations.update(found_evaluations)
 
         learn_positions = set()
         for position in positions:

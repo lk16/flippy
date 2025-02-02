@@ -177,7 +177,7 @@ class EdaxEvaluations:
         passed = position.pass_move()
         return deepcopy(self[passed]).pass_move()
 
-    # --- public helpers that don't modify self---
+    # --- public helpers that don't modify self ---
 
     def get_missing_children(self, position: Position) -> set[Position]:
         children = {
@@ -193,9 +193,3 @@ class EdaxEvaluations:
             except KeyError:
                 missing.add(position)
         return missing
-
-    # --- helpers that modify self ---
-    # TODO find out where this is used and produce an EdaxEvaluations instead of a list[EdaxEvaluation]
-    def update_from_list(self, evaluations: list[EdaxEvaluation]) -> None:
-        for evaluation in evaluations:
-            self[evaluation.position] = evaluation

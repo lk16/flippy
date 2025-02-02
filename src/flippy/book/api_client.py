@@ -16,7 +16,7 @@ from flippy.book.models import (
 )
 from flippy.book.server import MAX_POSITION_LOOKUP_SIZE
 from flippy.config import get_book_server_token, get_book_server_url
-from flippy.edax.types import EdaxEvaluation
+from flippy.edax.types import EdaxEvaluation, EdaxEvaluations
 from flippy.othello.position import Position
 
 
@@ -108,7 +108,7 @@ class APIClient:
         response = self._post("/api/job/result", client_id=client_id, json=payload)
         response.raise_for_status()
 
-    def lookup_positions(self, positions: list[Position]) -> list[EdaxEvaluation]:
+    def lookup_positions(self, positions: list[Position]) -> EdaxEvaluations:
         all_parsed: list[SerializedEvaluation] = []
 
         for i in range(0, len(positions), MAX_POSITION_LOOKUP_SIZE):
@@ -120,7 +120,13 @@ class APIClient:
                 [SerializedEvaluation.model_validate(item) for item in response.json()]
             )
 
-        return [item.to_evaluation() for item in all_parsed]
+        evaluations = EdaxEvaluations()
+
+        for item in all_parsed:
+            eval = item.to_evaluation()
+            evaluations[eval.position] = eval
+
+        return evaluations
 
     def save_learned_evaluations(self, evaluations: list[EdaxEvaluation]) -> None:
         if not evaluations:

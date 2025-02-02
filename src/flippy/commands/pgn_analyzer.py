@@ -25,7 +25,7 @@ class PgnAnanlyzer:
             board.position.get_normalized_children()
         )
         found_evaluations = self.api_client.lookup_positions(list(missing_positions))
-        self.evaluations.update_from_list(found_evaluations)
+        self.evaluations.update(found_evaluations)
 
         for move in board.get_moves_as_set():
             child = board.do_move(move)
@@ -100,7 +100,7 @@ class PgnAnanlyzer:
         all_positions = self._get_all_positions()
 
         found_evaluations = self.api_client.lookup_positions(list(all_positions))
-        self.evaluations.update_from_list(found_evaluations)
+        self.evaluations.update(found_evaluations)
 
         # Compute evaluations for missing positions
         computed_evaluations = self._evaluate_positions(all_positions)

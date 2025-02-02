@@ -42,7 +42,7 @@ class EvaluateMode(GameMode):
             return
 
         found_evaluations = self.api_client.lookup_positions(list(missing_positions))
-        self.evaluations.update_from_list(found_evaluations)
+        self.evaluations.update(found_evaluations)
 
         # Check again for any positions still missing after server update
         missing_positions = self.evaluations.get_missing_children(position)
