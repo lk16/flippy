@@ -4,7 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from flippy.edax.types import EdaxEvaluation
-from flippy.othello.position import Position
+from flippy.othello.position import NormalizedPosition
 
 
 class SerializedEvaluation(BaseModel):
@@ -17,7 +17,7 @@ class SerializedEvaluation(BaseModel):
 
     def to_evaluation(self) -> EdaxEvaluation:
         return EdaxEvaluation(
-            position=Position.from_api(self.position),
+            position=NormalizedPosition.from_api(self.position).to_position(),
             level=self.level,
             depth=self.depth,
             confidence=self.confidence,
@@ -27,8 +27,11 @@ class SerializedEvaluation(BaseModel):
 
     @classmethod
     def from_evaluation(cls, evaluation: EdaxEvaluation) -> SerializedEvaluation:
+        # API returns positions in normalized form
+        normalized = NormalizedPosition(evaluation.position)
+
         return cls(
-            position=evaluation.position.to_api(),
+            position=normalized.to_api(),
             level=evaluation.level,
             depth=evaluation.depth,
             confidence=evaluation.confidence,

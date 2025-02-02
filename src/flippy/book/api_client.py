@@ -17,7 +17,7 @@ from flippy.book.models import (
 from flippy.book.server import MAX_POSITION_LOOKUP_SIZE
 from flippy.config import get_book_server_token, get_book_server_url
 from flippy.edax.types import EdaxEvaluation, EdaxEvaluations
-from flippy.othello.position import Position
+from flippy.othello.position import NormalizedPosition
 
 
 def get_git_commit() -> str:
@@ -108,11 +108,13 @@ class APIClient:
         response = self._post("/api/job/result", client_id=client_id, json=payload)
         response.raise_for_status()
 
-    def lookup_positions(self, positions: list[Position]) -> EdaxEvaluations:
+    def lookup_positions(self, positions: set[NormalizedPosition]) -> EdaxEvaluations:
         all_parsed: list[SerializedEvaluation] = []
 
-        for i in range(0, len(positions), MAX_POSITION_LOOKUP_SIZE):
-            chunk = positions[i : i + MAX_POSITION_LOOKUP_SIZE]
+        positions_list = list(positions)
+
+        for i in range(0, len(positions_list), MAX_POSITION_LOOKUP_SIZE):
+            chunk = positions_list[i : i + MAX_POSITION_LOOKUP_SIZE]
             payload = LookupPositionsPayload(positions=[pos.to_api() for pos in chunk])
             response = self._post("/api/positions/lookup", json=payload)
 
@@ -124,7 +126,11 @@ class APIClient:
 
         for item in all_parsed:
             eval = item.to_evaluation()
-            evaluations[eval.position] = eval
+
+            # API returns positions in normalized form
+            normalized = NormalizedPosition(eval.position)
+
+            evaluations[normalized] = eval
 
         return evaluations
 

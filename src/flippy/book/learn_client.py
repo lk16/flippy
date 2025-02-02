@@ -12,7 +12,7 @@ from flippy.book.models import (
 )
 from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxRequest
-from flippy.othello.position import Position
+from flippy.othello.position import NormalizedPosition
 
 
 class BookLearningClient:
@@ -79,9 +79,9 @@ class BookLearningClient:
                 time.sleep(5)  # Back off on error
 
     def do_job(self, job: Job) -> JobResult:
-        position = Position.from_api(job.position)
+        position = NormalizedPosition.from_api(job.position)
 
-        request = EdaxRequest([position], job.level, source=None)
+        request = EdaxRequest({position}, job.level, source=None)
 
         before = datetime.now()
         evaluations = start_evaluation_sync(request)

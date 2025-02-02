@@ -41,7 +41,7 @@ class EvaluateMode(GameMode):
         if not missing_positions:
             return
 
-        found_evaluations = self.api_client.lookup_positions(list(missing_positions))
+        found_evaluations = self.api_client.lookup_positions(missing_positions)
         self.evaluations.update(found_evaluations)
 
         # Check again for any positions still missing after server update
@@ -93,7 +93,7 @@ class EvaluateMode(GameMode):
             child = board.do_move(move)
 
             try:
-                evaluation = self.evaluations[child.position]
+                evaluation = self.evaluations[child.position.normalized()]
             except KeyError:
                 continue
 

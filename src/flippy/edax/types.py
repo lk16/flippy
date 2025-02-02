@@ -1,28 +1,27 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Iterable
 
 from flippy.book import MIN_LEARN_LEVEL
 from flippy.othello.game import Game
-from flippy.othello.position import PASS_MOVE, Position
+from flippy.othello.position import PASS_MOVE, NormalizedPosition, Position
 
 
 class EdaxRequest:
     def __init__(
         self,
-        positions: Iterable[Position],
+        positions: set[NormalizedPosition],
         level: int,
         *,
         source: Position | Game | None,
     ) -> None:
-        self.positions = set(positions)
+        self.positions = positions
         self.level = level
         self.source = source
 
 
 class EdaxResponse:
-    def __init__(self, request: EdaxRequest, evaluations: "EdaxEvaluations") -> None:
+    def __init__(self, request: EdaxRequest, evaluations: EdaxEvaluations) -> None:
         self.request = request
         self.evaluations = evaluations
 
@@ -30,7 +29,7 @@ class EdaxResponse:
             if position.is_game_end() or not position.has_moves():
                 continue
 
-            assert position.normalized() in self.evaluations
+            assert position in self.evaluations
 
 
 class EdaxEvaluation:
@@ -120,48 +119,50 @@ class EdaxEvaluations:
     """
 
     def __init__(self) -> None:
-        self.__data: dict[Position, EdaxEvaluation] = {}
+        self.__data: dict[NormalizedPosition, EdaxEvaluation] = {}
 
     # --- dict like interface ---
 
-    def keys(self) -> set[Position]:
+    def keys(self) -> set[NormalizedPosition]:
         return set(self.__data.keys())
 
     def values(self) -> list[EdaxEvaluation]:
         return list(self.__data.values())
 
-    def __getitem__(self, position: Position) -> EdaxEvaluation:
-        if position.is_game_end():
-            return self.__lookup_game_end(position)
+    def __getitem__(self, normalized: NormalizedPosition) -> EdaxEvaluation:
+        if normalized.is_game_end():
+            return self.__lookup_game_end(normalized)
 
-        if not position.has_moves():
-            return self.__lookup_passed(position)
+        if not normalized.has_moves():
+            return self.__lookup_passed(normalized)
 
-        key, rotation = position.normalize()
-        return deepcopy(self.__data[key]).unrotate(rotation)
+        return deepcopy(self.__data[normalized])
 
     def update(self, other: EdaxEvaluations) -> None:
         for position, evaluation in other.__data.items():
             self[position] = evaluation
 
-    def __setitem__(self, position: Position, evaluation: EdaxEvaluation) -> None:
-        assert position.is_normalized()
-        assert evaluation.position == position
+    def __setitem__(
+        self, normalized: NormalizedPosition, evaluation: EdaxEvaluation
+    ) -> None:
+        assert evaluation.position.normalized() == normalized
 
-        if position not in self.__data:
-            self.__data[position] = evaluation
+        if normalized not in self.__data:
+            self.__data[normalized] = evaluation
 
-        found = self.__data[position]
+        found = self.__data[normalized]
 
         if evaluation.is_better_than(found):
-            self.__data[position] = evaluation
+            self.__data[normalized] = evaluation
 
-    def __contains__(self, position: Position) -> bool:
-        return position in self.__data
+    def __contains__(self, normalized: NormalizedPosition) -> bool:
+        return normalized in self.__data
 
     # --- private helpers ---
 
-    def __lookup_game_end(self, position: Position) -> EdaxEvaluation:
+    def __lookup_game_end(self, normalized: NormalizedPosition) -> EdaxEvaluation:
+        position = normalized.to_position()
+
         empties = position.count_empties()
         score = position.get_final_score()
         return EdaxEvaluation(
@@ -173,23 +174,19 @@ class EdaxEvaluations:
             best_moves=[],
         )
 
-    def __lookup_passed(self, position: Position) -> EdaxEvaluation:
-        passed = position.pass_move()
+    def __lookup_passed(self, normalized: NormalizedPosition) -> EdaxEvaluation:
+        passed = normalized.pass_move()
         return deepcopy(self[passed]).pass_move()
 
     # --- public helpers that don't modify self ---
 
-    def get_missing_children(self, position: Position) -> set[Position]:
+    def get_missing_children(self, position: Position) -> set[NormalizedPosition]:
         children = {
             position.do_normalized_move(move) for move in position.get_moves_as_set()
         }
-        return children - self.__data.keys()
+        return children - set(self.__data.keys())
 
-    def get_missing(self, positions: set[Position]) -> set[Position]:
-        missing: set[Position] = set()
-        for position in positions:
-            try:
-                self[position]
-            except KeyError:
-                missing.add(position)
-        return missing
+    def get_missing(
+        self, positions: set[NormalizedPosition]
+    ) -> set[NormalizedPosition]:
+        return positions - self.__data.keys()

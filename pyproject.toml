@@ -24,7 +24,6 @@ organize-pgn = "python src/flippy/commands/pgn_organizer.py"
 analyze-pgn = "python src/flippy/commands/pgn_analyzer.py"
 recent-games = "python src/flippy/commands/recent_games.py"
 book = "python src/flippy/commands/book.py"
-unique-positions = "python src/flippy/commands/unique_positions.py"
 
 
 [tool.pdm]

@@ -15,7 +15,7 @@ from flippy.edax.types import EdaxEvaluations, EdaxRequest, EdaxResponse
 from flippy.mode.base import BaseMode
 from flippy.othello.board import BLACK, Board
 from flippy.othello.game import Game
-from flippy.othello.position import InvalidMove, Position
+from flippy.othello.position import InvalidMove, NormalizedPosition, Position
 
 
 class PGNMode(BaseMode):
@@ -200,7 +200,7 @@ class PGNMode(BaseMode):
             child = board.do_move(move)
 
             try:
-                evaluation = self.evaluations[child.position]
+                evaluation = self.evaluations[child.position.normalized()]
             except KeyError:
                 continue
 
@@ -250,7 +250,7 @@ class PGNMode(BaseMode):
 
             for child in board.get_children():
                 try:
-                    evaluation = self.evaluations[child.position]
+                    evaluation = self.evaluations[child.position.normalized()]
                 except KeyError:
                     continue
 
@@ -299,9 +299,9 @@ class PGNMode(BaseMode):
         self.search_missing_positions(positions, level, parent)
 
     def search_missing_positions(
-        self, positions: set[Position], level: int, source: Game | Position
+        self, positions: set[NormalizedPosition], level: int, source: Game | Position
     ) -> None:
-        found_evaluations = self.api_client.lookup_positions(list(positions))
+        found_evaluations = self.api_client.lookup_positions(positions)
         self.evaluations.update(found_evaluations)
 
         learn_positions = set()

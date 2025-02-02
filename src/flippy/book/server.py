@@ -22,7 +22,7 @@ from flippy.book.models import (
     StatsResponse,
 )
 from flippy.config import BookServerConfig, get_book_server_token, get_db_dsn
-from flippy.othello.position import Position
+from flippy.othello.position import NormalizedPosition
 
 
 class Client:
@@ -180,8 +180,10 @@ async def upsert_evaluation(
     except ValueError as e:
         raise ValueError(f"Evaluation is not valid: {e}") from e
 
-    if not evaluation.position.is_normalized():
-        raise ValueError("Position is not normalized")
+    try:
+        normalized = NormalizedPosition(evaluation.position)
+    except ValueError as e:
+        raise ValueError("Position is not normalized") from e
 
     disc_count = evaluation.position.count_discs()
 
@@ -206,7 +208,7 @@ async def upsert_evaluation(
 
     await conn.execute(
         query,
-        evaluation.position.to_bytes(),
+        normalized.to_bytes(),
         evaluation.position.count_discs(),
         evaluation.level,
         evaluation.depth,
@@ -306,8 +308,8 @@ async def get_job_for_disc_count(
     if not row:
         return None
 
-    position = Position.from_bytes(row["position"])
-    return Job(position=position.to_api(), level=learn_level)
+    normalized = NormalizedPosition.from_bytes(row["position"])
+    return Job(position=normalized.to_api(), level=learn_level)
 
 
 @app.get("/api/job")
@@ -356,20 +358,13 @@ async def get_positions(
     _: None = Depends(verify_auth),
     state: ServerState = Depends(get_server_state),
 ) -> list[SerializedEvaluation]:
-    positions = [Position.from_api(pos) for pos in payload.positions]
+    positions = [NormalizedPosition.from_api(pos) for pos in payload.positions]
 
     if len(positions) > MAX_POSITION_LOOKUP_SIZE:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot request more than {MAX_POSITION_LOOKUP_SIZE} positions at once",
         )
-
-    for position in positions:
-        if not position.is_normalized():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Positions must be normalized",
-            )
 
     conn = await state.get_db()
     position_bytes = [pos.to_bytes() for pos in positions]
@@ -384,10 +379,11 @@ async def get_positions(
 
     results = []
     for row in rows:
-        position = Position.from_bytes(row["position"])
+        normalized = NormalizedPosition.from_bytes(row["position"])
+
         results.append(
             SerializedEvaluation(
-                position=position.to_api(),
+                position=normalized.to_api(),
                 level=row["level"],
                 depth=row["depth"],
                 confidence=row["confidence"],

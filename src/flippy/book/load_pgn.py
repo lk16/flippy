@@ -9,7 +9,7 @@ from flippy.config import PgnConfig
 from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxRequest
 from flippy.othello.game import Game
-from flippy.othello.position import Position
+from flippy.othello.position import NormalizedPosition
 
 LEARN_CHUNK_SIZE = 100
 
@@ -19,7 +19,7 @@ PGN_JSON_PATH = PROJECT_ROOT / ".flippy/pgn.json"
 def load_pgn() -> None:
     pgn_config = PgnConfig()
 
-    positions: set[Position] = set()
+    positions: set[NormalizedPosition] = set()
 
     prefix = pgn_config.target_folder / "normal"
     pgn_files = sorted(prefix.rglob("*.pgn"))
@@ -57,7 +57,7 @@ def load_pgn() -> None:
     json.dump(data, PGN_JSON_PATH.open("w"))
 
 
-def learn_new_positions(positions: set[Position]) -> None:
+def learn_new_positions(positions: set[NormalizedPosition]) -> None:
     # Remove positions that we won't save in DB.
     pgn_positions = {position for position in positions if position.is_db_savable()}
 
@@ -66,7 +66,7 @@ def learn_new_positions(positions: set[Position]) -> None:
     api_client = APIClient()
 
     # TODO consider adding extra endpoint to get missing positions
-    found_evaluations = api_client.lookup_positions(list(pgn_positions))
+    found_evaluations = api_client.lookup_positions(pgn_positions)
     found_positions = found_evaluations.keys()
 
     learn_positions = list(pgn_positions - set(found_positions))
@@ -77,7 +77,7 @@ def learn_new_positions(positions: set[Position]) -> None:
         chunk_start = LEARN_CHUNK_SIZE * chunk_id
         chunk_end = LEARN_CHUNK_SIZE * (chunk_id + 1)
         chunk = learn_positions[chunk_start:chunk_end]
-        request = EdaxRequest(chunk, MIN_LEARN_LEVEL, source=None)
+        request = EdaxRequest(set(chunk), MIN_LEARN_LEVEL, source=None)
 
         before = datetime.now()
         edax_evaluations = start_evaluation_sync(request)

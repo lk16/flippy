@@ -7,7 +7,7 @@ from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxEvaluations, EdaxRequest
 from flippy.othello.board import BLACK, WHITE, Board
 from flippy.othello.game import Game
-from flippy.othello.position import PASS_MOVE, Position
+from flippy.othello.position import PASS_MOVE, NormalizedPosition, Position
 
 
 class PgnAnanlyzer:
@@ -24,13 +24,13 @@ class PgnAnanlyzer:
         missing_positions = self.evaluations.get_missing(
             board.position.get_normalized_children()
         )
-        found_evaluations = self.api_client.lookup_positions(list(missing_positions))
+        found_evaluations = self.api_client.lookup_positions(missing_positions)
         self.evaluations.update(found_evaluations)
 
         for move in board.get_moves_as_set():
             child = board.do_move(move)
             try:
-                evaluation = self.evaluations[child.position]
+                evaluation = self.evaluations[child.position.normalized()]
             except KeyError:
                 continue
 
@@ -45,15 +45,9 @@ class PgnAnanlyzer:
 
         return best_moves, best_score
 
-    def _get_all_positions(self) -> set[Position]:
-        positions: set[Position] = set()
-        for board in self.game.boards:
-            positions.add(board.position)
-            for child in board.get_children():
-                positions.add(child.position)
-        return positions
-
-    def _evaluate_positions(self, all_positions: set[Position]) -> EdaxEvaluations:
+    def _evaluate_positions(
+        self, all_positions: set[NormalizedPosition]
+    ) -> EdaxEvaluations:
         request_positions = self.evaluations.get_missing(all_positions)
         request = EdaxRequest(request_positions, self.level, source=None)
         return start_evaluation_sync(request)
@@ -85,7 +79,7 @@ class PgnAnanlyzer:
         played_field = Position.index_to_field(played_move)
         played_child = board.do_move(played_move)
 
-        score = self.evaluations[played_child.position].score
+        score = self.evaluations[played_child.position.normalized()].score
         score_str = self._get_colored_score(score, board)
 
         output_line = f"{move_offset + 1:>2}. {turn} {played_field} {score_str}"
@@ -97,9 +91,9 @@ class PgnAnanlyzer:
 
     def __call__(self) -> None:
         # Get set of all positions and their children in game
-        all_positions = self._get_all_positions()
+        all_positions = self.game.get_normalized_positions(add_children=True)
 
-        found_evaluations = self.api_client.lookup_positions(list(all_positions))
+        found_evaluations = self.api_client.lookup_positions(all_positions)
         self.evaluations.update(found_evaluations)
 
         # Compute evaluations for missing positions

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from flippy.othello.board import BLACK, WHITE, Board
-from flippy.othello.position import PASS_MOVE, InvalidMove, Position
+from flippy.othello.position import PASS_MOVE, InvalidMove, NormalizedPosition
 
 metadata_regex = re.compile(r'\[(.*) "(.*)"\]')
 
@@ -173,8 +173,10 @@ class Game:
 
         return all_children
 
-    def get_normalized_positions(self, add_children: bool = False) -> set[Position]:
-        positions: set[Position] = set()
+    def get_normalized_positions(
+        self, add_children: bool = False
+    ) -> set[NormalizedPosition]:
+        positions: set[NormalizedPosition] = set()
 
         for board in self.boards:
             positions.add(board.position.normalized())

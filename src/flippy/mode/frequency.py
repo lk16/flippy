@@ -4,8 +4,8 @@ from typing import Any
 from flippy.arguments import Arguments
 from flippy.config import PgnConfig
 from flippy.mode.game import GameMode
-from flippy.othello.board import Board
 from flippy.othello.game import Game
+from flippy.othello.position import NormalizedPosition
 
 
 class FrequencyMode(GameMode):
@@ -14,8 +14,8 @@ class FrequencyMode(GameMode):
         self.args = args.position_frequency
         self.frequencies = self._load_frequencies()
 
-    def _load_frequencies(self) -> defaultdict[Board, int]:
-        frequencies: defaultdict[Board, int] = defaultdict(lambda: 0)
+    def _load_frequencies(self) -> defaultdict[NormalizedPosition, int]:
+        frequencies: defaultdict[NormalizedPosition, int] = defaultdict(lambda: 0)
 
         pgn_config = PgnConfig()
         pgn_files = list((pgn_config.target_folder / "normal").rglob("*.pgn"))
@@ -48,8 +48,7 @@ class FrequencyMode(GameMode):
 
         for game in games:
             for board in game.boards:
-                normalized, _ = board.normalize()
-                frequencies[normalized] += 1
+                frequencies[board.position.normalized()] += 1
 
         return frequencies
 
@@ -60,7 +59,7 @@ class FrequencyMode(GameMode):
 
         for move in range(64):
             if board.is_valid_move(move):
-                normalized_child = board.do_normalized_move(move)
+                normalized_child = board.position.do_normalized_move(move)
                 freq = self.frequencies[normalized_child]
                 child_frequencies[move] = freq
 

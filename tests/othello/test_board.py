@@ -211,14 +211,3 @@ def test_black_white_getters() -> None:
     assert black_bits & (1 << 27) != 0
     assert black_bits & (1 << 19) != 0
     assert white_bits & (1 << 36) != 0
-
-
-def test_as_tuple() -> None:
-    board = Board.start()
-    tuple_result = board.as_tuple()
-    assert len(tuple_result) == 2
-    assert tuple_result[0] == board.position
-    assert tuple_result[1] == board.turn
-
-    # Test tuple is hashable
-    hash(tuple_result)
