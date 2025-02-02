@@ -105,6 +105,17 @@ class Window:
         text_rect.center = self.get_board_square_center(index)
         self.screen.blit(text_surface, text_rect.topleft)
 
+    def draw_level(self, index: int, color: tuple[int, int, int], level: int) -> None:
+        font_size = int(0.4 * FONT_SIZE)
+
+        font = pygame.font.Font(None, font_size)
+        text_surface = font.render(str(level), True, color)
+        text_rect = text_surface.get_rect()
+        center = self.get_board_square_center(index)
+        text_rect.center = (center[0] + SQUARE_SIZE // 8, center[1] + SQUARE_SIZE // 4)
+
+        self.screen.blit(text_surface, text_rect.topleft)
+
     def draw(self) -> None:
         board = self.mode.get_board()
 
@@ -112,7 +123,7 @@ class Window:
         move_mistakes: set[int] = ui_details.pop("move_mistakes", set())
         unknown_squares: set[int] = ui_details.pop("unknown_squares", set())
         child_frequencies: dict[int, int] = ui_details.pop("child_frequencies", {})
-        evaluations: dict[int, int] = ui_details.pop("evaluations", {})
+        evaluations: dict[int, dict[str, int]] = ui_details.pop("evaluations", {})
         played_move: Optional[int] = ui_details.pop("played_move", None)
         graph_data: list[Optional[tuple[int, int]]] = ui_details.pop("graph_data", [])
         graph_current_move: Optional[int] = ui_details.pop("graph_current_move", None)
@@ -156,9 +167,15 @@ class Window:
                 self.draw_disc(index, COLOR_PLAYED_MOVE)
 
             if index in evaluations:
-                self.draw_number(index, turn_color, evaluations[index])
-                if evaluations[index] == max(evaluations.values()):
+                self.draw_number(index, turn_color, evaluations[index]["score"])
+                if evaluations[index]["score"] == max(
+                    item["score"] for item in evaluations.values()
+                ):
                     self.draw_best_move_marker(index, turn_color)
+
+                if "level" in evaluations[index]:
+                    self.draw_level(index, turn_color, evaluations[index]["level"])
+
             elif board.is_valid_move(index) and not child_frequencies:
                 self.draw_move_indicator(index, turn_color)
 

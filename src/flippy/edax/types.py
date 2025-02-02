@@ -3,7 +3,6 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Iterable
 
-from flippy.othello.board import Board
 from flippy.othello.game import Game
 from flippy.othello.position import PASS_MOVE, Position
 
@@ -14,7 +13,7 @@ class EdaxRequest:
         positions: Iterable[Position],
         level: int,
         *,
-        source: Board | Game | None,
+        source: Position | Game | None,
     ) -> None:
         self.positions = set(positions)
         self.level = level
@@ -94,6 +93,7 @@ class EdaxEvaluation:
         )
 
 
+# TODO make this behave like a dict
 class EdaxEvaluations:
     def __init__(self) -> None:
         self.values: dict[Position, EdaxEvaluation] = {}
@@ -154,3 +154,9 @@ class EdaxEvaluations:
             except KeyError:
                 missing.add(position)
         return missing
+
+    def keys(self) -> set[Position]:
+        return set(self.values.keys())
+
+    def __getitem__(self, position: Position) -> EdaxEvaluation:
+        return self.lookup(position)

@@ -5,13 +5,12 @@ from pygame.event import Event
 from typing import Any
 
 from flippy.arguments import Arguments
-from flippy.book import MIN_UI_SEARCH_LEVEL, is_savable_evaluation
+from flippy.book import MAX_UI_SEARCH_LEVEL, MIN_UI_SEARCH_LEVEL, is_savable_evaluation
 from flippy.book.models import SerializedEvaluation
 from flippy.config import get_book_server_token, get_book_server_url
 from flippy.edax.process import start_evaluation
 from flippy.edax.types import EdaxEvaluations, EdaxRequest, EdaxResponse
 from flippy.mode.game import GameMode
-from flippy.othello.board import Board
 from flippy.othello.position import Position
 
 
@@ -38,10 +37,10 @@ class EvaluateMode(GameMode):
             self.on_board_change()
 
     def on_board_change(self) -> None:
-        board = self.get_board()
+        position = self.get_board().position
 
         # Get positions that are missing and not currently being evaluated
-        missing_positions = self.evaluations.get_missing_children(board.position)
+        missing_positions = self.evaluations.get_missing_children(position)
         if not missing_positions:
             return
 
@@ -62,10 +61,10 @@ class EvaluateMode(GameMode):
         self.evaluations.update(evaluations)
 
         # Check again for any positions still missing after server update
-        missing_positions = self.evaluations.get_missing_children(board.position)
-        if missing_positions:
-            request = EdaxRequest(missing_positions, MIN_UI_SEARCH_LEVEL, source=board)
-            start_evaluation(request, self.recv_queue)
+        missing_positions = self.evaluations.get_missing_children(position)
+
+        request = EdaxRequest(missing_positions, MIN_UI_SEARCH_LEVEL, source=position)
+        start_evaluation(request, self.recv_queue)
 
     def _process_recv_messages(self) -> None:
         while True:
@@ -100,9 +99,9 @@ class EvaluateMode(GameMode):
         next_level = level + 2
 
         if (
-            isinstance(source, Board)
-            and source == self.get_board()
-            and next_level <= 32
+            isinstance(source, Position)
+            and source == self.get_board().position
+            and next_level <= MAX_UI_SEARCH_LEVEL
         ):
             next_request = EdaxRequest(positions, next_level, source=source)
             start_evaluation(next_request, self.recv_queue)
@@ -110,7 +109,7 @@ class EvaluateMode(GameMode):
     def get_ui_details(self) -> dict[str, Any]:
         self._process_recv_messages()
 
-        evaluations: dict[int, int] = {}
+        evaluations: dict[int, dict[str, int]] = {}
 
         board = self.get_board()
 
@@ -122,6 +121,9 @@ class EvaluateMode(GameMode):
             except KeyError:
                 continue
 
-            evaluations[move] = -evaluation.score
+            evaluations[move] = {
+                "score": -evaluation.score,
+                "level": evaluation.level,
+            }
 
         return {"evaluations": evaluations}

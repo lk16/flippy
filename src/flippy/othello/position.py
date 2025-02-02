@@ -336,6 +336,10 @@ class Position:
     def get_children(self) -> list[Position]:
         return [self.do_move(move) for move in self.get_moves_as_set()]
 
+    def get_normalized_children(self) -> set[Position]:
+        # TODO add test for this
+        return {self.do_normalized_move(move) for move in self.get_moves_as_set()}
+
     def to_problem(self) -> str:
         squares = ""
         for index in range(64):
