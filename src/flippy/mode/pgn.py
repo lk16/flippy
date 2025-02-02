@@ -302,12 +302,15 @@ class PGNMode(BaseMode):
             return
 
         positions = set(positions)
-        missing = self.evaluations.get_missing(positions)
+        missing = set()
+        for position in positions:
+            missing.update(self.evaluations.get_missing_children(position))
 
         if missing:
             self._fetch_from_server(missing)
-            # Recheck missing positions after server fetch
-            missing = self.evaluations.get_missing(positions)
+            missing = set()
+            for position in positions:
+                missing.update(self.evaluations.get_missing_children(position))
             if missing:
                 self._start_initial_evaluation(missing, source)
                 return
