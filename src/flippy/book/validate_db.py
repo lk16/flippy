@@ -95,3 +95,19 @@ async def validate_edax_stats_table(expected_stats: dict[tuple[int, int], int]) 
             print(f"  Actual: {actual}")
 
     await conn.close()
+
+
+async def recalculate_edax_stats_table() -> None:
+    conn = await asyncpg.connect(get_db_dsn())
+    await conn.execute("DELETE FROM edax_stats")
+
+    rows = await conn.fetch(
+        "SELECT disc_count, level, COUNT(*) FROM edax GROUP BY disc_count, level"
+    )
+    for row in rows:
+        await conn.execute(
+            "INSERT INTO edax_stats (disc_count, level, count) VALUES ($1, $2, $3)",
+            row["disc_count"],
+            row["level"],
+            row["count"],
+        )

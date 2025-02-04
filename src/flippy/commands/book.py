@@ -6,7 +6,7 @@ from pathlib import Path
 from flippy.book.learn_client import BookLearningClient
 from flippy.book.load_pgn import load_pgn as load_pgn_
 from flippy.book.load_wthor import load_wthor as load_wthor_
-from flippy.book.validate_db import validate_db
+from flippy.book.validate_db import recalculate_edax_stats_table, validate_db
 from flippy.config import BookServerConfig
 
 app = typer.Typer(pretty_exceptions_enable=False)
@@ -38,6 +38,11 @@ def load_wthor(filenames: list[Path]) -> None:
 @app.command()
 def validate() -> None:
     asyncio.run(validate_db())
+
+
+@app.command()
+def recalc_stats() -> None:
+    asyncio.run(recalculate_edax_stats_table())
 
 
 if __name__ == "__main__":
