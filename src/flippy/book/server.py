@@ -188,33 +188,68 @@ async def upsert_evaluation(
     # TODO remove column learn_priority from DB
     priority = 3 * evaluation.level + disc_count
 
-    query = """
-    INSERT INTO edax (position, disc_count, level, depth, confidence, score, learn_priority, best_moves)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-    ON CONFLICT (position)
-    DO UPDATE SET
-        level = EXCLUDED.level,
-        depth = EXCLUDED.depth,
-        confidence = EXCLUDED.confidence,
-        score = EXCLUDED.score,
-        learn_priority = EXCLUDED.learn_priority,
-        best_moves = EXCLUDED.best_moves
-    WHERE edax.level < EXCLUDED.level
-    """
-
     conn = await state.get_db()
+    async with conn.transaction():
+        # First decrement stats for existing lower-level evaluations
+        # This prevents double-counting when upgrading position levels
+        stats_decrease_query = """
+        WITH existing_row AS (
+            SELECT level
+            FROM edax
+            WHERE position = $1
+        )
+        UPDATE edax_stats
+        SET count = count - 1
+        FROM existing_row
+        WHERE edax_stats.disc_count = $2
+            AND edax_stats.level = existing_row.level
+            AND existing_row.level < $3;
+        """
+        await conn.execute(
+            stats_decrease_query,
+            normalized.to_bytes(),
+            evaluation.position.count_discs(),
+            evaluation.level,
+        )
 
-    await conn.execute(
-        query,
-        normalized.to_bytes(),
-        evaluation.position.count_discs(),
-        evaluation.level,
-        evaluation.depth,
-        evaluation.confidence,
-        evaluation.score,
-        priority,
-        evaluation.best_moves,
-    )
+        # Increment stats for the new evaluation level
+        await conn.execute(
+            """
+            INSERT INTO edax_stats (disc_count, level, count)
+            VALUES ($1, $2, 1)
+            ON CONFLICT (disc_count, level)
+            DO UPDATE SET count = edax_stats.count + 1
+            """,
+            evaluation.position.count_discs(),
+            evaluation.level,
+        )
+
+        # Finally, update the position evaluation itself
+        # Only updates if new level is higher than existing
+        query = """
+        INSERT INTO edax (position, disc_count, level, depth, confidence, score, learn_priority, best_moves)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (position)
+        DO UPDATE SET
+            level = EXCLUDED.level,
+            depth = EXCLUDED.depth,
+            confidence = EXCLUDED.confidence,
+            score = EXCLUDED.score,
+            learn_priority = EXCLUDED.learn_priority,
+            best_moves = EXCLUDED.best_moves
+        WHERE edax.level < EXCLUDED.level
+        """
+        await conn.execute(
+            query,
+            normalized.to_bytes(),
+            evaluation.position.count_discs(),
+            evaluation.level,
+            evaluation.depth,
+            evaluation.confidence,
+            evaluation.score,
+            priority,
+            evaluation.best_moves,
+        )
 
 
 @app.get("/api/stats/clients")
@@ -244,14 +279,8 @@ async def get_book_stats(
     state: ServerState = Depends(get_server_state),
     _: None = Depends(verify_auth),
 ) -> list[list[str]]:
-    query = """
-    SELECT disc_count, level, COUNT(*)
-    FROM edax
-    GROUP BY disc_count, level;
-    """
-
     conn = await state.get_db()
-    stats = await conn.fetch(query)
+    stats = await conn.fetch("SELECT disc_count, level, count FROM edax_stats")
 
     disc_counts = sorted(set(row[0] for row in stats))
     levels = sorted(set(row[1] for row in stats))

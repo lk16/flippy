@@ -22,7 +22,7 @@ async def validate_edax_table() -> dict[tuple[int, int], int]:
     for offset in count(0, limit):
         rows = await conn.fetch(
             """
-            SELECT position, level, depth, confidence, score, best_moves
+            SELECT position, disc_count, level, depth, confidence, score, best_moves
             FROM edax
             ORDER BY position
             LIMIT $1 OFFSET $2
@@ -38,24 +38,34 @@ async def validate_edax_table() -> dict[tuple[int, int], int]:
             try:
                 normalized = NormalizedPosition.from_bytes(row["position"])
 
+                position = normalized.to_position()
+
                 EdaxEvaluation(
-                    position=normalized.to_position(),
+                    position=position,
                     level=row["level"],
                     depth=row["depth"],
                     confidence=row["confidence"],
                     score=row["score"],
                     best_moves=row["best_moves"],
                 )
+                disc_count = row["disc_count"]
+
+                if disc_count != position.count_discs():
+                    raise ValueError(
+                        f"Disc count mismatch for position {row['position']}: "
+                        f"{disc_count} != {position.count_discs()}"
+                    )
+
             except Exception as e:
                 print(f"Error at position {row['position']}: {e}")
+                continue
 
             level = row["level"]
-            depth = row["depth"]
 
-            if (level, depth) not in counts:
-                counts[(level, depth)] = 0
+            if (disc_count, level) not in counts:
+                counts[(disc_count, level)] = 0
 
-            counts[(level, depth)] += 1
+            counts[(disc_count, level)] += 1
 
         checked_rows += len(rows)
         print(f"Checked {checked_rows} rows")
@@ -63,6 +73,25 @@ async def validate_edax_table() -> dict[tuple[int, int], int]:
     return counts
 
 
-async def validate_edax_stats_table(counts: dict[tuple[int, int], int]) -> None:
-    # TODO implement this once the edax stats table is implemented
-    _ = counts
+async def validate_edax_stats_table(expected_stats: dict[tuple[int, int], int]) -> None:
+    conn = await asyncpg.connect(get_db_dsn())
+
+    # Fetch all entries from edax_stats
+    rows = await conn.fetch("SELECT disc_count, level, count FROM edax_stats")
+
+    # Convert DB stats into comparable format
+    stats: dict[tuple[int, int], int] = {}
+    for row in rows:
+        stats[(row["disc_count"], row["level"])] = row["count"]
+
+    # Compare stats with expected stats
+    for key in set(stats) | set(expected_stats):
+        actual = stats.get(key, 0)
+        expected = expected_stats.get(key, 0)
+        if actual != expected:
+            disc_count, level = key
+            print(f"Mismatch for disc_count={disc_count}, level={level}:")
+            print(f"  Expected: {expected}")
+            print(f"  Actual: {actual}")
+
+    await conn.close()

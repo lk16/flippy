@@ -3,6 +3,9 @@ async function loadStats() {
     const data = await response.json();
 
     const table = document.getElementById('statsTable');
+    // Clear existing rows
+    table.innerHTML = '';
+
     data.forEach(row => {
         const tr = document.createElement('tr');
         row.forEach(cell => {
@@ -21,4 +24,6 @@ async function loadStats() {
     });
 }
 
+// Update immediately and then every second
 loadStats();
+setInterval(loadStats, 1000);

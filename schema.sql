@@ -16,3 +16,11 @@ CREATE INDEX idx_edax_learn_depth ON public.edax USING btree (depth);
 CREATE INDEX idx_edax_learn_priority ON public.edax USING btree (learn_priority);
 CREATE INDEX idx_edax_level ON public.edax USING btree (level);
 CREATE UNIQUE INDEX idx_edax_position ON public.edax USING btree (position);
+
+
+CREATE TABLE public.edax_stats (
+    disc_count integer NOT NULL,
+    level integer NOT NULL,
+    count bigint NOT NULL,
+    PRIMARY KEY (disc_count, level)
+);
