@@ -417,9 +417,6 @@ async def show_clients(
     return (static_dir / "clients.html").read_text()
 
 
-MAX_POSITION_LOOKUP_SIZE = 1000
-
-
 @app.post("/api/positions/lookup")
 async def get_positions(
     payload: LookupPositionsPayload,
@@ -427,12 +424,6 @@ async def get_positions(
     state: ServerState = Depends(get_server_state),
 ) -> list[SerializedEvaluation]:
     positions = [NormalizedPosition.from_api(pos) for pos in payload.positions]
-
-    if len(positions) > MAX_POSITION_LOOKUP_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot request more than {MAX_POSITION_LOOKUP_SIZE} positions at once",
-        )
 
     conn = await state.get_db()
     position_bytes = [pos.to_bytes() for pos in positions]

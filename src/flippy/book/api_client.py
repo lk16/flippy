@@ -6,6 +6,7 @@ from socket import gethostname
 from typing import Any, Optional
 
 from flippy.book.models import (
+    MAX_BATCH_SIZE,
     EvaluationsPayload,
     Job,
     JobResult,
@@ -14,7 +15,6 @@ from flippy.book.models import (
     RegisterResponse,
     SerializedEvaluation,
 )
-from flippy.book.server import MAX_POSITION_LOOKUP_SIZE
 from flippy.config import get_book_server_token, get_book_server_url
 from flippy.edax.types import EdaxEvaluation, EdaxEvaluations
 from flippy.othello.position import NormalizedPosition
@@ -113,8 +113,8 @@ class APIClient:
 
         positions_list = list(positions)
 
-        for i in range(0, len(positions_list), MAX_POSITION_LOOKUP_SIZE):
-            chunk = positions_list[i : i + MAX_POSITION_LOOKUP_SIZE]
+        for i in range(0, len(positions_list), MAX_BATCH_SIZE):
+            chunk = positions_list[i : i + MAX_BATCH_SIZE]
             payload = LookupPositionsPayload(positions=[pos.to_api() for pos in chunk])
             response = self._post("/api/positions/lookup", json=payload)
 

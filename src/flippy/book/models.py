@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from flippy.edax.types import EdaxEvaluation
 from flippy.othello.position import NormalizedPosition
@@ -76,5 +76,17 @@ class EvaluationsPayload(BaseModel):
     evaluations: list[SerializedEvaluation]
 
 
+MAX_BATCH_SIZE = 1000
+
+
 class LookupPositionsPayload(BaseModel):
     positions: list[str]
+
+    @field_validator("positions")
+    @classmethod
+    def validate_positions_length(cls, v: list[str]) -> list[str]:
+        if len(v) > MAX_BATCH_SIZE:
+            raise ValueError(
+                f"Cannot request more than {MAX_BATCH_SIZE} positions at once"
+            )
+        return v
