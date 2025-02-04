@@ -49,9 +49,7 @@ class EdaxEvaluation:
         self.confidence = confidence
         self.score = score
         self.best_moves = best_moves
-        self.validate()
 
-    def validate(self) -> None:
         if not (0 <= self.depth <= 60):
             raise ValueError(f"Depth must be between 0 and 60, got {self.depth}")
 

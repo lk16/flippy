@@ -170,15 +170,13 @@ async def submit_result(
 async def upsert_evaluation(
     serialized_evaluation: SerializedEvaluation, state: ServerState
 ) -> None:
-    evaluation = serialized_evaluation.to_evaluation()
+    try:
+        evaluation = serialized_evaluation.to_evaluation()
+    except ValueError as e:
+        raise ValueError(f"Evaluation is not valid: {e}") from e
 
     if not evaluation.is_db_savable():
         raise ValueError("Evaluation is not savable")
-
-    try:
-        evaluation.validate()
-    except ValueError as e:
-        raise ValueError(f"Evaluation is not valid: {e}") from e
 
     try:
         normalized = NormalizedPosition(evaluation.position)
