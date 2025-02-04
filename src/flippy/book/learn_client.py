@@ -58,8 +58,9 @@ class BookLearningClient:
 
                 job = self.get_job()
                 if job is None:
-                    # No more positions to compute
-                    break
+                    print("No jobs available right now, waiting 10 seconds")
+                    time.sleep(10)
+                    continue
 
                 print("Got a job")
                 job_result = self.do_job(job)

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
-from flippy.book import MAX_SAVABLE_DISCS, get_learn_level
+from flippy.book import get_learn_level
 from flippy.book.models import (
     ClientStats,
     EvaluationsPayload,
@@ -25,6 +25,7 @@ from flippy.config import BookServerConfig, get_book_server_token, get_db_dsn
 from flippy.othello.position import NormalizedPosition
 
 
+# TODO move client state into the database
 class Client:
     def __init__(self, client_id: str, hostname: str, git_commit: str):
         self.id = client_id
@@ -37,7 +38,6 @@ class Client:
 
 class ServerState:
     def __init__(self) -> None:
-        # TODO move active clients into DB and remove this
         self.active_clients: dict[str, Client] = {}
         self.token = get_book_server_token()
 
@@ -154,7 +154,10 @@ async def submit_result(
     if client_id not in state.active_clients:
         raise HTTPException(status_code=401)
 
-    state.active_clients[client_id].jobs_completed += 1
+    # Update client state
+    client = state.active_clients[client_id]
+    client.jobs_completed += 1
+    client.job = None
 
     completed = state.active_clients[client_id].jobs_completed
     print(f"Client {client_id} has now completed {completed} positions")
@@ -353,13 +356,58 @@ async def get_job(
     state.prune_inactive_clients()
 
     conn = await state.get_db()
-    # TODO this is inefficient, once we keep track of items in `edax` table per disc count and level, we can just query the first item
-    for disc_count in range(4, MAX_SAVABLE_DISCS + 1):
-        job = await get_job_for_disc_count(conn, disc_count)
-        if job:
-            return job
 
-    return None
+    async with conn.transaction():
+        # Find disc counts that have positions needing work using edax_stats
+        query = """
+            SELECT disc_count, level
+            FROM edax_stats
+            WHERE count > 0
+            ORDER BY disc_count, level
+        """
+        rows = await conn.fetch(query)
+
+        # We could do this in SQL, but we want to keep the get_learn_level logic in one place.
+        tuples = [
+            (row["disc_count"], row["level"])
+            for row in rows
+            if row["level"] < get_learn_level(row["disc_count"])
+        ]
+
+        if not tuples:
+            return None
+
+        taken_positions = [
+            NormalizedPosition.from_api(client.job.position)
+            for client in state.active_clients.values()
+            if client.job is not None
+        ]
+
+        # Get a random position for this disc count
+        # The level is not relevant as long as it's below the learn level.
+        learn_level = get_learn_level(tuples[0][0])
+
+        query = """
+            SELECT position
+            FROM edax
+            WHERE disc_count = $1
+            AND level < $2
+            AND position != ALL($3)
+            ORDER BY RANDOM()
+            LIMIT 1
+        """
+        row = await conn.fetchrow(query, tuples[0][0], learn_level, taken_positions)
+
+        if not row:
+            return None
+
+        normalized = NormalizedPosition.from_bytes(row["position"])
+        job = Job(position=normalized.to_api(), level=learn_level)
+
+        # Store the assigned job in client state
+        state.active_clients[client_id].job = job
+
+        return job
 
 
 @app.get("/book", response_class=HTMLResponse)
