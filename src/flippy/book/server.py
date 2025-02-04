@@ -186,11 +186,6 @@ async def upsert_evaluation(
     except ValueError as e:
         raise ValueError("Position is not normalized") from e
 
-    disc_count = evaluation.position.count_discs()
-
-    # TODO remove column learn_priority from DB
-    priority = 3 * evaluation.level + disc_count
-
     conn = await state.get_db()
     async with conn.transaction():
         # First decrement stats for existing lower-level evaluations
@@ -230,15 +225,14 @@ async def upsert_evaluation(
         # Finally, update the position evaluation itself
         # Only updates if new level is higher than existing
         query = """
-        INSERT INTO edax (position, disc_count, level, depth, confidence, score, learn_priority, best_moves)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        INSERT INTO edax (position, disc_count, level, depth, confidence, score, best_moves)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (position)
         DO UPDATE SET
             level = EXCLUDED.level,
             depth = EXCLUDED.depth,
             confidence = EXCLUDED.confidence,
             score = EXCLUDED.score,
-            learn_priority = EXCLUDED.learn_priority,
             best_moves = EXCLUDED.best_moves
         WHERE edax.level < EXCLUDED.level
         """
@@ -250,7 +244,6 @@ async def upsert_evaluation(
             evaluation.depth,
             evaluation.confidence,
             evaluation.score,
-            priority,
             evaluation.best_moves,
         )
 
