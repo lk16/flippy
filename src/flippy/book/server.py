@@ -7,7 +7,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from typing import Optional
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from flippy.book import get_learn_level
 from flippy.book.models import (
@@ -25,40 +25,39 @@ from flippy.config import BookServerConfig, get_book_server_token, get_db_dsn
 from flippy.othello.position import NormalizedPosition
 
 
-# TODO move client state into the database
-class Client:
-    def __init__(self, client_id: str, hostname: str, git_commit: str):
-        self.id = client_id
-        self.hostname = hostname
-        self.git_commit = git_commit
-        self.last_heartbeat = datetime.now()
-        self.job: Optional[Job] = None
-        self.jobs_completed = 0
-
-
 class ServerState:
     def __init__(self) -> None:
-        self.active_clients: dict[str, Client] = {}
         self.token = get_book_server_token()
+        # Create event loop to run async init
+        import asyncio
+
+        asyncio.create_task(self._init_db())
+
+    async def _init_db(self) -> None:
+        """Initialize database state on server start"""
+        conn = await self.get_db()
+        await conn.execute("TRUNCATE TABLE clients")
+        print("Truncated clients table on server start")
 
     async def get_db(self) -> asyncpg.Connection:
         return await asyncpg.connect(get_db_dsn())
 
-    def prune_inactive_clients(self) -> None:
+    async def prune_inactive_clients(self) -> None:
         inactive_threshold = timedelta(minutes=5)
         min_heartbeat_time = datetime.now() - inactive_threshold
 
-        inactive_client_ids: list[str] = []
+        conn = await self.get_db()
+        deleted = await conn.execute(
+            """
+            DELETE FROM clients
+            WHERE last_heartbeat < $1
+            RETURNING id
+            """,
+            min_heartbeat_time,
+        )
 
-        for client_id, client in self.active_clients.items():
-            if client.last_heartbeat < min_heartbeat_time:
-                inactive_client_ids.append(client_id)
-
-        for client_id in inactive_client_ids:
-            del self.active_clients[client_id]
-
-        if len(inactive_client_ids) > 0:
-            print(f"Pruned {len(inactive_client_ids)} inactive clients")
+        if deleted != "DELETE 0":
+            print(f"Pruned {deleted} inactive clients from database")
 
 
 def get_server_state() -> ServerState:
@@ -102,31 +101,82 @@ def verify_auth(
     )
 
 
-@app.post("/api/register")
+@app.post("/api/learn-clients/register")
 async def register_client(
     payload: RegisterRequest,
     state: ServerState = Depends(get_server_state),
     _: None = Depends(verify_auth),
 ) -> RegisterResponse:
     client_id = str(uuid4())
-    state.active_clients[client_id] = Client(
-        client_id, payload.hostname, payload.git_commit
-    )
+
+    conn = await state.get_db()
+    async with conn.transaction():
+        await conn.execute(
+            """
+            INSERT INTO clients (id, hostname, git_commit, position)
+            VALUES ($1, $2, $3, NULL)
+            """,
+            client_id,
+            payload.hostname,
+            payload.git_commit,
+        )
+
     print(f"Registered client {client_id}")
     return RegisterResponse(client_id=client_id)
 
 
-@app.post("/api/heartbeat")
-async def heartbeat(
+async def validate_client_id(
     client_id: str = Header(...),
-    _: None = Depends(verify_auth),
+    state: ServerState = Depends(get_server_state),
+) -> str:
+    """Validates that a client ID exists in the database and returns it."""
+    conn = await state.get_db()
+    exists = await conn.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM clients WHERE id = $1)",
+        client_id,
+    )
+    if not exists:
+        raise HTTPException(status_code=401, detail="Invalid client ID")
+    return client_id
+
+
+@app.post("/api/learn-clients/heartbeat")
+async def heartbeat(
+    client_id: str = Depends(validate_client_id),
     state: ServerState = Depends(get_server_state),
 ) -> Response:
-    if client_id not in state.active_clients:
-        raise HTTPException(status_code=401)
-
-    state.active_clients[client_id].last_heartbeat = datetime.now()
+    conn = await state.get_db()
+    await conn.execute(
+        """
+        UPDATE clients
+        SET last_heartbeat = NOW()
+        WHERE id = $1
+        """,
+        UUID(client_id),
+    )
     return Response()
+
+
+@app.get("/api/learn-clients")
+async def get_learn_clients(
+    _: None = Depends(verify_auth),
+    state: ServerState = Depends(get_server_state),
+) -> StatsResponse:
+    conn = await state.get_db()
+    rows = await conn.fetch("SELECT * FROM clients ORDER BY jobs_completed DESC")
+
+    clients = [
+        ClientStats(
+            id=str(row["id"]),
+            hostname=row["hostname"],
+            git_commit=row["git_commit"],
+            positions_computed=row["jobs_completed"],
+            last_active=row["last_heartbeat"],
+        )
+        for row in rows
+    ]
+
+    return StatsResponse(active_clients=len(clients), client_stats=clients)
 
 
 @app.post("/api/evaluations")
@@ -147,19 +197,22 @@ async def submit_evaluations(
 @app.post("/api/job/result")
 async def submit_result(
     result: JobResult,
-    client_id: str = Header(...),
-    _: None = Depends(verify_auth),
+    client_id: str = Depends(validate_client_id),
     state: ServerState = Depends(get_server_state),
 ) -> Response:
-    if client_id not in state.active_clients:
-        raise HTTPException(status_code=401)
-
     # Update client state
-    client = state.active_clients[client_id]
-    client.jobs_completed += 1
-    client.job = None
+    conn = await state.get_db()
 
-    completed = state.active_clients[client_id].jobs_completed
+    completed: int = await conn.fetchval(
+        """
+        UPDATE clients
+        SET jobs_completed = jobs_completed + 1, position = NULL
+        WHERE id = $1
+        RETURNING jobs_completed
+        """,
+        client_id,
+    )
+
     print(f"Client {client_id} has now completed {completed} positions")
 
     try:
@@ -248,28 +301,6 @@ async def upsert_evaluation(
         )
 
 
-@app.get("/api/stats/clients")
-async def get_stats(
-    _: None = Depends(verify_auth),
-    state: ServerState = Depends(get_server_state),
-) -> StatsResponse:
-    clients = state.active_clients.values()
-
-    return StatsResponse(
-        active_clients=len(clients),
-        client_stats=[
-            ClientStats(
-                id=client.id,
-                hostname=client.hostname,
-                git_commit=client.git_commit,
-                positions_computed=client.jobs_completed,
-                last_active=client.last_heartbeat,
-            )
-            for client in clients
-        ],
-    )
-
-
 @app.get("/api/stats/book")
 async def get_book_stats(
     state: ServerState = Depends(get_server_state),
@@ -313,40 +344,15 @@ async def get_book_stats(
     return table
 
 
-async def get_job_for_disc_count(
-    conn: asyncpg.Connection, disc_count: int
-) -> Optional[Job]:
-    query = """
-        SELECT position
-        FROM edax
-        WHERE disc_count = $1
-        AND level < $2
-        ORDER BY level
-        LIMIT 1
-    """
-
-    learn_level = get_learn_level(disc_count)
-    row = await conn.fetchrow(query, disc_count, learn_level)
-
-    if not row:
-        return None
-
-    normalized = NormalizedPosition.from_bytes(row["position"])
-    return Job(position=normalized.to_api(), level=learn_level)
-
-
 @app.get("/api/job")
 async def get_job(
     state: ServerState = Depends(get_server_state),
     _: None = Depends(verify_auth),
-    client_id: str = Header(...),
+    client_id: str = Depends(validate_client_id),
 ) -> Optional[Job]:
-    if client_id not in state.active_clients:
-        raise HTTPException(status_code=401)
-
     # We prune clients here, because otherwise we have to call this periodically and setup timing logic.
     # If nobody asks for work, we don't risk losing any work handed out to inactive clients.
-    state.prune_inactive_clients()
+    await state.prune_inactive_clients()
 
     conn = await state.get_db()
 
@@ -370,13 +376,7 @@ async def get_job(
         if not tuples:
             return None
 
-        taken_positions = [
-            NormalizedPosition.from_api(client.job.position)
-            for client in state.active_clients.values()
-            if client.job is not None
-        ]
-
-        # Get a random position for this disc count
+        # Get a random position for this disc count that isn't currently assigned
         # The level is not relevant as long as it's below the learn level.
         learn_level = get_learn_level(tuples[0][0])
 
@@ -385,20 +385,35 @@ async def get_job(
             FROM edax
             WHERE disc_count = $1
             AND level < $2
-            AND position != ALL($3)
+            AND position NOT IN (
+                SELECT position
+                FROM clients
+                WHERE position IS NOT NULL
+            )
             ORDER BY RANDOM()
             LIMIT 1
         """
-        row = await conn.fetchrow(query, tuples[0][0], learn_level, taken_positions)
+        row = await conn.fetchrow(query, tuples[0][0], learn_level)
 
         if not row:
-            return None
+            raise HTTPException(
+                status_code=500,
+                detail="Table edax_stats is out of sync with edax table",
+            )
 
         normalized = NormalizedPosition.from_bytes(row["position"])
         job = Job(position=normalized.to_api(), level=learn_level)
 
         # Store the assigned job in client state
-        state.active_clients[client_id].job = job
+        await conn.execute(
+            """
+            UPDATE clients
+            SET position = $1
+            WHERE id = $2
+            """,
+            normalized.to_bytes(),
+            client_id,
+        )
 
         return job
 

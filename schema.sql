@@ -1,11 +1,11 @@
 CREATE TABLE public.edax (
-    position bytea,
-    disc_count integer,
-    level integer,
-    depth integer,
-    confidence integer,
-    score integer,
-    best_moves integer[]
+    position bytea NOT NULL,
+    disc_count integer NOT NULL,
+    level integer NOT NULL,
+    depth integer NOT NULL,
+    confidence integer NOT NULL,
+    score integer NOT NULL,
+    best_moves integer[] NOT NULL
 );
 
 
@@ -21,4 +21,13 @@ CREATE TABLE public.edax_stats (
     level integer NOT NULL,
     count bigint NOT NULL,
     PRIMARY KEY (disc_count, level)
+);
+
+CREATE TABLE public.clients (
+    id UUID PRIMARY KEY,
+    hostname TEXT NOT NULL,
+    git_commit TEXT NOT NULL,
+    last_heartbeat TIMESTAMP,
+    position bytea,
+    jobs_completed INTEGER NOT NULL DEFAULT 0
 );

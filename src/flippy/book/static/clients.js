@@ -1,5 +1,5 @@
 function updateTable() {
-    fetch('/api/stats/clients')
+    fetch('/api/learn-clients')
         .then(response => response.json())
         .then(data => {
             const tbody = document.getElementById('clientTableBody');

@@ -65,7 +65,6 @@ def learn_new_positions(positions: set[NormalizedPosition]) -> None:
 
     api_client = APIClient()
 
-    # TODO consider adding extra endpoint to get missing positions
     found_evaluations = api_client.lookup_positions(pgn_positions)
     found_positions = found_evaluations.keys()
 

@@ -87,13 +87,13 @@ class APIClient:
             git_commit=get_git_commit(),
         )
 
-        response = self._post("/api/register", json=payload)
+        response = self._post("/api/learn-clients/register", json=payload)
 
         parsed = RegisterResponse.model_validate_json(response.text)
         return parsed.client_id
 
     def heartbeat(self, client_id: str) -> None:
-        response = self._post("/api/heartbeat", client_id=client_id)
+        response = self._post("/api/learn-clients/heartbeat", client_id=client_id)
         response.raise_for_status()
 
     def get_learn_job(self, client_id: str) -> Optional[Job]:

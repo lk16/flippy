@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pydantic import BaseModel, field_validator
+from typing import Optional
 
 from flippy.edax.types import EdaxEvaluation
 from flippy.othello.position import NormalizedPosition
@@ -69,7 +70,7 @@ class ClientStats(BaseModel):
     hostname: str
     git_commit: str
     positions_computed: int
-    last_active: datetime
+    last_active: Optional[datetime]
 
 
 class EvaluationsPayload(BaseModel):
