@@ -124,9 +124,6 @@ class EdaxEvaluation:
         return self.level >= MIN_LEARN_LEVEL and self.position.is_db_savable()
 
 
-# TODO add tests for EdaxEvaluations
-
-
 class EdaxEvaluations:
     """
     This class represents a set of evaluated positions and exposes an interface
@@ -160,7 +157,10 @@ class EdaxEvaluations:
     def __setitem__(
         self, normalized: NormalizedPosition, evaluation: EdaxEvaluation
     ) -> None:
-        assert evaluation.position.normalized() == normalized
+        if evaluation.position.normalized() != normalized:
+            raise ValueError(
+                f"Evaluation position {evaluation.position} does not match normalized {normalized}"
+            )
 
         if normalized not in self.__data:
             self.__data[normalized] = evaluation
