@@ -14,21 +14,18 @@ from flippy.arguments import (
     Arguments,
     PGNArguments,
     PositionFrequencyArguments,
-    TrainingArguments,
 )
 from flippy.mode.base import BaseMode
 from flippy.mode.evaluate import EvaluateMode
 from flippy.mode.frequency import FrequencyMode
 from flippy.mode.game import GameMode
 from flippy.mode.pgn import PGNMode
-from flippy.mode.training.mode import TrainingMode
 from flippy.mode.watch import WatchMode
 from flippy.window import Window
 
 app = typer.Typer(pretty_exceptions_enable=False)
 
 MODES = {
-    "training": TrainingMode,
     "evaluate": EvaluateMode,
     "frequency": FrequencyMode,
     "game": GameMode,
@@ -46,10 +43,9 @@ def main(
     pgn_file: Annotated[Optional[Path], typer.Option("-p")] = None,
     mode_name: Annotated[str, typer.Option("-m")] = "game",
 ) -> None:
-    loader_args = TrainingArguments(filters, top)
     freq_args = PositionFrequencyArguments(lost_only, most_recent)
     pgn_args = PGNArguments(pgn_file)
-    args = Arguments(loader_args, freq_args, pgn_args)
+    args = Arguments(freq_args, pgn_args)
 
     try:
         mode_type: Type[BaseMode] = MODES[mode_name]
