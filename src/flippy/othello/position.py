@@ -314,7 +314,6 @@ class Position:
         return [self.do_move(move) for move in self.get_moves_as_set()]
 
     def get_normalized_children(self) -> set[NormalizedPosition]:
-        # TODO add test for this
         return {self.do_normalized_move(move) for move in self.get_moves_as_set()}
 
     def count_discs(self) -> int:
@@ -328,8 +327,6 @@ class Position:
 
 
 class NormalizedPosition:
-    # TODO add tests
-
     """
     This class represents a normalized position and can be converted from and to a Position.
     It is hashable and supports the bare minimum to be usable in an EdaxRequest.

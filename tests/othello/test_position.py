@@ -1,6 +1,6 @@
 import pytest
 
-from flippy.othello.position import PASS_MOVE, InvalidMove, Position
+from flippy.othello.position import PASS_MOVE, InvalidMove, NormalizedPosition, Position
 
 POSITION_START = Position.start()
 POSITION_EMPTY = Position.empty()
@@ -279,3 +279,133 @@ def test_count_discs(position: Position, expected: int) -> None:
 )
 def test_count_empties(position: Position, expected: int) -> None:
     assert position.count_empties() == expected
+
+
+@pytest.mark.parametrize(
+    ["position"],
+    [
+        pytest.param(POSITION_START, id="start"),
+        pytest.param(POSITION_EMPTY, id="empty"),
+        pytest.param(POSITION_AFTER_ONE_MOVE, id="after-one-move"),
+        pytest.param(POSITION_NO_MOVES_WIN, id="no-moves"),
+        pytest.param(POSITION_NEED_TO_PASS, id="need-to-pass"),
+    ],
+)
+def test_get_normalized_children(position: Position) -> None:
+    # Get normalized children using the method under test
+    normalized_children = position.get_normalized_children()
+
+    # Get children the long way and normalize them
+    regular_children = position.get_children()
+    normalized_regular = {child.normalized() for child in regular_children}
+
+    # Both sets should be equal
+    assert normalized_children == normalized_regular
+
+
+def test_normalized_position_to_from_position_roundtrip() -> None:
+    """Test that converting to Position and back preserves the normalized position"""
+    original = POSITION_START.normalized()
+    position = original.to_position()
+    converted = NormalizedPosition(position)
+    assert original == converted
+
+
+def test_normalized_position_to_from_api_roundtrip() -> None:
+    """Test that converting to API string and back preserves the normalized position"""
+    original = POSITION_START.normalized()
+    api_str = original.to_api()
+    converted = NormalizedPosition.from_api(api_str)
+    assert original == converted
+    assert len(api_str) == 32  # Verify string length
+
+
+def test_normalized_position_to_from_bytes_roundtrip() -> None:
+    """Test that converting to bytes and back preserves the normalized position"""
+    original = POSITION_START.normalized()
+    bytes_ = original.to_bytes()
+    converted = NormalizedPosition.from_bytes(bytes_)
+    assert original == converted
+    assert len(bytes_) == 16  # 2 uint64 = 16 bytes
+
+
+@pytest.mark.parametrize(
+    ["position", "expected"],
+    [
+        pytest.param(POSITION_START.normalized(), False, id="start"),
+        pytest.param(POSITION_EMPTY.normalized(), True, id="empty"),
+        pytest.param(POSITION_AFTER_ONE_MOVE.normalized(), False, id="after-one-move"),
+        pytest.param(POSITION_NO_MOVES_WIN.normalized(), True, id="no-moves"),
+        pytest.param(POSITION_NEED_TO_PASS.normalized(), False, id="need-to-pass"),
+    ],
+)
+def test_normalized_position_is_game_end(
+    position: NormalizedPosition, expected: bool
+) -> None:
+    assert position.is_game_end() == expected
+
+
+@pytest.mark.parametrize(
+    ["position", "expected"],
+    [
+        pytest.param(POSITION_START.normalized(), True, id="start"),
+        pytest.param(POSITION_EMPTY.normalized(), False, id="empty"),
+        pytest.param(POSITION_AFTER_ONE_MOVE.normalized(), True, id="after-one-move"),
+        pytest.param(POSITION_NO_MOVES_WIN.normalized(), False, id="no-moves"),
+        pytest.param(POSITION_NEED_TO_PASS.normalized(), False, id="need-to-pass"),
+    ],
+)
+def test_normalized_position_has_moves(
+    position: NormalizedPosition, expected: bool
+) -> None:
+    assert position.has_moves() == expected
+
+
+def test_normalized_position_pass_move() -> None:
+    """Test that passing a move returns a normalized position with players swapped"""
+    position = POSITION_START.normalized()
+    passed = position.pass_move()
+    # Verify the passed position is normalized and players are swapped
+    assert passed == Position(POSITION_START.opp, POSITION_START.me).normalized()
+
+
+@pytest.mark.parametrize(
+    ["position", "expected"],
+    [
+        pytest.param(POSITION_START.normalized(), True, id="start-savable"),
+        pytest.param(POSITION_EMPTY.normalized(), False, id="empty-not-savable"),
+        pytest.param(
+            POSITION_NO_MOVES_WIN.normalized(), False, id="no-moves-not-savable"
+        ),
+    ],
+)
+def test_normalized_position_is_db_savable(
+    position: NormalizedPosition, expected: bool
+) -> None:
+    assert position.is_db_savable() == expected
+
+
+@pytest.mark.parametrize(
+    ["position", "expected"],
+    [
+        pytest.param(
+            POSITION_EMPTY.normalized(),
+            "---------------------------------------------------------------- X;\n",
+            id="empty",
+        ),
+        pytest.param(
+            POSITION_START.normalized(),
+            "---------------------------OX------XO--------------------------- X;\n",
+            id="start",
+        ),
+        pytest.param(
+            POSITION_AFTER_ONE_MOVE.normalized(),
+            "---------------------------XO------OOO-------------------------- X;\n",
+            id="after-one-move",
+        ),
+    ],
+)
+def test_normalized_position_to_problem(
+    position: NormalizedPosition, expected: str
+) -> None:
+    assert position.to_problem() == expected
