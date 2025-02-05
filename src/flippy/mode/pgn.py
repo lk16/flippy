@@ -292,17 +292,31 @@ class PGNMode(BaseMode):
 
     def search_game_positions(self, game: Game, level: int) -> None:
         positions = game.get_normalized_positions(add_children=True)
-        self.search_missing_positions(positions, level, game)
+
+        missing_positions = self.evaluations.get_missing(positions)
+
+        if missing_positions:
+            found_evaluations = self.api_client.lookup_positions(missing_positions)
+            self.evaluations.update(found_evaluations)
+
+        self._search_missing_positions(positions, level, game)
 
     def search_child_positions(self, parent: Position, level: int) -> None:
         positions = parent.get_normalized_children()
-        self.search_missing_positions(positions, level, parent)
 
-    def search_missing_positions(
+        missing_positions = self.evaluations.get_missing(positions)
+
+        if missing_positions:
+            found_evaluations = self.api_client.lookup_positions(missing_positions)
+            self.evaluations.update(found_evaluations)
+
+        self._search_missing_positions(positions, level, parent)
+
+    def _search_missing_positions(
         self, positions: set[NormalizedPosition], level: int, source: Game | Position
     ) -> None:
-        found_evaluations = self.api_client.lookup_positions(positions)
-        self.evaluations.update(found_evaluations)
+        if level > MAX_UI_SEARCH_LEVEL:
+            return
 
         learn_positions = set()
         for position in positions:
@@ -315,5 +329,9 @@ class PGNMode(BaseMode):
             if evaluation.level < level:
                 learn_positions.add(position)
 
-        request = EdaxRequest(positions=learn_positions, level=level, source=source)
+        if not learn_positions:
+            self._search_missing_positions(positions, level + 2, source)
+            return
+
+        request = EdaxRequest(learn_positions, level, source=source)
         start_evaluation(request, self.recv_queue)
