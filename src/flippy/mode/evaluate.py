@@ -38,17 +38,12 @@ class EvaluateMode(GameMode):
 
         # Get positions that are missing and not currently being evaluated
         missing_positions = self.evaluations.get_missing_children(position)
-        if not missing_positions:
-            return
 
-        found_evaluations = self.api_client.lookup_positions(missing_positions)
-        self.evaluations.update(found_evaluations)
+        if missing_positions:
+            found_evaluations = self.api_client.lookup_positions(missing_positions)
+            self.evaluations.update(found_evaluations)
 
-        # Check again for any positions still missing after server update
-        missing_positions = self.evaluations.get_missing_children(position)
-
-        request = EdaxRequest(missing_positions, MIN_UI_SEARCH_LEVEL, source=position)
-        start_evaluation(request, self.recv_queue)
+        self._search_missing_positions(position, MIN_UI_SEARCH_LEVEL)
 
     def _process_recv_messages(self) -> None:
         while True:
@@ -60,6 +55,7 @@ class EvaluateMode(GameMode):
             self._process_recv_message(message)
 
     def _process_recv_message(self, message: EdaxResponse) -> None:
+        print(f"Received evaluations for level {message.request.level}")
         self.evaluations.update(message.evaluations)
 
         # Submit evaluations to server API
@@ -69,18 +65,37 @@ class EvaluateMode(GameMode):
 
         self.api_client.save_learned_evaluations(savable_evaluations)
 
-        positions = message.request.positions
-        level = message.request.level
         source = message.request.source
-        next_level = level + 2
 
-        if (
-            isinstance(source, Position)
-            and source == self.get_board().position
-            and next_level <= MAX_UI_SEARCH_LEVEL
-        ):
-            next_request = EdaxRequest(positions, next_level, source=source)
-            start_evaluation(next_request, self.recv_queue)
+        assert isinstance(source, Position)
+        if source != self.get_board().position:
+            # Board changed, don't evaluate further
+            return
+
+        next_level = message.request.level + 2
+        self._search_missing_positions(source, next_level)
+
+    def _search_missing_positions(self, source: Position, level: int) -> None:
+        if level > MAX_UI_SEARCH_LEVEL:
+            return
+
+        learn_positions = set()
+        for position in source.get_normalized_children():
+            if position not in self.evaluations:
+                learn_positions.add(position)
+                continue
+
+            evaluation = self.evaluations[position]
+
+            if evaluation.level < level:
+                learn_positions.add(position)
+
+        if not learn_positions:
+            self._search_missing_positions(source, level + 2)
+            return
+
+        request = EdaxRequest(learn_positions, level, source=source)
+        start_evaluation(request, self.recv_queue)
 
     def get_ui_details(self) -> dict[str, Any]:
         self._process_recv_messages()

@@ -32,7 +32,7 @@ class PGNMode(BaseMode):
 
         if self.args.pgn_file:
             self.game = Game.from_pgn(self.args.pgn_file)
-            self.search_missing_game_positions(self.game, MIN_UI_SEARCH_LEVEL)
+            self.search_game_positions(self.game, MIN_UI_SEARCH_LEVEL)
 
     def on_frame(self, event: Event) -> None:
         if self.game:
@@ -83,7 +83,7 @@ class PGNMode(BaseMode):
                 self.alternative_moves.pop()
                 self.alternative_moves.append(child)
 
-        self.search_missing_child_positions(child.position, MIN_UI_SEARCH_LEVEL)
+        self.search_child_positions(child.position, MIN_UI_SEARCH_LEVEL)
 
     def toggle_show_all_move_evaluations(self) -> None:
         self.show_all_move_evaluations = not self.show_all_move_evaluations
@@ -148,7 +148,7 @@ class PGNMode(BaseMode):
         self.game = Game.from_pgn(pgn_file)
         self.moves_done = 0
 
-        self.search_missing_game_positions(self.game, MIN_UI_SEARCH_LEVEL)
+        self.search_game_positions(self.game, MIN_UI_SEARCH_LEVEL)
         return pgn_file
 
     def _process_recv_messages(self) -> None:
@@ -182,14 +182,14 @@ class PGNMode(BaseMode):
                 # Game changed, don't evaluate further
                 return
 
-            self.search_missing_game_positions(source, next_search_level)
+            self.search_game_positions(source, next_search_level)
 
         elif isinstance(source, Position):
             if source != self.get_board().position:
                 # Board changed, don't evaluate further
                 return
 
-            self.search_missing_child_positions(source, next_search_level)
+            self.search_child_positions(source, next_search_level)
 
     def get_ui_evaluations(self) -> dict[int, dict[str, int]]:
         evaluations: dict[int, dict[str, int]] = {}
@@ -290,11 +290,11 @@ class PGNMode(BaseMode):
         ui_details["graph_current_move"] = graph_current_move
         return ui_details
 
-    def search_missing_game_positions(self, game: Game, level: int) -> None:
+    def search_game_positions(self, game: Game, level: int) -> None:
         positions = game.get_normalized_positions(add_children=True)
         self.search_missing_positions(positions, level, game)
 
-    def search_missing_child_positions(self, parent: Position, level: int) -> None:
+    def search_child_positions(self, parent: Position, level: int) -> None:
         positions = parent.get_normalized_children()
         self.search_missing_positions(positions, level, parent)
 
@@ -306,13 +306,11 @@ class PGNMode(BaseMode):
 
         learn_positions = set()
         for position in positions:
-            try:
-                evaluation = self.evaluations[position]
-            except KeyError:
+            if position not in self.evaluations:
                 learn_positions.add(position)
                 continue
 
-            # TODO prevent re-evaluating positions with 100% confidence
+            evaluation = self.evaluations[position]
 
             if evaluation.level < level:
                 learn_positions.add(position)
