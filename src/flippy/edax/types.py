@@ -15,7 +15,24 @@ class EdaxRequest:
         *,
         source: Position | Game | None,
     ) -> None:
-        self.positions = positions
+        searchable: set[NormalizedPosition] = set()
+
+        for position in positions:
+            if position.is_game_end():
+                # Discard if the game is over.
+                continue
+
+            if not position.has_moves():
+                # Pass if there are no moves, but opponent has moves.
+                # Edax crashes when asked to solve a position without moves.
+                passed = position.pass_move()
+                searchable.add(passed)
+                continue
+
+            # The position has moves, so we can search it as-is.
+            searchable.add(position)
+
+        self.positions = searchable
         self.level = level
         self.source = source
 

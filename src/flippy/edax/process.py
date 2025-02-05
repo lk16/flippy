@@ -34,26 +34,6 @@ class EdaxProcess:
         self.edax_path = get_edax_path()
         self.verbose = get_edax_verbose()
 
-        searchable: set[NormalizedPosition] = set()
-
-        # TODO this filtering and cleaning should be done in the request.
-        for position in request.positions:
-            if position.is_game_end():
-                # Discard if the game is over.
-                continue
-
-            if not position.has_moves():
-                # Pass if there are no moves, but opponent has moves.
-                # Edax crashes when asked to solve a position without moves.
-                passed = position.pass_move()
-                searchable.add(passed)
-                continue
-
-            # The position has moves, so we can search it as-is.
-            searchable.add(position)
-
-        self.searchable_positions = searchable
-
     def _search_sync(self) -> EdaxEvaluations:
         command = (
             f"{self.edax_path} -solve /dev/stdin -level {self.request.level} -verbose 3"
@@ -72,7 +52,7 @@ class EdaxProcess:
         assert proc.stdout
 
         proc_input = "".join(
-            position.to_problem() for position in self.searchable_positions
+            position.to_problem() for position in self.request.positions
         )
         proc.stdin.write(proc_input.encode())
         proc.stdin.close()
@@ -97,7 +77,7 @@ class EdaxProcess:
 
         evaluations = EdaxEvaluations()
         total_read_lines = 0
-        for position in self.searchable_positions:
+        for position in self.request.positions:
             remaining_lines = lines[total_read_lines:]
             evaluation, read_lines = self.__parse_output_lines(
                 remaining_lines, position
