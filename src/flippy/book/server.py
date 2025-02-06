@@ -1,6 +1,5 @@
 import asyncpg  # type:ignore[import-untyped]
 import secrets
-from datetime import datetime, timedelta
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -43,21 +42,17 @@ class ServerState:
         return await asyncpg.connect(get_db_dsn())
 
     async def prune_inactive_clients(self) -> None:
-        inactive_threshold = timedelta(minutes=5)
-        min_heartbeat_time = datetime.now() - inactive_threshold
-
         conn = await self.get_db()
-        deleted = await conn.execute(
+        deleted: list[dict[str, UUID]] = await conn.fetch(
             """
             DELETE FROM clients
-            WHERE last_heartbeat < $1
+            WHERE last_heartbeat < CURRENT_TIMESTAMP - INTERVAL '5 minutes'
             RETURNING id
             """,
-            min_heartbeat_time,
         )
 
-        if deleted != "DELETE 0":
-            print(f"Pruned {deleted} inactive clients from database")
+        if deleted:
+            print(f"Pruned {len(deleted)} inactive clients from database")
 
 
 def get_server_state() -> ServerState:
