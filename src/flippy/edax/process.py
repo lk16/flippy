@@ -6,9 +6,9 @@ import subprocess
 from multiprocessing import Queue
 from typing import Optional
 
-from flippy.config import EDAX_PATH
+from flippy.config import get_edax_path, get_edax_verbose
 from flippy.edax.types import EdaxEvaluation, EdaxEvaluations, EdaxRequest, EdaxResponse
-from flippy.othello.position import Position
+from flippy.othello.position import NormalizedPosition, Position
 
 
 def start_evaluation(request: EdaxRequest, recv_queue: Queue[EdaxResponse]) -> None:
@@ -31,39 +31,36 @@ class EdaxProcess:
     def __init__(self, request: EdaxRequest, send_queue: Queue[EdaxResponse]) -> None:
         self.request = request
         self.send_queue = send_queue
-        self.edax_path = EDAX_PATH
-
-        searchable: set[Position] = set()
-
-        for position in request.positions:
-            if position.is_game_end():
-                # Discard if the game is over.
-                continue
-            elif not position.has_moves():
-                # Pass if there are no moves, but opponent has moves.
-                # Edax crashes when asked to solve a position without moves.
-                passed = position.pass_move()
-                searchable.add(passed.normalized())
-            else:
-                searchable.add(position.normalized())
-
-        self.searchable_positions = searchable
+        self.edax_path = get_edax_path()
+        self.verbose = get_edax_verbose()
 
     def _search_sync(self) -> EdaxEvaluations:
+        command = (
+            f"{self.edax_path} -solve /dev/stdin -level {self.request.level} -verbose 3"
+        )
+        cwd = self.edax_path.parent.parent
+
         proc = subprocess.Popen(
-            f"{self.edax_path} -solve /dev/stdin -level {self.request.level} -verbose 3".split(),
+            command.split(),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            cwd=self.edax_path.parent.parent,
+            cwd=cwd,
         )
 
         assert proc.stdin
         assert proc.stdout
 
-        proc_input = "".join(board.to_problem() for board in self.searchable_positions)
+        proc_input = "".join(
+            position.to_problem() for position in self.request.positions
+        )
         proc.stdin.write(proc_input.encode())
         proc.stdin.close()
+
+        if self.verbose:
+            print(f"Running command: {command}")
+            print(f"CWD: {cwd}")
+            print(f"Input: {proc_input}")
 
         lines: list[str] = []
 
@@ -74,15 +71,19 @@ class EdaxProcess:
             line = raw_line.decode()
             lines.append(line)
 
+        if self.verbose:
+            for line in lines:
+                print(f"Output: {line.rstrip()}")
+
         evaluations = EdaxEvaluations()
         total_read_lines = 0
-        for position in self.searchable_positions:
+        for position in self.request.positions:
             remaining_lines = lines[total_read_lines:]
             evaluation, read_lines = self.__parse_output_lines(
                 remaining_lines, position
             )
             total_read_lines += read_lines
-            evaluations.add(position, evaluation)
+            evaluations[position] = evaluation
 
         return evaluations
 
@@ -97,7 +98,7 @@ class EdaxProcess:
 
     # TODO #26 write tests for Edax output parser
     def __parse_output_lines(
-        self, lines: list[str], position: Position
+        self, lines: list[str], normalized: NormalizedPosition
     ) -> tuple[EdaxEvaluation, int]:
         evaluation: Optional[EdaxEvaluation] = None
 
@@ -105,7 +106,7 @@ class EdaxProcess:
             if line.startswith("*** problem") and read_lines > 2:
                 break
 
-            line_evaluation = self.__parse_output_line(line, position)
+            line_evaluation = self.__parse_output_line(line, normalized)
             if line_evaluation is not None:
                 evaluation = line_evaluation
 
@@ -114,7 +115,7 @@ class EdaxProcess:
 
     # TODO #26 write tests for Edax output parser
     def __parse_output_line(
-        self, line: str, position: Position
+        self, line: str, normalized: NormalizedPosition
     ) -> Optional[EdaxEvaluation]:
         if (
             line == "\n"
@@ -141,7 +142,7 @@ class EdaxProcess:
             confidence = int(columns[0].split("@")[1].split("%")[0])
 
         return EdaxEvaluation(
-            position=position,
+            position=normalized.to_position(),
             depth=depth,
             level=self.request.level,
             confidence=confidence,

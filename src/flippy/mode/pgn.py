@@ -5,16 +5,17 @@ from multiprocessing import Queue
 from pathlib import Path
 from pygame.event import Event
 from tkinter import filedialog
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
 from flippy.arguments import Arguments
-from flippy.db import DB, MAX_UI_SEARCH_LEVEL, MIN_UI_SEARCH_LEVEL
+from flippy.book import MAX_UI_SEARCH_LEVEL, MIN_UI_SEARCH_LEVEL
+from flippy.book.api_client import APIClient
 from flippy.edax.process import start_evaluation
 from flippy.edax.types import EdaxEvaluations, EdaxRequest, EdaxResponse
 from flippy.mode.base import BaseMode
 from flippy.othello.board import BLACK, Board
 from flippy.othello.game import Game
-from flippy.othello.position import InvalidMove, Position
+from flippy.othello.position import InvalidMove, NormalizedPosition, Position
 
 
 class PGNMode(BaseMode):
@@ -26,13 +27,12 @@ class PGNMode(BaseMode):
         self.recv_queue: Queue[EdaxResponse] = Queue()
         self.evaluations = EdaxEvaluations()
         self.show_all_move_evaluations = False
-        self.db = DB()
+        self.show_level = False
+        self.api_client = APIClient()
 
         if self.args.pgn_file:
             self.game = Game.from_pgn(self.args.pgn_file)
-            self.lookup_or_search(
-                self.game.get_normalized_positions(add_children=True), source=self.game
-            )
+            self.search_game_positions(self.game, MIN_UI_SEARCH_LEVEL)
 
     def on_frame(self, event: Event) -> None:
         if self.game:
@@ -48,6 +48,8 @@ class PGNMode(BaseMode):
                 self.show_prev_position()
             elif event.key == pygame.K_SPACE:
                 self.toggle_show_all_move_evaluations()
+            elif event.key == pygame.K_l:
+                self.toggle_show_level()
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == pygame.BUTTON_RIGHT:
             self.show_prev_position()
@@ -81,10 +83,13 @@ class PGNMode(BaseMode):
                 self.alternative_moves.pop()
                 self.alternative_moves.append(child)
 
-        self.lookup_or_search(child.get_child_positions(), source=child)
+        self.search_child_positions(child.position, MIN_UI_SEARCH_LEVEL)
 
     def toggle_show_all_move_evaluations(self) -> None:
         self.show_all_move_evaluations = not self.show_all_move_evaluations
+
+    def toggle_show_level(self) -> None:
+        self.show_level = not self.show_level
 
     def show_next_position(self) -> None:
         if self.game is None:
@@ -143,7 +148,7 @@ class PGNMode(BaseMode):
         self.game = Game.from_pgn(pgn_file)
         self.moves_done = 0
 
-        self.lookup_or_search(self.game.get_normalized_positions(), source=self.game)
+        self.search_game_positions(self.game, MIN_UI_SEARCH_LEVEL)
         return pgn_file
 
     def _process_recv_messages(self) -> None:
@@ -156,8 +161,19 @@ class PGNMode(BaseMode):
             self._process_recv_message(message)
 
     def _process_recv_message(self, message: EdaxResponse) -> None:
-        self.db.update_edax_evaluations(message.evaluations)
         self.evaluations.update(message.evaluations)
+
+        # Submit evaluations to server API
+        payload = [
+            eval for eval in message.evaluations.values() if eval.is_db_savable()
+        ]
+
+        self.api_client.save_learned_evaluations(payload)
+
+        next_search_level = message.request.level + 2
+
+        if next_search_level > MAX_UI_SEARCH_LEVEL:
+            return
 
         source = message.request.source
 
@@ -166,23 +182,17 @@ class PGNMode(BaseMode):
                 # Game changed, don't evaluate further
                 return
 
-            positions = self.game.get_normalized_positions()
+            self.search_game_positions(source, next_search_level)
 
-        elif isinstance(source, Board):
-            if source != self.get_board():
+        elif isinstance(source, Position):
+            if source != self.get_board().position:
                 # Board changed, don't evaluate further
                 return
 
-            positions = set(source.get_child_positions())
+            self.search_child_positions(source, next_search_level)
 
-        else:
-            # Unreachable
-            raise NotImplementedError
-
-        self.lookup_or_search(positions, source=source)
-
-    def get_ui_evaluations(self) -> dict[int, int]:
-        evaluations: dict[int, int] = {}
+    def get_ui_evaluations(self) -> dict[int, dict[str, int]]:
+        evaluations: dict[int, dict[str, int]] = {}
         board = self.get_board()
         played_move = self.get_played_move()
 
@@ -190,18 +200,21 @@ class PGNMode(BaseMode):
             child = board.do_move(move)
 
             try:
-                evaluation = self.evaluations.lookup(child.position)
+                evaluation = self.evaluations[child.position.normalized()]
             except KeyError:
                 continue
 
-            evaluations[move] = -evaluation.score
+            evaluations[move] = {"score": -evaluation.score}
+
+            if self.show_level:
+                evaluations[move]["level"] = evaluation.level
 
         if (
             not self.alternative_moves
             and evaluations
             and not self.show_all_move_evaluations
         ):
-            max_evaluation = max(evaluations.values())
+            max_evaluation = max(evaluations.values(), key=lambda x: x["score"])
 
             shown_evaluations = {
                 move
@@ -237,7 +250,7 @@ class PGNMode(BaseMode):
 
             for child in board.get_children():
                 try:
-                    evaluation = self.evaluations.lookup(child.position)
+                    evaluation = self.evaluations[child.position.normalized()]
                 except KeyError:
                     continue
 
@@ -277,39 +290,48 @@ class PGNMode(BaseMode):
         ui_details["graph_current_move"] = graph_current_move
         return ui_details
 
-    def lookup_or_search(
-        self, positions: Iterable[Position], *, source: Board | Game | None
+    def search_game_positions(self, game: Game, level: int) -> None:
+        positions = game.get_normalized_positions(add_children=True)
+
+        missing_positions = self.evaluations.get_missing(positions)
+
+        if missing_positions:
+            found_evaluations = self.api_client.lookup_positions(missing_positions)
+            self.evaluations.update(found_evaluations)
+
+        self._search_missing_positions(positions, level, game)
+
+    def search_child_positions(self, parent: Position, level: int) -> None:
+        positions = parent.get_normalized_children()
+
+        missing_positions = self.evaluations.get_missing(positions)
+
+        if missing_positions:
+            found_evaluations = self.api_client.lookup_positions(missing_positions)
+            self.evaluations.update(found_evaluations)
+
+        self._search_missing_positions(positions, level, parent)
+
+    def _search_missing_positions(
+        self, positions: set[NormalizedPosition], level: int, source: Game | Position
     ) -> None:
-        if not positions:
+        if level > MAX_UI_SEARCH_LEVEL:
             return
 
-        positions = set(positions)
+        learn_positions = set()
+        for position in positions:
+            if position not in self.evaluations:
+                learn_positions.add(position)
+                continue
 
-        missing = self.evaluations.get_missing(positions)
+            evaluation = self.evaluations[position]
 
-        if missing:
-            db_evaluations = self.db.lookup_edax_positions(missing)
-            self.evaluations.update(db_evaluations)
-            db_missing = self.evaluations.get_missing(positions)
+            if evaluation.level < level:
+                learn_positions.add(position)
 
-            if db_missing:
-                request = EdaxRequest(db_missing, MIN_UI_SEARCH_LEVEL, source=source)
-                start_evaluation(request, self.recv_queue)
-                return
-
-        evaluations = [self.evaluations.lookup(position) for position in positions]
-
-        min_level = min(evaluation.level for evaluation in evaluations)
-        learn_level = min_level + 2 + (min_level % 2)
-
-        search_positions = [
-            evaluation.position
-            for evaluation in evaluations
-            if evaluation.level == min_level
-        ]
-
-        if learn_level >= MAX_UI_SEARCH_LEVEL:
+        if not learn_positions:
+            self._search_missing_positions(positions, level + 2, source)
             return
 
-        request = EdaxRequest(search_positions, learn_level, source=source)
+        request = EdaxRequest(learn_positions, level, source=source)
         start_evaluation(request, self.recv_queue)

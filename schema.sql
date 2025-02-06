@@ -1,26 +1,33 @@
 CREATE TABLE public.edax (
-    position bytea,
-    disc_count integer,
-    level integer,
-    depth integer,
-    confidence integer,
-    score integer,
-    learn_priority integer,
-    best_moves integer[]
+    position bytea NOT NULL,
+    disc_count integer NOT NULL,
+    level integer NOT NULL,
+    depth integer NOT NULL,
+    confidence integer NOT NULL,
+    score integer NOT NULL,
+    best_moves integer[] NOT NULL
 );
 
 
 CREATE INDEX idx_edax_disc_count ON public.edax USING btree (disc_count);
 CREATE INDEX idx_edax_disc_count_level ON public.edax USING btree (disc_count, level);
 CREATE INDEX idx_edax_learn_depth ON public.edax USING btree (depth);
-CREATE INDEX idx_edax_learn_priority ON public.edax USING btree (learn_priority);
 CREATE INDEX idx_edax_level ON public.edax USING btree (level);
 CREATE UNIQUE INDEX idx_edax_position ON public.edax USING btree (position);
 
-CREATE TABLE public.greedy (
-    position bytea,
-    score integer,
-    best_move integer
+
+CREATE TABLE public.edax_stats (
+    disc_count integer NOT NULL,
+    level integer NOT NULL,
+    count bigint NOT NULL,
+    PRIMARY KEY (disc_count, level)
 );
 
-CREATE UNIQUE INDEX idx_greedy_position ON public.greedy USING btree (position);
+CREATE TABLE public.clients (
+    id UUID PRIMARY KEY,
+    hostname TEXT NOT NULL,
+    git_commit TEXT NOT NULL,
+    last_heartbeat TIMESTAMP,
+    position bytea,
+    jobs_completed INTEGER NOT NULL DEFAULT 0
+);

@@ -8,11 +8,13 @@ dependencies = [
     "pyautogui>=0.9.54",
     "typer>=0.9.0",
     "requests>=2.31.0",
-    "pika>=1.3.2",
     "python-dotenv>=1.0.1",
-    "psycopg2-binary>=2.9.9",
+    "fastapi>=0.115.7",
+    "pydantic>=2.10.5",
+    "uvicorn>=0.34.0",
+    "asyncpg>=0.30.0",
 ]
-requires-python = "==3.11.*"
+requires-python = "==3.12.*"
 readme = "README.md"
 license = { text = "MIT" }
 
@@ -22,15 +24,12 @@ organize-pgn = "python src/flippy/commands/pgn_organizer.py"
 analyze-pgn = "python src/flippy/commands/pgn_analyzer.py"
 recent-games = "python src/flippy/commands/recent_games.py"
 book = "python src/flippy/commands/book.py"
-unique-positions = "python src/flippy/commands/unique_positions.py"
-update-greedy = "python src/flippy/commands/update_greedy.py"
-book-worker = "python src/flippy/commands/book_worker.py"
 
 
 [tool.pdm]
 [tool.pdm.dev-dependencies]
 dev = [
-    "mypy>=1.8.0",
+    "mypy==1.13.0",
     "pre-commit>=3.6.1",
     "pdbpp>=0.10.3",
     "ruff>=0.2.1",
@@ -51,3 +50,6 @@ select = ["E4", "E7", "E9", "F", "I"]
 [tool.ruff.lint.isort]
 known-first-party = ["flippy"]
 known-third-party = ["*"]
+
+[tool.pytest.ini_options]
+norecursedirs = ["db_data"]

@@ -17,26 +17,46 @@ def resolve_paths(string: str) -> list[Path]:
     return [resolve_path(part) for part in string.split(",")]
 
 
-PGN_SOURCE_FOLDERS = resolve_paths(os.environ["FLIPPY_PGN_SOURCE_FOLDERS"])
-PGN_TARGET_FOLDER = resolve_path(os.environ["FLIPPY_PGN_TARGET_FOLDER"])
+def get_db_dsn() -> str:
+    user = os.environ["FLIPPY_POSTGRES_USER"]
+    pass_ = os.environ["FLIPPY_POSTGRES_PASS"]
+    host = os.environ["FLIPPY_POSTGRES_HOST"]
+    port = int(os.environ["FLIPPY_POSTGRES_PORT"])
+    db = os.environ["FLIPPY_POSTGRES_DB"]
 
-PLAYOK_USERNAMES = os.environ["FLIPPY_PLAYOK_USERNAMES"].split(",")
-USERNAMES = os.environ["FLIPPY_USERNAMES"].split(",")
+    return f"postgres://{user}:{pass_}@{host}:{port}/{db}"
 
-ALL_USERNAMES = {*PLAYOK_USERNAMES, *USERNAMES}
 
-EDAX_PATH = resolve_path(os.environ["FLIPPY_EDAX_PATH"])
+class PgnConfig:
+    def __init__(self) -> None:
+        self.source_folders = resolve_paths(os.environ["FLIPPY_PGN_SOURCE_FOLDERS"])
+        self.target_folder = resolve_path(os.environ["FLIPPY_PGN_TARGET_FOLDER"])
 
-POSTGRES_USER = os.environ["FLIPPY_POSTGRES_USER"]
-POSTGRES_PASS = os.environ["FLIPPY_POSTGRES_PASS"]
-POSTGRES_HOST = os.environ["FLIPPY_POSTGRES_HOST"]
-POSTGRES_PORT = int(os.environ["FLIPPY_POSTGRES_PORT"])
-POSTGRES_DB = os.environ["FLIPPY_POSTGRES_DB"]
+        self.playok_usernames = os.environ["FLIPPY_PLAYOK_USERNAMES"].split(",")
+        self.usernames = os.environ["FLIPPY_USERNAMES"].split(",")
 
-POSTGRES_DSN = f"postgres://{POSTGRES_USER}:{POSTGRES_PASS}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+        self.all_usernames = {*self.playok_usernames, *self.usernames}
 
-RABBITMQ_USER = os.environ["FLIPPY_RABBITMQ_USER"]
-RABBITMQ_PASS = os.environ["FLIPPY_RABBITMQ_PASS"]
-RABBITMQ_PORT = int(os.environ["FLIPPY_RABBITMQ_PORT"])
-RABBITMQ_HOST = os.environ["FLIPPY_RABBITMQ_HOST"]
-RABBITMQ_QUEUE = os.environ["FLIPPY_RABBITMQ_QUEUE"]
+
+def get_edax_path() -> Path:
+    return resolve_path(os.environ["FLIPPY_EDAX_PATH"])
+
+
+def get_edax_verbose() -> bool:
+    return os.getenv("FLIPPY_EDAX_VERBOSE", "0") != "0"
+
+
+def get_book_server_url() -> str:
+    return os.environ["FLIPPY_BOOK_SERVER_URL"]
+
+
+class BookServerConfig:
+    def __init__(self) -> None:
+        self.host = os.environ["FLIPPY_BOOK_SERVER_HOST"]
+        self.port = int(os.environ["FLIPPY_BOOK_SERVER_PORT"])
+        self.basic_auth_user = os.environ["FLIPPY_BOOK_SERVER_BASIC_AUTH_USER"]
+        self.basic_auth_pass = os.environ["FLIPPY_BOOK_SERVER_BASIC_AUTH_PASS"]
+
+
+def get_book_server_token() -> str:
+    return os.environ["FLIPPY_BOOK_SERVER_TOKEN"]

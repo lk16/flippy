@@ -86,23 +86,6 @@ class Board:
         turn = opponent(self.turn)
         return Board(position, turn)
 
-    def do_normalized_move(self, move: int) -> Board:
-        return self.do_move(move).normalized()
-
-    def rotated(self, rotation: int) -> Board:
-        position = self.position.rotated(rotation)
-        return Board(position, self.turn)
-
-    def normalize(self) -> tuple[Board, int]:
-        position, rotation = self.position.normalize()
-        return Board(position, self.turn), rotation
-
-    def normalized(self) -> Board:
-        return self.normalize()[0]
-
-    def is_normalized(self) -> bool:
-        return self.position.is_normalized()
-
     def pass_move(self) -> Board:
         return self.do_move(PASS_MOVE)
 
@@ -156,25 +139,13 @@ class Board:
     def fields_to_indexes(cls, fields: list[str]) -> list[int]:
         return [cls.field_to_index(field) for field in fields]
 
-    @classmethod
-    def unrotate_move(cls, move: int, rotation: int) -> int:
-        return Position.unrotate_move(move, rotation)
-
-    @classmethod
-    def rotate_move(cls, move: int, rotation: int) -> int:
-        return Position.rotate_move(move, rotation)
-
-    def as_tuple(self) -> tuple[Position, int]:
-        return (self.position, self.turn)
-
     def __hash__(self) -> int:
-        return hash(self.as_tuple())
+        raise NotImplementedError
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Board):
-            raise TypeError(f"Cannot compare Board with {type(other)}")
-
-        return self.as_tuple() == other.as_tuple()
+            raise TypeError("Cannot compare Board with non-Board")
+        return self.position == other.position and self.turn == other.turn
 
     def get_children(self) -> list[Board]:
         return [self.do_move(move) for move in self.get_moves_as_set()]

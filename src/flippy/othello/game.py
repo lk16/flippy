@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from flippy.othello.board import BLACK, WHITE, Board
-from flippy.othello.position import PASS_MOVE, InvalidMove, Position
+from flippy.othello.position import PASS_MOVE, InvalidMove, NormalizedPosition
 
-metadata_regex = re.compile('\[(.*) "(.*)"\]')
+metadata_regex = re.compile(r'\[(.*) "(.*)"\]')
 
 
 class Game:
@@ -33,7 +33,7 @@ class Game:
 
         for move in moves:
             if not board.is_valid_move(move):
-                # Passed moves may not be present in moves list
+                # Passed moves may be missing from moves list
                 board = board.do_move(PASS_MOVE)
                 boards.append(board)
 
@@ -173,8 +173,10 @@ class Game:
 
         return all_children
 
-    def get_normalized_positions(self, add_children: bool = False) -> set[Position]:
-        positions: set[Position] = set()
+    def get_normalized_positions(
+        self, add_children: bool = False
+    ) -> set[NormalizedPosition]:
+        positions: set[NormalizedPosition] = set()
 
         for board in self.boards:
             positions.add(board.position.normalized())
@@ -184,3 +186,9 @@ class Game:
                     positions.add(child_position.normalized())
 
         return positions
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Game):
+            raise TypeError("Cannot compare Game with non-Game object")
+
+        return self.metadata == other.metadata and self.boards == other.boards
