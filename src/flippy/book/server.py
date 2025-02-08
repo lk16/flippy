@@ -362,41 +362,49 @@ async def get_job(
         rows = await conn.fetch(query)
 
         # We could do this in SQL, but we want to keep the get_learn_level logic in one place.
-        tuples = [
-            (row["disc_count"], row["level"])
-            for row in rows
-            if row["level"] < get_learn_level(row["disc_count"])
-        ]
+        learnable_disc_counts = sorted(
+            {
+                row["disc_count"]
+                for row in rows
+                if row["level"] < get_learn_level(row["disc_count"])
+            }
+        )
 
-        if not tuples:
-            # No jobs available
-            return None
+        normalized: Optional[NormalizedPosition] = None
 
-        # Get a random position for this disc count that isn't currently assigned
-        # The level is not relevant as long as it's below the learn level.
-        learn_level = get_learn_level(tuples[0][0])
+        # Try to find job at different disc counts, starting with the lowest.
+        # It is rare that we will have to try more than one disc count.
+        for learnable_disc_count in learnable_disc_counts:
+            # Get a random position for this disc count that isn't currently assigned
+            # The level is not relevant as long as it's below the learn level.
+            learn_level = get_learn_level(learnable_disc_count)
 
-        query = """
-            SELECT position
-            FROM edax
-            WHERE disc_count = $1
-            AND level < $2
-            AND position NOT IN (
+            query = """
                 SELECT position
-                FROM clients
-                WHERE position IS NOT NULL
-            )
-            ORDER BY RANDOM()
-            LIMIT 1
-        """
-        row = await conn.fetchrow(query, tuples[0][0], learn_level)
+                FROM edax
+                WHERE disc_count = $1
+                AND level < $2
+                AND position NOT IN (
+                    SELECT position
+                    FROM clients
+                    WHERE position IS NOT NULL
+                )
+                ORDER BY RANDOM()
+                LIMIT 1
+            """
+            row = await conn.fetchrow(query, learnable_disc_count, learn_level)
 
-        if not row:
+            if row:
+                normalized = NormalizedPosition.from_bytes(row["position"])
+                break
+
+        if not normalized:
             # No jobs available for current disc count, tell client to wait
             return None
 
-        normalized = NormalizedPosition.from_bytes(row["position"])
-        job = Job(position=normalized.to_api(), level=learn_level)
+        job = Job(
+            position=normalized.to_api(), level=get_learn_level(learnable_disc_count)
+        )
 
         # Store the assigned job in client state
         await conn.execute(
