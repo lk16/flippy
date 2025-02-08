@@ -369,6 +369,7 @@ async def get_job(
         ]
 
         if not tuples:
+            # No jobs available
             return None
 
         # Get a random position for this disc count that isn't currently assigned
@@ -391,10 +392,8 @@ async def get_job(
         row = await conn.fetchrow(query, tuples[0][0], learn_level)
 
         if not row:
-            raise HTTPException(
-                status_code=500,
-                detail="Table edax_stats is out of sync with edax table",
-            )
+            # No jobs available for current disc count, tell client to wait
+            return None
 
         normalized = NormalizedPosition.from_bytes(row["position"])
         job = Job(position=normalized.to_api(), level=learn_level)
