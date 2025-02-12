@@ -166,6 +166,9 @@ cython_debug/
 pgn/
 pgn.zip
 
+# opening training logs
+opening_logs.txt
+
 # flippy config file
 config.json
 
