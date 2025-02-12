@@ -166,9 +166,6 @@ cython_debug/
 pgn/
 pgn.zip
 
-# opening training logs
-opening_logs.txt
-
 # flippy config file
 config.json
 
@@ -180,3 +177,6 @@ wthor/
 
 # flippy app data
 .flippy/
+
+# opening training files
+src/flippy/mode/training/openings.py

@@ -6,8 +6,6 @@ from typing import Any
 from flippy.arguments import Arguments
 from flippy.mode.base import BaseMode
 from flippy.mode.training.exercise import Exercise
-from flippy.mode.training.loader import ExerciseLoader
-from flippy.mode.training.logs import LogItem
 from flippy.othello.board import Board
 
 
@@ -16,8 +14,7 @@ class NoExercisesLeft(Exception):
 
 
 class TrainingMode(BaseMode):
-    def __init__(self, args: Arguments) -> None:
-        self.args = args.training
+    def __init__(self, _: Arguments) -> None:
         self.exercises: list[Exercise] = []
         self.remaining_exercise_ids: list[int] = []
         self.move_mistakes: set[int] = set()
@@ -44,8 +41,14 @@ class TrainingMode(BaseMode):
             self.remaining_exercise_ids.append(current_exercise_id)
 
     def load_exercises(self) -> None:
-        loader = ExerciseLoader(self.args)
-        self.exercises, self.remaining_exercise_ids = loader.get_exercises()
+        try:
+            from flippy.mode.training.openings import EXERCISES
+        except ImportError:
+            raise ImportError("Openings exercises not found")
+
+        self.exercises = EXERCISES
+
+        self.remaining_exercise_ids = list(range(len(self.exercises)))
         print(f"Exercises: {len(self.remaining_exercise_ids)}")
 
         random.shuffle(self.remaining_exercise_ids)
@@ -95,7 +98,6 @@ class TrainingMode(BaseMode):
         if len(exercise.boards) <= self.moves_done:
             # End of exercise, find next one.
             # Exercise will come back later if mistakes were made.
-            LogItem(exercise.get_moves_seq_str(), self.exercise_mistakes).save_to_file()
 
             self.change_exercise(keep_current=self.exercise_mistakes)
             self.exercise_mistakes = False
