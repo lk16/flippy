@@ -6,6 +6,7 @@ from typing import Any
 from flippy.arguments import Arguments
 from flippy.mode.base import BaseMode
 from flippy.mode.training.exercise import Exercise
+from flippy.mode.training.openings import EXERCISES
 from flippy.othello.board import Board
 
 
@@ -41,13 +42,7 @@ class TrainingMode(BaseMode):
             self.remaining_exercise_ids.append(current_exercise_id)
 
     def load_exercises(self) -> None:
-        try:
-            from flippy.mode.training.openings import EXERCISES
-        except ImportError:
-            raise ImportError("Openings exercises not found")
-
         self.exercises = EXERCISES
-
         self.remaining_exercise_ids = list(range(len(self.exercises)))
         print(f"Exercises: {len(self.remaining_exercise_ids)}")
 
@@ -72,7 +67,17 @@ class TrainingMode(BaseMode):
         return exercise.boards[self.moves_done]
 
     def get_ui_details(self) -> dict[str, Any]:
-        return {"move_mistakes": self.move_mistakes}
+        details: dict[str, Any] = {"move_mistakes": self.move_mistakes}
+
+        try:
+            exercise = self.get_exercise()
+        except NoExercisesLeft:
+            pass
+        else:
+            if self.moves_done in exercise.forced_move_indices:
+                details["forced_move_index"] = exercise.moves[self.moves_done]
+
+        return details
 
     def on_move(self, move: int) -> None:
         try:
@@ -88,6 +93,11 @@ class TrainingMode(BaseMode):
 
         if move != exercise.moves[self.moves_done]:
             # Incorrect move.
+
+            if self.moves_done in exercise.forced_move_indices:
+                # Wrong forced move.
+                return
+
             self.move_mistakes.add(move)
             self.exercise_mistakes = True
             return

@@ -177,6 +177,3 @@ wthor/
 
 # flippy app data
 .flippy/
-
-# opening training files
-src/flippy/mode/training/openings.py
