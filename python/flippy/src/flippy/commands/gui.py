@@ -20,12 +20,14 @@ from flippy.mode.evaluate import EvaluateMode
 from flippy.mode.frequency import FrequencyMode
 from flippy.mode.game import GameMode
 from flippy.mode.pgn import PGNMode
+from flippy.mode.training.mode import TrainingMode
 from flippy.mode.watch import WatchMode
 from flippy.window import Window
 
 app = typer.Typer(pretty_exceptions_enable=False)
 
 MODES = {
+    "training": TrainingMode,
     "evaluate": EvaluateMode,
     "frequency": FrequencyMode,
     "game": GameMode,
