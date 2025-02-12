@@ -160,6 +160,7 @@ class Window:
                 self.draw_disc(index, COLOR_GRAY_DISC)
             elif index in move_mistakes:
                 self.draw_move_indicator(index, COLOR_WRONG_MOVE)
+                continue
             elif index in child_frequencies:
                 self.draw_number(index, turn_color, child_frequencies[index])
 
