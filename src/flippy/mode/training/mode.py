@@ -6,7 +6,7 @@ from typing import Any
 from flippy.arguments import Arguments
 from flippy.mode.base import BaseMode
 from flippy.mode.training.exercise import Exercise
-from flippy.mode.training.exercise_list import EXERCISES
+from flippy.mode.training.exercise_list import get_exercises
 from flippy.othello.board import Board
 
 
@@ -42,7 +42,7 @@ class TrainingMode(BaseMode):
             self.remaining_exercise_ids.append(current_exercise_id)
 
     def load_exercises(self) -> None:
-        self.exercises = EXERCISES
+        self.exercises = get_exercises()
         self.remaining_exercise_ids = list(range(len(self.exercises)))
         print(f"Exercises: {len(self.remaining_exercise_ids)}")
 
