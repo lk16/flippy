@@ -72,3 +72,6 @@ class Exercise:
 
     def __str__(self) -> str:
         return Board.indexes_to_fields(self.moves)
+
+    def __repr__(self) -> str:
+        return f"Exercise(color={self.color}, moves={self.raw!r})"
