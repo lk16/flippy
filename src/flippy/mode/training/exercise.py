@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from flippy.othello.board import BLACK, WHITE, Board
-from flippy.othello.position import InvalidMove
+from flippy.othello.position import InvalidMove, NormalizedPosition
 
 
 class Exercise:
@@ -69,6 +69,28 @@ class Exercise:
             raise ValueError(
                 f"White exercise must have an even number of moves: {self}"
             )
+
+    def get_normalized(self, move_index: int) -> NormalizedPosition:
+        return self.boards[move_index].position.normalized()
+
+    def get_forced_move(self, board: Board, move_index: int) -> int:
+        target_position = self.get_normalized(move_index + 1)
+
+        for move in board.get_moves_as_set():
+            if board.position.do_normalized_move(move) == target_position:
+                return move
+
+        raise RuntimeError("No valid forced move found")
+
+    def get_next_board(self, board: Board, move: int, moves_done: int) -> Board:
+        child = board.do_move(move)
+        normalized_grand_child = self.get_normalized(moves_done + 2)
+
+        for grand_child in child.get_children():
+            if grand_child.position.normalized() == normalized_grand_child:
+                return grand_child
+
+        raise RuntimeError("No valid child board found")
 
     def __str__(self) -> str:
         return Board.indexes_to_fields(self.moves)
