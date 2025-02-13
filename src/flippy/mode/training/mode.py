@@ -6,7 +6,7 @@ from typing import Any
 from flippy.arguments import Arguments
 from flippy.mode.base import BaseMode
 from flippy.mode.training.exercise import Exercise
-from flippy.mode.training.openings import EXERCISES
+from flippy.mode.training.exercise_list import EXERCISES
 from flippy.othello.board import Board
 
 
