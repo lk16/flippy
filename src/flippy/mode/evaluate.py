@@ -1,4 +1,5 @@
 import queue
+import threading
 from multiprocessing import Queue
 from pygame.event import Event
 from typing import Any
@@ -15,7 +16,7 @@ from flippy.othello.position import Position
 class EvaluateMode(GameMode):
     def __init__(self, args: Arguments) -> None:
         super().__init__(args)
-        self.recv_queue: Queue[EdaxResponse] = Queue()
+        self.recv_queue: Queue[EdaxResponse | EdaxEvaluations] = Queue()
         self.evaluations = EdaxEvaluations()
         self.api_client = APIClient()
 
@@ -40,8 +41,12 @@ class EvaluateMode(GameMode):
         missing_positions = self.evaluations.get_missing_children(position)
 
         if missing_positions:
-            found_evaluations = self.api_client.lookup_positions(missing_positions)
-            self.evaluations.update(found_evaluations)
+            # Move API call to separate thread
+            def call_api() -> None:
+                found_evaluations = self.api_client.lookup_positions(missing_positions)
+                self.recv_queue.put(found_evaluations)
+
+            threading.Thread(target=call_api).start()
 
         self._search_missing_positions(position, MIN_UI_SEARCH_LEVEL)
 
@@ -52,27 +57,35 @@ class EvaluateMode(GameMode):
             except queue.Empty:
                 break
 
-            self._process_recv_message(message)
+            if isinstance(message, EdaxResponse):
+                self._process_recv_edax_response(message)
+            elif isinstance(message, EdaxEvaluations):
+                self._process_recv_edax_evaluations(message)
 
-    def _process_recv_message(self, message: EdaxResponse) -> None:
-        print(f"Received evaluations for level {message.request.level}")
-        self.evaluations.update(message.evaluations)
+    def _process_recv_edax_evaluations(self, evaluations: EdaxEvaluations) -> None:
+        self.evaluations.update(evaluations)
 
-        # Submit evaluations to server API
+    def _process_recv_edax_response(self, response: EdaxResponse) -> None:
+        self.evaluations.update(response.evaluations)
+
+        # Submit evaluations to server API in separate thread
         savable_evaluations = [
-            eval for eval in message.evaluations.values() if eval.is_db_savable()
+            eval for eval in response.evaluations.values() if eval.is_db_savable()
         ]
 
-        self.api_client.save_learned_evaluations(savable_evaluations)
+        def save_evaluations() -> None:
+            self.api_client.save_learned_evaluations(savable_evaluations)
 
-        source = message.request.source
+        threading.Thread(target=save_evaluations).start()
+
+        source = response.request.source
 
         assert isinstance(source, Position)
         if source != self.get_board().position:
             # Board changed, don't evaluate further
             return
 
-        next_level = message.request.level + 2
+        next_level = response.request.level + 2
         self._search_missing_positions(source, next_level)
 
     def _search_missing_positions(self, source: Position, level: int) -> None:
@@ -95,7 +108,10 @@ class EvaluateMode(GameMode):
             return
 
         request = EdaxRequest(learn_positions, level, source=source)
-        start_evaluation(request, self.recv_queue)
+
+        # Ignoring type error is fine here since start_evaluation expects Queue[EdaxResponse],
+        # but we have Queue[EdaxResponse | EdaxEvaluations]. EdaxResponse is a subset of our queue's types.
+        start_evaluation(request, self.recv_queue)  # type:ignore[arg-type]
 
     def get_ui_details(self) -> dict[str, Any]:
         self._process_recv_messages()

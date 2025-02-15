@@ -1,5 +1,6 @@
 import pygame
 import queue
+import threading
 import tkinter as tk
 from multiprocessing import Queue
 from pathlib import Path
@@ -24,7 +25,7 @@ class PGNMode(BaseMode):
         self.game: Optional[Game] = None
         self.moves_done = 0
         self.alternative_moves: list[Board] = []
-        self.recv_queue: Queue[EdaxResponse] = Queue()
+        self.recv_queue: Queue[EdaxResponse | EdaxEvaluations] = Queue()
         self.evaluations = EdaxEvaluations()
         self.show_all_move_evaluations = False
         self.show_level = False
@@ -158,24 +159,34 @@ class PGNMode(BaseMode):
             except queue.Empty:
                 break
 
-            self._process_recv_message(message)
+            if isinstance(message, EdaxResponse):
+                self._process_recv_edax_response(message)
+            elif isinstance(message, EdaxEvaluations):
+                self._process_recv_edax_evaluations(message)
 
-    def _process_recv_message(self, message: EdaxResponse) -> None:
-        self.evaluations.update(message.evaluations)
+    def _process_recv_edax_evaluations(self, evaluations: EdaxEvaluations) -> None:
+        self.evaluations.update(evaluations)
+
+    def _process_recv_edax_response(self, response: EdaxResponse) -> None:
+        self.evaluations.update(response.evaluations)
 
         # Submit evaluations to server API
         payload = [
-            eval for eval in message.evaluations.values() if eval.is_db_savable()
+            eval for eval in response.evaluations.values() if eval.is_db_savable()
         ]
 
-        self.api_client.save_learned_evaluations(payload)
+        def save_evaluations() -> None:
+            self.api_client.save_learned_evaluations(payload)
 
-        next_search_level = message.request.level + 2
+        # Post to API in separate thread to avoid blocking the main thread.
+        threading.Thread(target=save_evaluations).start()
+
+        next_search_level = response.request.level + 2
 
         if next_search_level > MAX_UI_SEARCH_LEVEL:
             return
 
-        source = message.request.source
+        source = response.request.source
 
         if isinstance(source, Game):
             if source != self.game:
@@ -290,14 +301,21 @@ class PGNMode(BaseMode):
         ui_details["graph_current_move"] = graph_current_move
         return ui_details
 
+    def get_positions_from_api_threaded(
+        self, positions: set[NormalizedPosition]
+    ) -> None:
+        def call_api() -> None:
+            found_evaluations = self.api_client.lookup_positions(positions)
+            self.recv_queue.put(found_evaluations)
+
+        if positions:
+            threading.Thread(target=call_api).start()
+
     def search_game_positions(self, game: Game, level: int) -> None:
         positions = game.get_normalized_positions(add_children=True)
 
         missing_positions = self.evaluations.get_missing(positions)
-
-        if missing_positions:
-            found_evaluations = self.api_client.lookup_positions(missing_positions)
-            self.evaluations.update(found_evaluations)
+        self.get_positions_from_api_threaded(missing_positions)
 
         self._search_missing_positions(positions, level, game)
 
@@ -305,10 +323,7 @@ class PGNMode(BaseMode):
         positions = parent.get_normalized_children()
 
         missing_positions = self.evaluations.get_missing(positions)
-
-        if missing_positions:
-            found_evaluations = self.api_client.lookup_positions(missing_positions)
-            self.evaluations.update(found_evaluations)
+        self.get_positions_from_api_threaded(missing_positions)
 
         self._search_missing_positions(positions, level, parent)
 
@@ -334,4 +349,7 @@ class PGNMode(BaseMode):
             return
 
         request = EdaxRequest(learn_positions, level, source=source)
-        start_evaluation(request, self.recv_queue)
+
+        # Ignoring type error is fine here since start_evaluation expects Queue[EdaxResponse],
+        # but we have Queue[EdaxResponse | EdaxEvaluations]. EdaxResponse is a subset of our queue's types.
+        start_evaluation(request, self.recv_queue)  # type:ignore[arg-type]
