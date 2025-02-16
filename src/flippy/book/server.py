@@ -1,6 +1,14 @@
 import asyncpg  # type:ignore[import-untyped]
 import secrets
-from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Response,
+    status,
+)
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
@@ -177,6 +185,7 @@ async def get_learn_clients(
 @app.post("/api/evaluations")
 async def submit_evaluations(
     payload: EvaluationsPayload,
+    background_tasks: BackgroundTasks,
     _: None = Depends(verify_auth),
     state: ServerState = Depends(get_server_state),
 ) -> Response:
@@ -186,12 +195,19 @@ async def submit_evaluations(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
+    background_tasks.add_task(refresh_stats_view, state)
     return Response()
+
+
+async def refresh_stats_view(state: ServerState) -> None:
+    conn = await state.get_db()
+    await conn.execute("REFRESH MATERIALIZED VIEW edax_stats_view")
 
 
 @app.post("/api/job/result")
 async def submit_result(
     result: JobResult,
+    background_tasks: BackgroundTasks,
     client_id: str = Depends(validate_client_id),
     state: ServerState = Depends(get_server_state),
 ) -> Response:
@@ -212,6 +228,7 @@ async def submit_result(
 
     try:
         await upsert_evaluation(result.evaluation, state)
+        background_tasks.add_task(refresh_stats_view, state)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -235,62 +252,28 @@ async def upsert_evaluation(
         raise ValueError("Position is not normalized") from e
 
     conn = await state.get_db()
-    async with conn.transaction():
-        # First check if we have an existing evaluation and its level
-        existing_level = await conn.fetchval(
-            "SELECT level FROM edax WHERE position = $1",
-            normalized.to_bytes(),
-        )
 
-        # If we have this position and new level isn't higher, skip update
-        if existing_level is not None and existing_level >= evaluation.level:
-            return
-
-        # If updating an existing position, decrement its old stats
-        if existing_level is not None:
-            await conn.execute(
-                """
-                UPDATE edax_stats
-                SET count = count - 1
-                WHERE disc_count = $1 AND level = $2
-                """,
-                evaluation.position.count_discs(),
-                existing_level,
-            )
-
-        # Update the position evaluation
-        await conn.execute(
-            """
-            INSERT INTO edax (position, disc_count, level, depth, confidence, score, best_moves)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            ON CONFLICT (position)
-            DO UPDATE SET
-                level = EXCLUDED.level,
-                depth = EXCLUDED.depth,
-                confidence = EXCLUDED.confidence,
-                score = EXCLUDED.score,
-                best_moves = EXCLUDED.best_moves
-            """,
-            normalized.to_bytes(),
-            evaluation.position.count_discs(),
-            evaluation.level,
-            evaluation.depth,
-            evaluation.confidence,
-            evaluation.score,
-            evaluation.best_moves,
-        )
-
-        # Increment stats for the new level
-        await conn.execute(
-            """
-            INSERT INTO edax_stats (disc_count, level, count)
-            VALUES ($1, $2, 1)
-            ON CONFLICT (disc_count, level)
-            DO UPDATE SET count = edax_stats.count + 1
-            """,
-            evaluation.position.count_discs(),
-            evaluation.level,
-        )
+    await conn.execute(
+        """
+        INSERT INTO edax (position, disc_count, level, depth, confidence, score, best_moves)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (position)
+        DO UPDATE SET
+            level = EXCLUDED.level,
+            depth = EXCLUDED.depth,
+            confidence = EXCLUDED.confidence,
+            score = EXCLUDED.score,
+            best_moves = EXCLUDED.best_moves
+        WHERE EXCLUDED.level > edax.level
+        """,
+        normalized.to_bytes(),
+        evaluation.position.count_discs(),
+        evaluation.level,
+        evaluation.depth,
+        evaluation.confidence,
+        evaluation.score,
+        evaluation.best_moves,
+    )
 
 
 @app.get("/api/stats/book")
@@ -299,7 +282,7 @@ async def get_book_stats(
     _: None = Depends(verify_auth),
 ) -> list[list[str]]:
     conn = await state.get_db()
-    stats = await conn.fetch("SELECT disc_count, level, count FROM edax_stats")
+    stats = await conn.fetch("SELECT disc_count, level, count FROM edax_stats_view")
 
     disc_counts = sorted(set(row[0] for row in stats))
     levels = sorted(set(row[1] for row in stats))
@@ -349,10 +332,10 @@ async def get_job(
     conn = await state.get_db()
 
     async with conn.transaction():
-        # Find disc counts that have positions needing work using edax_stats
+        # Find disc counts that have positions needing work using edax_stats_view
         query = """
             SELECT disc_count, level
-            FROM edax_stats
+            FROM edax_stats_view
             WHERE count > 0
             ORDER BY disc_count, level
         """
