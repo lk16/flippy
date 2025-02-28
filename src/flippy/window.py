@@ -127,6 +127,7 @@ class Window:
         played_move: Optional[int] = ui_details.pop("played_move", None)
         graph_data: list[Optional[tuple[int, int]]] = ui_details.pop("graph_data", [])
         graph_current_move: Optional[int] = ui_details.pop("graph_current_move", None)
+        forced_move_index: Optional[int] = ui_details.pop("forced_move_index", None)
 
         if ui_details:
             print(
@@ -160,6 +161,7 @@ class Window:
                 self.draw_disc(index, COLOR_GRAY_DISC)
             elif index in move_mistakes:
                 self.draw_move_indicator(index, COLOR_WRONG_MOVE)
+                continue
             elif index in child_frequencies:
                 self.draw_number(index, turn_color, child_frequencies[index])
 
@@ -175,8 +177,13 @@ class Window:
 
                 if "level" in evaluations[index]:
                     self.draw_level(index, turn_color, evaluations[index]["level"])
+                continue
 
-            elif board.is_valid_move(index) and not child_frequencies:
+            if (
+                board.is_valid_move(index)
+                and not child_frequencies
+                and (forced_move_index is None or index == forced_move_index)
+            ):
                 self.draw_move_indicator(index, turn_color)
 
         self.draw_graph(graph_data, graph_current_move)
