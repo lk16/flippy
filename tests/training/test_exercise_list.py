@@ -1,9 +1,14 @@
-from typing import Any
+from typing import Optional
 
 from flippy.mode.training.exercise import Exercise
-from flippy.mode.training.exercise_list import BLACK_TREE, WHITE_TREE, get_exercises
+from flippy.mode.training.exercise_list import (
+    BLACK_TREE,
+    WHITE_TREE,
+    Node,
+    get_exercises,
+)
 from flippy.othello.board import Board
-from flippy.othello.position import InvalidMove
+from flippy.othello.position import InvalidMove, NormalizedPosition
 
 
 def test_exercise_validity() -> None:
@@ -23,98 +28,151 @@ def test_exercise_order() -> None:
     ), "Exercises should be ordered first by color, then by raw"
 
 
-def check_tree_integrity(prefix: str, tree: dict[str, Any], board: Board) -> None:
-    if not tree:
+def check_move_count(prefix: str, tree: Node) -> None:
+    moves = tree.moves.split()
+
+    if len(moves) > 2 or len(moves) == 0:
+        raise AssertionError(f"At {prefix}: Invalid number of moves: {len(moves)}")
+
+
+def apply_moves(board: Board, moves: list[str], prefix: str = "") -> Board:
+    """Apply a sequence of moves to a board, raising AssertionError if any move is invalid."""
+    current_board = board
+    move_path = prefix
+
+    for i, move in enumerate(moves):
+        try:
+            current_board = current_board.do_move(Board.field_to_index(move))
+        except InvalidMove:
+            move_context = f"({' '.join(moves[:i])})" if i > 0 else ""
+            raise AssertionError(
+                f"At {move_path} {move_context}: Invalid move '{move}'"
+            )
+
+    return current_board
+
+
+def check_move_validity(prefix: str, tree: Node, board: Board) -> Optional[Board]:
+    moves = tree.moves.split()
+    return apply_moves(board, moves, prefix)
+
+
+def check_child_moves_set(prefix: str, tree: Node, board: Board) -> None:
+    moves = tree.moves.split()
+
+    if tree.children and len(moves) != 2:
+        raise AssertionError(f"At {prefix}: Non-leaf node should have two moves")
+
+    if not tree.children:
         return
 
+    # Apply the two moves from the current node
+    grand_child_board = apply_moves(board, moves, prefix)
+
     # Track first moves to ensure uniqueness and completeness
-    valid_moves = {Board.index_to_field(i) for i in board.get_moves_as_set()}
+    valid_moves = {
+        Board.index_to_field(i) for i in grand_child_board.get_moves_as_set()
+    }
     seen_first_moves = set()
 
-    # Check each key-value pair
-    for key, value in tree.items():
-        moves = key.split()
-        first_move = moves[0]
-
-        if first_move == "transposition":
-            continue
-
-        # Check for duplicate first moves
-        if first_move in seen_first_moves:
-            raise AssertionError(f"Duplicate first move '{first_move}' at {prefix}")
-        seen_first_moves.add(first_move)
+    # Check each child node
+    for child in tree.children:
+        first_child_move = child.moves.split()[0]
 
         try:
-            child = board.do_move(Board.field_to_index(moves[0]))
-        except InvalidMove as e:
+            Board.field_to_index(first_child_move)
+        except ValueError:
             raise AssertionError(
-                f"Invalid first move '{moves[0]}' at {prefix}: {str(e)}"
+                f"At {prefix}: Invalid first move '{first_child_move}'"
             )
 
-        if moves[1] == "transposition":
-            continue
-
-        try:
-            grand_child = child.do_move(Board.field_to_index(moves[1]))
-        except InvalidMove as e:
+        if first_child_move in seen_first_moves:
             raise AssertionError(
-                f"Invalid second move '{moves[1]}' at {prefix}: {str(e)}"
+                f"At {prefix}: Duplicate first move '{first_child_move}'"
             )
 
-        # Recursively check subtree
-        next_prefix = f"{prefix} {moves[0]} {moves[1]}"
-
-        if isinstance(value, dict):
-            check_tree_integrity(next_prefix, value, grand_child)
-        elif isinstance(value, str):
-            check_leaf_integrity(next_prefix, value, grand_child)
-        elif isinstance(value, list):
-            for value_item in value:
-                check_leaf_integrity(next_prefix, value_item, grand_child)
-        else:
-            raise AssertionError(f"Invalid subtree at {prefix}: {type(value)}")
+        seen_first_moves.add(first_child_move)
 
     # Check if all valid moves are covered
     missing_moves = valid_moves - seen_first_moves
     if missing_moves:
         raise AssertionError(
-            f"Missing valid first moves at {prefix}: {sorted(missing_moves)}"
+            f"At {prefix}: Missing valid first moves: {sorted(missing_moves)}"
         )
 
 
-def check_leaf_integrity(prefix: str, value: str, board: Board) -> None:
-    if "transposition" in value:
+def check_tree_integrity(prefix: str, node: Node, board: Board) -> None:
+    assert board.count_discs() == 4 + len(prefix.split())
+
+    check_move_count(prefix, node)
+    check_child_moves_set(prefix, node, board)
+
+    child_board = check_move_validity(prefix, node, board)
+
+    if node.transposition is not None:
         # TODO validate transposition
         return
 
-    moves = value.split()
+    # This is checked earlier, but the type checker doesn't know that.
+    assert child_board is not None
 
-    if len(moves) == 0:
-        return
+    # Recursively check subtree
+    next_prefix = f"{prefix} {node.moves}"
 
-    if len(moves) != 2:
-        raise AssertionError(f"Invalid leaf move '{value}' at {prefix}")
-
-    try:
-        child = board.do_move(Board.field_to_index(moves[0]))
-    except InvalidMove as e:
-        raise AssertionError(f"Invalid first move '{moves[0]}' at {prefix}: {str(e)}")
-
-    try:
-        child.do_move(Board.field_to_index(moves[1]))
-    except InvalidMove as e:
-        raise AssertionError(f"Invalid second move '{moves[1]}' at {prefix}: {str(e)}")
+    for child in node.children:
+        check_tree_integrity(next_prefix, child, child_board)
 
 
 def test_black_tree_integrity() -> None:
-    assert len(BLACK_TREE) == 1, "Black tree should have exactly one root"
+    assert len(BLACK_TREE.moves.split()) == 1, "Black tree root should have one move"
 
-    key = next(iter(BLACK_TREE.keys()))
+    board = Board.start().do_move(Board.field_to_index(BLACK_TREE.moves))
 
-    board = Board.start().do_move(Board.field_to_index(key))
-    check_tree_integrity(key, BLACK_TREE[key], board)
+    for child in BLACK_TREE.children:
+        check_tree_integrity(BLACK_TREE.moves, child, board)
 
 
 def test_white_tree_integrity() -> None:
+    assert WHITE_TREE.moves == "", "White tree root should have no moves"
+
     board = Board.start()
-    check_tree_integrity("", WHITE_TREE, board)
+
+    for child in WHITE_TREE.children:
+        check_tree_integrity("", child, board)
+
+
+def check_transpositions(tree: Node) -> None:
+    transpositions: dict[NormalizedPosition, str] = {}
+
+    def check_transpositions_recursive(prefix: str, tree: Node, board: Board) -> None:
+        child_board = apply_moves(board, tree.moves.split(), prefix)
+
+        next_prefix = f"{prefix} {tree.moves}".strip()
+
+        normalized = child_board.position.normalized()
+
+        try:
+            found = transpositions[normalized]
+        except KeyError:
+            if tree.transposition is not None:
+                raise AssertionError(f"At {next_prefix}: Transposition not found")
+
+            transpositions[normalized] = next_prefix
+        else:
+            if tree.transposition != found:
+                raise AssertionError(
+                    f"At {next_prefix}: Invalid/missing transposition: {found}"
+                )
+
+        for child in tree.children:
+            check_transpositions_recursive(next_prefix, child, child_board)
+
+    check_transpositions_recursive("", tree, Board.start())
+
+
+def test_black_tree_transpositions() -> None:
+    check_transpositions(BLACK_TREE)
+
+
+def test_white_tree_transpositions() -> None:
+    check_transpositions(WHITE_TREE)
