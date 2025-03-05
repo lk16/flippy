@@ -42,7 +42,7 @@ def apply_moves(board: Board, moves: list[str], prefix: str = "") -> Board:
         try:
             current_board = current_board.do_move(Board.field_to_index(move))
         except InvalidMove:
-            move_context = (move_path + " ".join(moves[:i])).strip()
+            move_context = (move_path + " " + " ".join(moves[:i])).strip()
             raise AssertionError(f"At {move_context}: Invalid move '{move}'")
 
     return current_board
