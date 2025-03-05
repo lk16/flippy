@@ -30,7 +30,7 @@ BLACK_TREE = Node("e6", c=[
             Node("f6 c4", e=7),
         ]),
         Node("b6 b5", e=7, c=[
-            Node("b4 a5", e=10, t='e6 d6 c5 b4 b5 b6 a5'),
+            Node("b4 a5", t='e6 d6 c5 b4 b5 b6 a5'),
             Node("f4 c6", e=13),
             Node("f6 c4", e=7),
         ]),
@@ -67,7 +67,7 @@ BLACK_TREE = Node("e6", c=[
         ]),
         Node("d6 f6", e=4, c=[
             Node("c4 c6", e=4),
-            Node("c6 c4", e=4, t='e6 f4 c3 c6 c4 d6 f6'),
+            Node("c6 c4", t='e6 f4 c3 c6 c4 d6 f6'),
             Node("d3 c5", e=4),
             Node("e7 f5", e=5),
             Node("g6 c7", e=10),
@@ -82,7 +82,7 @@ BLACK_TREE = Node("e6", c=[
     ]),
     Node("f6 f5", e=2, c=[
         Node("d6 c5", e=2, c=[
-            Node("b4 c4", e=10, t='e6 d6 c5 f6 c4 b4 f5'),
+            Node("b4 c4", t='e6 d6 c5 f6 c4 b4 f5'),
             Node("b6 e7", e=11),
             Node("c4 c6", e=5),
             Node("e3 d3", e=2),
@@ -147,9 +147,19 @@ WHITE_TREE = Node("", c=[
             ]),
         ]),
         Node("d3 c4", c=[
-            Node("b3 e7", e=10),
-            Node("b5 e7", e=10),
-            Node("c3 d6", e=2, t='e6 f4 c3 c4 d3 d6'),
+            Node("b3 e7", e=10, c=[
+                Node("f3 d6", e=10),
+                Node("f5 f6", e=14),
+                Node("f7 d6", e=13),
+                Node("g4 c3", e=17),
+            ]),
+            Node("b5 e7", e=10, c=[
+                Node("f3 e3", e=10),
+                Node("f5 f6", e=14),
+                Node("f7 d6", e=10),
+                Node("g4 c3", e=16),
+            ]),
+            Node("c3 d6", t='e6 f4 c3 c4 d3 d6'),
             Node("e3 d6", e=5),
             Node("f3 d6", e=7),
             Node("f5 d6", e=4),
@@ -169,7 +179,7 @@ WHITE_TREE = Node("", c=[
             Node("g4 e7", e=12),
         ]),
         Node("g3 c6", c=[
-            Node("c3 c4", e=13, t='e6 f4 c3 c4 g3 c6'),
+            Node("c3 c4", t='e6 f4 c3 c4 g3 c6'),
             Node("c4 f3", e=11),
             Node("c5 d6", e=12),
             Node("e3 f6", e=12),
