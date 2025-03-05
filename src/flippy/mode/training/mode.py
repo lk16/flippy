@@ -1,13 +1,23 @@
 from __future__ import annotations
 
+import json
 import random
 from typing import Any
 
+from flippy import PROJECT_ROOT
 from flippy.arguments import Arguments
 from flippy.mode.base import BaseMode
 from flippy.mode.training.exercise import Exercise
 from flippy.mode.training.exercise_list import get_exercises
 from flippy.othello.board import Board
+
+EXERCISE_SCORES_PATH = PROJECT_ROOT / ".flippy/exercise_scores.json"
+
+EXERCISE_DEFAULT_SCORE = 100
+EXERCISE_MIN_SCORE = 10
+
+EXERCISE_CORRECT_DIFF = 20
+EXERCISE_INCORRECT_DIFF = 30
 
 
 class NoExercisesLeft(Exception):
@@ -17,38 +27,76 @@ class NoExercisesLeft(Exception):
 class TrainingMode(BaseMode):
     def __init__(self, _: Arguments) -> None:
         self.exercises = get_exercises()
-        self.remaining_exercise_ids = list(range(len(self.exercises)))
         self.move_mistakes: set[int] = set()
         self.exercise_mistakes = False
+        self.current_exercise_id = 0
 
-        print(f"Exercises: {len(self.remaining_exercise_ids)}")
-        random.shuffle(self.remaining_exercise_ids)
+        self.exercise_scores: dict[str, int] = {}
 
-        try:
-            exercise = self.get_exercise()
-        except NoExercisesLeft:
-            self.moves_done = 0
-            self.board = Board.empty()
-        else:
-            self.moves_done = exercise.skipped_initial_moves
-            self.board = exercise.boards[self.moves_done]
+        # Load existing exercise scores from file if available
+        if EXERCISE_SCORES_PATH.exists():
+            self.exercise_scores = json.load(EXERCISE_SCORES_PATH.open())
+
+        # Initialize default scores for any new exercises
+        for exercise in self.exercises:
+            if exercise.raw not in self.exercise_scores:
+                self.exercise_scores[exercise.raw] = EXERCISE_DEFAULT_SCORE
+
+        print(f"Exercises: {len(self.exercises)}")
+
+        # Select the first exercise based on weighted probabilities
+        self.select_weighted_random_exercise()
+        exercise = self.get_exercise()
+        # Initialize the board state to the starting position of the exercise
+        # (skipping any initial moves that are part of the setup)
+        self.moves_done = exercise.skipped_initial_moves
+        self.board = exercise.boards[self.moves_done]
 
     def get_exercise(self) -> Exercise:
-        try:
-            exercise_id = self.remaining_exercise_ids[0]
-        except IndexError as e:
-            raise NoExercisesLeft from e
+        return self.exercises[self.current_exercise_id]
 
-        return self.exercises[exercise_id]
+    def select_weighted_random_exercise(self) -> None:
+        # Update score for current exercise based on performance
+        current_exercise = self.get_exercise()
+        if not self.exercise_mistakes:
+            # Increase score for correct answers (making it less likely to appear)
+            self.exercise_scores[current_exercise.raw] = (
+                self.exercise_scores[current_exercise.raw] + EXERCISE_CORRECT_DIFF
+            )
 
-    def change_exercise(self, keep_current: bool) -> None:
-        try:
-            current_exercise_id = self.remaining_exercise_ids.pop(0)
-        except IndexError as e:
-            raise NoExercisesLeft from e
+        else:
+            # Decrease score for incorrect answers (making it more likely to appear)
+            self.exercise_scores[current_exercise.raw] = max(
+                EXERCISE_MIN_SCORE,
+                self.exercise_scores[current_exercise.raw] - EXERCISE_INCORRECT_DIFF,
+            )
 
-        if keep_current:
-            self.remaining_exercise_ids.append(current_exercise_id)
+        # Save updated scores to file
+        EXERCISE_SCORES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with EXERCISE_SCORES_PATH.open("w") as f:
+            json.dump(self.exercise_scores, f, indent=4, sort_keys=True)
+
+        # Calculate weights (inverse of scores)
+        weights = {}
+        for i, exercise in enumerate(self.exercises):
+            if i == self.current_exercise_id:
+                continue  # Skip the current exercise
+            weights[i] = 1000 / self.exercise_scores[exercise.raw]
+
+        if not weights:
+            raise NoExercisesLeft()
+
+        # Normalize weights to sum to 1
+        total_weight = sum(weights.values())
+        normalized_weights = {ex_id: w / total_weight for ex_id, w in weights.items()}
+
+        # Select an exercise based on weights
+        exercise_ids = list(normalized_weights.keys())
+        weights_list = [normalized_weights[ex_id] for ex_id in exercise_ids]
+
+        self.current_exercise_id = random.choices(
+            exercise_ids, weights=weights_list, k=1
+        )[0]
 
     def get_board(self) -> Board:
         return self.board
@@ -99,7 +147,7 @@ class TrainingMode(BaseMode):
             # End of exercise, find next one.
             # Exercise will come back later if mistakes were made.
 
-            self.change_exercise(keep_current=self.exercise_mistakes)
+            self.select_weighted_random_exercise()
             self.exercise_mistakes = False
 
             try:
