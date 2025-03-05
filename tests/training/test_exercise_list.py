@@ -1,5 +1,3 @@
-from typing import Optional
-
 from flippy.mode.training.exercise import Exercise
 from flippy.mode.training.exercise_list import (
     BLACK_TREE,
@@ -52,7 +50,7 @@ def apply_moves(board: Board, moves: list[str], prefix: str = "") -> Board:
     return current_board
 
 
-def check_move_validity(prefix: str, tree: Node, board: Board) -> Optional[Board]:
+def check_move_validity(prefix: str, tree: Node, board: Board) -> Board:
     moves = tree.moves.split()
     return apply_moves(board, moves, prefix)
 
@@ -110,11 +108,13 @@ def check_tree_integrity(prefix: str, node: Node, board: Board) -> None:
     child_board = check_move_validity(prefix, node, board)
 
     if node.transposition is not None:
-        # TODO validate transposition
-        return
+        if node.children:
+            raise AssertionError(
+                f"At {prefix}: Transposition move should not have children"
+            )
 
-    # This is checked earlier, but the type checker doesn't know that.
-    assert child_board is not None
+        if node.eval is not None:
+            raise AssertionError(f"At {prefix}: Transposition should not have eval")
 
     # Recursively check subtree
     next_prefix = f"{prefix} {node.moves}"
