@@ -37,6 +37,14 @@ class TrainingMode(BaseMode):
         if EXERCISE_SCORES_PATH.exists():
             self.exercise_scores = json.load(EXERCISE_SCORES_PATH.open())
 
+        # Remove exercises that are no longer in the exercise list.
+        exercise_keys = {exercise.raw for exercise in self.exercises}
+        self.exercise_scores = {
+            ex_id: score
+            for ex_id, score in self.exercise_scores.items()
+            if ex_id in exercise_keys
+        }
+
         # Initialize default scores for any new exercises
         for exercise in self.exercises:
             if exercise.raw not in self.exercise_scores:
@@ -56,25 +64,7 @@ class TrainingMode(BaseMode):
         return self.exercises[self.current_exercise_id]
 
     def select_weighted_random_exercise(self) -> None:
-        # Update score for current exercise based on performance
-        current_exercise = self.get_exercise()
-        if not self.exercise_mistakes:
-            # Increase score for correct answers (making it less likely to appear)
-            self.exercise_scores[current_exercise.raw] = (
-                self.exercise_scores[current_exercise.raw] + EXERCISE_CORRECT_DIFF
-            )
-
-        else:
-            # Decrease score for incorrect answers (making it more likely to appear)
-            self.exercise_scores[current_exercise.raw] = max(
-                EXERCISE_MIN_SCORE,
-                self.exercise_scores[current_exercise.raw] - EXERCISE_INCORRECT_DIFF,
-            )
-
-        # Save updated scores to file
-        EXERCISE_SCORES_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with EXERCISE_SCORES_PATH.open("w") as f:
-            json.dump(self.exercise_scores, f, indent=4, sort_keys=True)
+        self.print_exercise_score_distribution()
 
         # Calculate weights (inverse of scores)
         weights = {}
@@ -147,6 +137,14 @@ class TrainingMode(BaseMode):
             # End of exercise, find next one.
             # Exercise will come back later if mistakes were made.
 
+            # Update score for current exercise based on performance
+            self._update_exercise_score(self.exercise_mistakes)
+
+            # Save updated scores to file
+            EXERCISE_SCORES_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with EXERCISE_SCORES_PATH.open("w") as f:
+                json.dump(self.exercise_scores, f, indent=4, sort_keys=True)
+
             self.select_weighted_random_exercise()
             self.exercise_mistakes = False
 
@@ -162,3 +160,53 @@ class TrainingMode(BaseMode):
 
         self.board = exercise.get_next_board(self.board, move, self.moves_done)
         self.moves_done += 2
+
+    def _update_exercise_score(self, had_mistakes: bool) -> None:
+        """Update the score for the current exercise based on performance."""
+        current_exercise = self.get_exercise()
+        key = current_exercise.raw
+
+        if had_mistakes:
+            # Decrease score for incorrect answers (making it more likely to appear)
+            self.exercise_scores[key] = max(
+                EXERCISE_MIN_SCORE,
+                self.exercise_scores[key] - EXERCISE_INCORRECT_DIFF,
+            )
+        else:
+            # Increase score for correct answers (making it less likely to appear)
+            self.exercise_scores[key] += EXERCISE_CORRECT_DIFF
+
+    def print_exercise_score_distribution(self) -> None:
+        """
+        Print a distribution of exercise scores showing:
+        - Score value (higher scores = less likely to appear)
+        - Probability of selection (%) for exercises with that score
+        - Number of exercises with that score
+        - Total probability (%) for all exercises with that score
+
+        This helps visualize how the spaced repetition system is prioritizing exercises
+        based on past performance.
+        """
+        # Group exercises by score
+        score_counts = {}
+        for exercise in self.exercises:
+            score = self.exercise_scores[exercise.raw]
+            if score not in score_counts:
+                score_counts[score] = 0
+            score_counts[score] += 1
+
+        # Calculate total inverse weight for probability calculation
+        total_inverse_weight = sum(
+            1000 / score for score in self.exercise_scores.values()
+        )
+
+        # Sort scores and print distribution
+        print("\nscore       % count  total%")
+
+        for score in sorted(score_counts.keys()):
+            count = score_counts[score]
+
+            probability = 100.0 * (1000 / score) / total_inverse_weight
+            print(
+                f"{score:>5} {probability:6.2f}% {count:>5} {probability * count:6.2f}%"
+            )
