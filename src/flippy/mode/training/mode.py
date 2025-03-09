@@ -16,8 +16,10 @@ EXERCISE_SCORES_PATH = PROJECT_ROOT / ".flippy/exercise_scores.json"
 EXERCISE_DEFAULT_SCORE = 100
 EXERCISE_MIN_SCORE = 10
 
-EXERCISE_CORRECT_DIFF = 20
-EXERCISE_INCORRECT_DIFF = 30
+EXERCISE_CORRECT_DIFF = 30
+EXERCISE_INCORRECT_DIFF = 40
+
+EXERCISE_WEIGHT_POWER = 2.0
 
 
 class NoExercisesLeft(Exception):
@@ -66,12 +68,15 @@ class TrainingMode(BaseMode):
     def select_weighted_random_exercise(self) -> None:
         self.print_exercise_score_distribution()
 
-        # Calculate weights (inverse of scores)
+        # Calculate weights with exponential scaling to emphasize low scores
         weights = {}
         for i, exercise in enumerate(self.exercises):
             if i == self.current_exercise_id:
                 continue  # Skip the current exercise
-            weights[i] = 1000 / self.exercise_scores[exercise.raw]
+            # Use power function to create stronger bias toward low scores
+            weights[i] = (
+                1000 / self.exercise_scores[exercise.raw]
+            ) ** EXERCISE_WEIGHT_POWER
 
         if not weights:
             raise NoExercisesLeft()
@@ -197,7 +202,8 @@ class TrainingMode(BaseMode):
 
         # Calculate total inverse weight for probability calculation
         total_inverse_weight = sum(
-            1000 / score for score in self.exercise_scores.values()
+            (1000 / score) ** EXERCISE_WEIGHT_POWER
+            for score in self.exercise_scores.values()
         )
 
         # Sort scores and print distribution
@@ -206,7 +212,10 @@ class TrainingMode(BaseMode):
         for score in sorted(score_counts.keys()):
             count = score_counts[score]
 
-            probability = 100.0 * (1000 / score) / total_inverse_weight
+            # Apply the same power function used in selection
+            probability = (
+                100.0 * ((1000 / score) ** EXERCISE_WEIGHT_POWER) / total_inverse_weight
+            )
             print(
                 f"{score:>5} {probability:6.2f}% {count:>5} {probability * count:6.2f}%"
             )
