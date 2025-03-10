@@ -24,7 +24,7 @@ organize-pgn = "python src/flippy/commands/pgn_organizer.py"
 analyze-pgn = "python src/flippy/commands/pgn_analyzer.py"
 recent-games = "python src/flippy/commands/recent_games.py"
 book = "python src/flippy/commands/book.py"
-
+training = "python src/flippy/commands/training.py"
 
 [tool.pdm]
 [tool.pdm.dev-dependencies]
