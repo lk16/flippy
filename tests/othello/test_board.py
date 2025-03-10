@@ -13,6 +13,7 @@ from flippy.othello.position import PASS_MOVE
         pytest.param(56, "a8", id="index-56"),
         pytest.param(63, "h8", id="index-63"),
         pytest.param(17, "b3", id="index-17"),
+        pytest.param(PASS_MOVE, "--", id="index-pass"),
     ],
 )
 def test_index_to_field_ok(index: int, expected: str) -> None:
@@ -22,7 +23,7 @@ def test_index_to_field_ok(index: int, expected: str) -> None:
 @pytest.mark.parametrize(
     ["index"],
     [
-        pytest.param(-1, id="too-small"),
+        pytest.param(-2, id="too-small"),
         pytest.param(64, id="too-big"),
     ],
 )
