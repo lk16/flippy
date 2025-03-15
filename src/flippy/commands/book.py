@@ -13,10 +13,17 @@ app = typer.Typer(pretty_exceptions_enable=False)
 
 
 @app.command()
-def server(reload: bool = typer.Option(False)) -> None:
+def server(
+    reload: bool = typer.Option(False),
+    workers: int = typer.Option(1),
+) -> None:
     config = BookServerConfig()
     uvicorn.run(
-        "flippy.book.server:app", host=config.host, port=config.port, reload=reload
+        "flippy.book.server:app",
+        host=config.host,
+        port=config.port,
+        reload=reload,
+        workers=workers,
     )
 
 
