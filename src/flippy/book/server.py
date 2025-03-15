@@ -55,6 +55,7 @@ class ServerState:
             """
             DELETE FROM clients
             WHERE last_heartbeat < CURRENT_TIMESTAMP - INTERVAL '5 minutes'
+            OR last_heartbeat IS NULL
             RETURNING id
             """,
         )
@@ -116,8 +117,8 @@ async def register_client(
     async with conn.transaction():
         await conn.execute(
             """
-            INSERT INTO clients (id, hostname, git_commit, position)
-            VALUES ($1, $2, $3, NULL)
+            INSERT INTO clients (id, hostname, git_commit, position, last_heartbeat)
+            VALUES ($1, $2, $3, NULL, NOW())
             """,
             client_id,
             payload.hostname,
