@@ -29,7 +29,7 @@ CREATE TABLE public.clients (
     id UUID PRIMARY KEY,
     hostname TEXT NOT NULL,
     git_commit TEXT NOT NULL,
-    last_heartbeat TIMESTAMP,
+    last_heartbeat TIMESTAMP NOT NULL,
     position bytea,
     jobs_completed INTEGER NOT NULL DEFAULT 0
 );
