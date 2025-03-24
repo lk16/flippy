@@ -8,7 +8,7 @@ MIN_UI_SEARCH_LEVEL = 8
 MAX_UI_SEARCH_LEVEL = 32
 
 # Maxmium number of discs for a board to be potentially saved in DB.
-MAX_SAVABLE_DISCS = 40
+MAX_SAVABLE_DISCS = 30
 
 
 def get_learn_level(disc_count: int) -> int:
