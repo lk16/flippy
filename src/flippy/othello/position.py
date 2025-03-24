@@ -241,6 +241,9 @@ class Position:
 
     @classmethod
     def index_to_field(cls, index: int) -> str:
+        if index == PASS_MOVE:
+            return "--"
+
         if index not in range(64):
             raise ValueError
         return "abcdefgh"[index % 8] + "12345678"[index // 8]
