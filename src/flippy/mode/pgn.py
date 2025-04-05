@@ -23,7 +23,7 @@ class PGNMode(BaseMode):
     def __init__(self, args: Arguments) -> None:
         self.args = args.pgn
         self.game: Optional[Game] = None
-        self.moves_done = 0
+        self.game_board_index = 0
         self.alternative_moves: list[Board] = []
         self.recv_queue: Queue[EdaxResponse | EdaxEvaluations] = Queue()
         self.evaluations = EdaxEvaluations()
@@ -65,14 +65,14 @@ class PGNMode(BaseMode):
             return
 
         try:
-            next_board = self.game.boards[self.moves_done + 1]
+            next_board = self.game.boards[self.game_board_index + 1]
         except IndexError:
             next_board = None
 
         if next_board is not None and next_board == child:
             # User clicked on square that was actually played in game.
             # We do not handle it as alternative move.
-            self.moves_done += 1
+            self.game_board_index += 1
         else:
             self.alternative_moves.append(child)
 
@@ -99,8 +99,8 @@ class PGNMode(BaseMode):
         if self.alternative_moves:
             return
 
-        max_moves_done = len(self.game.boards) - 1
-        self.moves_done = min(self.moves_done + 1, max_moves_done)
+        if self.game_board_index < len(self.game.boards) - 1:
+            self.game_board_index += 1
 
     def show_prev_position(self) -> None:
         if self.game is None:
@@ -110,7 +110,8 @@ class PGNMode(BaseMode):
             self.alternative_moves.pop()
             return
 
-        self.moves_done = max(self.moves_done - 1, 0)
+        if self.game_board_index > 0:
+            self.game_board_index -= 1
 
     def get_board(self) -> Board:
         if self.game is None:
@@ -119,17 +120,32 @@ class PGNMode(BaseMode):
         if self.alternative_moves:
             return self.alternative_moves[-1]
 
-        return self.game.boards[self.moves_done]
+        return self.game.boards[self.game_board_index]
 
     def get_played_move(self) -> Optional[int]:
-        if (
-            self.game is None
-            or self.moves_done >= len(self.game.moves)
-            or self.alternative_moves
-        ):
+        if self.game is None:
+            # No game selected
             return None
 
-        return self.game.moves[self.moves_done]
+        if self.alternative_moves:
+            # User played some moves that are not part of the game.
+            return None
+
+        current_board = self.game.boards[self.game_board_index]
+
+        try:
+            next_board = self.game.boards[self.game_board_index + 1]
+        except IndexError:
+            # Game ended with current board.
+            return None
+
+        for move in current_board.get_moves_as_set():
+            if current_board.do_move(move) == next_board:
+                return move
+
+        # Last move was a pass move.
+        assert not current_board.has_moves()
+        return None
 
     def select_pgn_file(self) -> Optional[Path]:
         root = tk.Tk()
@@ -147,7 +163,7 @@ class PGNMode(BaseMode):
         pgn_file = Path(file_path)
 
         self.game = Game.from_pgn(pgn_file)
-        self.moves_done = 0
+        self.game_board_index = 0
 
         self.search_game_positions(self.game, MIN_UI_SEARCH_LEVEL)
         return pgn_file
@@ -296,7 +312,7 @@ class PGNMode(BaseMode):
         if self.alternative_moves:
             graph_current_move = None
         else:
-            graph_current_move = self.moves_done
+            graph_current_move = self.game_board_index
 
         ui_details["graph_current_move"] = graph_current_move
         return ui_details
