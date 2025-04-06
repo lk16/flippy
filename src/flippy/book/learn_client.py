@@ -19,6 +19,8 @@ class BookLearningClient:
     def __init__(self) -> None:
         self.api_client = APIClient()
         self.client_id: str | None = None
+        self.finished_job_count = 0
+        self.total_job_time = 0.0  # seconds
 
         threading.Thread(target=self._heartbeat_loop, daemon=True).start()
 
@@ -62,11 +64,24 @@ class BookLearningClient:
                     time.sleep(10)
                     continue
 
-                print("Got a job")
+                position = NormalizedPosition.from_api(job.position).to_position()
+                print(
+                    f"Got job {self.finished_job_count + 1} | {position.count_discs()} discs | learn level {job.level}:"
+                )
+                position.show()
+
                 job_result = self.do_job(job)
 
                 self.submit_result(job_result)
                 print("Submitted result")
+
+                self.finished_job_count += 1
+                self.total_job_time += job_result.computation_time
+                avg_job_time = self.total_job_time / self.finished_job_count
+                print(
+                    f"Total jobs: {self.finished_job_count:>6} | Average time: {avg_job_time:8.3f} sec"
+                )
+                print()
 
             except requests.HTTPError as e:
                 if e.response.status_code == 401:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import struct
 from copy import copy, deepcopy
 from typing import Iterable
@@ -53,6 +54,28 @@ class Position:
     @classmethod
     def empty(cls) -> Position:
         return Position(0x0, 0x0)
+
+    @classmethod
+    def random(cls, disc_count: int) -> Position:
+        if disc_count < 4 or disc_count > 64:
+            raise ValueError(
+                "Cannot create random position with less than 4 or more than 64 discs"
+            )
+
+        position = cls.start()
+
+        while position.count_discs() != disc_count:
+            moves = position.get_moves_as_set()
+
+            if not moves:
+                # We ran into a dead end, start over.
+                position = cls.start()
+                continue
+
+            move = random.choice(list(moves))
+            position = position.do_move(move)
+
+        return position
 
     def __repr__(self) -> str:
         return f"Position({hex(self.me)}, {hex(self.opp)})"
