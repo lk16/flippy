@@ -409,3 +409,38 @@ def test_normalized_position_to_problem(
     position: NormalizedPosition, expected: str
 ) -> None:
     assert position.to_problem() == expected
+
+
+@pytest.mark.parametrize(
+    "disc_count",
+    [
+        pytest.param(3, id="too_few_discs"),
+        pytest.param(65, id="too_many_discs"),
+    ],
+)
+def test_random_invalid_disc_count(disc_count: int) -> None:
+    with pytest.raises(
+        ValueError,
+        match="Cannot create random position with less than 4 or more than 64 discs",
+    ):
+        Position.random(disc_count)
+
+
+@pytest.mark.parametrize(
+    "disc_count",
+    [
+        pytest.param(4, id="minimum_discs"),
+        pytest.param(20, id="mid_game"),
+        pytest.param(64, id="full_board"),
+    ],
+)
+def test_random_valid_disc_count(disc_count: int) -> None:
+    # Test multiple times since it's random
+    for _ in range(5):
+        position = Position.random(disc_count)
+
+        # Check disc count is correct
+        assert position.count_discs() == disc_count
+
+        # Verify no overlapping discs
+        assert position.me & position.opp == 0
