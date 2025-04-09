@@ -190,13 +190,66 @@ async def submit_evaluations(
     _: None = Depends(verify_auth),
     state: ServerState = Depends(get_server_state),
 ) -> Response:
-    for evaluation in payload.evaluations:
-        try:
-            await upsert_evaluation(evaluation, state)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+    if not payload.evaluations:
+        return Response()
 
+    # Validate all evaluations first
+    valid_evaluations = []
+    for serialized_evaluation in payload.evaluations:
+        try:
+            evaluation = serialized_evaluation.to_evaluation()
+            if not evaluation.is_db_savable():
+                continue
+            normalized = NormalizedPosition(evaluation.position)
+            valid_evaluations.append(
+                (
+                    normalized.to_bytes(),
+                    evaluation.position.count_discs(),
+                    evaluation.level,
+                    evaluation.depth,
+                    evaluation.confidence,
+                    evaluation.score,
+                    evaluation.best_moves,
+                )
+            )
+        except ValueError:
+            continue
+
+    if not valid_evaluations:
+        return Response()
+
+    conn = await state.get_db()
+
+    # Create a single VALUES clause with all the data
+    values_clause = ", ".join(
+        [
+            f"(${i * 7 + 1}, ${i * 7 + 2}, ${i * 7 + 3}, ${i * 7 + 4}, ${i * 7 + 5}, ${i * 7 + 6}, ${i * 7 + 7})"
+            for i in range(len(valid_evaluations))
+        ]
+    )
+
+    query = f"""
+        INSERT INTO edax (position, disc_count, level, depth, confidence, score, best_moves)
+        VALUES {values_clause}
+        ON CONFLICT (position)
+        DO UPDATE SET
+            level = EXCLUDED.level,
+            depth = EXCLUDED.depth,
+            confidence = EXCLUDED.confidence,
+            score = EXCLUDED.score,
+            best_moves = EXCLUDED.best_moves
+        WHERE EXCLUDED.level > edax.level
+        """
+
+    # Flatten the list of tuples for the execute parameters
+    params = [item for sublist in valid_evaluations for item in sublist]
+
+    async with conn.transaction():
+        await conn.execute(query, *params)
+
+    # Refresh stats view in background
     background_tasks.add_task(refresh_stats_view, state)
+
     return Response()
 
 
@@ -228,29 +281,17 @@ async def submit_result(
     print(f"Client {client_id} has now completed {completed} positions")
 
     try:
-        await upsert_evaluation(result.evaluation, state)
-        background_tasks.add_task(refresh_stats_view, state)
+        evaluation = result.evaluation.to_evaluation()
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    return Response()
-
-
-async def upsert_evaluation(
-    serialized_evaluation: SerializedEvaluation, state: ServerState
-) -> None:
-    try:
-        evaluation = serialized_evaluation.to_evaluation()
-    except ValueError as e:
-        raise ValueError(f"Evaluation is not valid: {e}") from e
+        raise HTTPException(status_code=400, detail=f"Evaluation is not valid: {e}")
 
     if not evaluation.is_db_savable():
-        raise ValueError("Evaluation is not savable")
+        raise HTTPException(status_code=400, detail="Evaluation is not savable")
 
     try:
         normalized = NormalizedPosition(evaluation.position)
-    except ValueError as e:
-        raise ValueError("Position is not normalized") from e
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Position is not normalized")
 
     conn = await state.get_db()
 
@@ -275,6 +316,10 @@ async def upsert_evaluation(
         evaluation.score,
         evaluation.best_moves,
     )
+
+    background_tasks.add_task(refresh_stats_view, state)
+
+    return Response()
 
 
 @app.get("/api/stats/book")
