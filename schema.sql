@@ -24,12 +24,3 @@ FROM public.edax
 GROUP BY disc_count, level;
 
 CREATE UNIQUE INDEX ON public.edax_stats_view (disc_count, level);
-
-CREATE TABLE public.clients (
-    id UUID PRIMARY KEY,
-    hostname TEXT NOT NULL,
-    git_commit TEXT NOT NULL,
-    last_heartbeat TIMESTAMP NOT NULL,
-    position bytea,
-    jobs_completed INTEGER NOT NULL DEFAULT 0
-);
