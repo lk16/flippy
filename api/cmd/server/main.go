@@ -20,15 +20,20 @@ func main() {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 
+	// Initialize Redis
+	if err := db.InitRedis(); err != nil {
+		log.Fatalf("Failed to initialize Redis: %v", err)
+	}
+
 	// Create repositories
-	clientRepo := repository.NewClientRepository()
-	evalRepo := repository.NewEvaluationRepository()
+	clientRepo := repository.NewClientRepository(db.GetRedis())
+	evalRepo := repository.NewEvaluationRepository(clientRepo, db.GetRedis())
 
 	// Get the path to the static files
 	staticDir := "../src/flippy/book/static"
 
 	// Create handlers
-	clientHandler := handlers.NewClientHandler(clientRepo)
+	clientHandler := handlers.NewClientHandler(clientRepo, db.GetRedis())
 	evalHandler := handlers.NewEvaluationHandler(evalRepo)
 	htmlHandler := handlers.NewHTMLHandler(staticDir)
 

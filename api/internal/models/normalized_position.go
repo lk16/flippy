@@ -44,6 +44,18 @@ func NewNormalizedPositionFromBytes(b []byte) (NormalizedPosition, error) {
 	return newNormalizedPosition(player, opponent)
 }
 
+// NewNormalizedPositionEmpty creates a new normalized position with no discs
+func NewNormalizedPositionEmpty() NormalizedPosition {
+	normalized, err := NewPosition(0, 0)
+	if err != nil {
+		panic(fmt.Sprintf("normalized empty position is invalid: %s", err))
+	}
+
+	return NormalizedPosition{
+		position: normalized,
+	}
+}
+
 // newNormalizedPosition creates a new normalized position from a player and opponent bitboard
 func newNormalizedPosition(player, opponent uint64) (NormalizedPosition, error) {
 	if player&opponent != 0 {
