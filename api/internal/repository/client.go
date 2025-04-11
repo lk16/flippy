@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -101,8 +102,8 @@ func (r *ClientRepository) UpdateHeartbeat(ctx context.Context, clientID string)
 	return nil
 }
 
-// GetClientStats retrieves statistics for all clients
-func (r *ClientRepository) GetClientStats(ctx context.Context) (models.StatsResponse, error) {
+// GetClientStatsList retrieves statistics for all clients
+func (r *ClientRepository) GetClientStatsList(ctx context.Context) (models.StatsResponse, error) {
 	// Get all clients from Redis hash
 	clients, err := r.redis.HGetAll(ctx, clientsKey).Result()
 	if err != nil {
@@ -128,6 +129,23 @@ func (r *ClientRepository) GetClientStats(ctx context.Context) (models.StatsResp
 		ActiveClients: len(stats),
 		ClientStats:   stats,
 	}, nil
+}
+
+var ErrClientNotFound = errors.New("client not found")
+
+// GetClientStats retrieves statistics for a specific client
+func (r *ClientRepository) GetClientStats(ctx context.Context, clientID string) (models.ClientStats, error) {
+	_, err := r.redis.HGet(ctx, clientsKey, clientID).Bytes()
+
+	if err == redis.Nil {
+		return models.ClientStats{}, ErrClientNotFound
+	}
+
+	if err != nil {
+		return models.ClientStats{}, fmt.Errorf("error getting client: %w", err)
+	}
+
+	return models.ClientStats{}, nil
 }
 
 // AssignJob assigns a job to a client

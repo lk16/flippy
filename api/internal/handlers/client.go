@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/gofiber/fiber/v2"
@@ -40,13 +41,26 @@ func (h *ClientHandler) RegisterClient(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(resp)
 }
 
-// Heartbeat handles client heartbeat updates
-func (h *ClientHandler) Heartbeat(c *fiber.Ctx) error {
-	// TODO move this and similar into middleware
+// GetClient handles client registration
+func (h *ClientHandler) getClient(c *fiber.Ctx) (string, error) {
 	clientID := c.Get("client-id")
 	if clientID == "" {
+		return "", errors.New("missing client ID")
+	}
+
+	if _, err := h.clientRepo.GetClientStats(c.Context(), clientID); err != nil {
+		return "", err
+	}
+
+	return clientID, nil
+}
+
+// Heartbeat handles client heartbeat updates
+func (h *ClientHandler) Heartbeat(c *fiber.Ctx) error {
+	clientID, err := h.getClient(c)
+	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "Missing client ID",
+			"error": err.Error(),
 		})
 	}
 
@@ -61,7 +75,7 @@ func (h *ClientHandler) Heartbeat(c *fiber.Ctx) error {
 
 // GetClients returns statistics for all clients
 func (h *ClientHandler) GetClients(c *fiber.Ctx) error {
-	stats, err := h.clientRepo.GetClientStats(c.Context())
+	stats, err := h.clientRepo.GetClientStatsList(c.Context())
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -73,10 +87,10 @@ func (h *ClientHandler) GetClients(c *fiber.Ctx) error {
 
 // GetJob handles job assignment to clients
 func (h *ClientHandler) GetJob(c *fiber.Ctx) error {
-	clientID := c.Get("client-id")
-	if clientID == "" {
+	clientID, err := h.getClient(c)
+	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "Missing client ID",
+			"error": err.Error(),
 		})
 	}
 
@@ -98,10 +112,10 @@ func (h *ClientHandler) GetJob(c *fiber.Ctx) error {
 
 // SubmitJobResult handles job result submission
 func (h *ClientHandler) SubmitJobResult(c *fiber.Ctx) error {
-	clientID := c.Get("client-id")
-	if clientID == "" {
+	clientID, err := h.getClient(c)
+	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "Missing client ID",
+			"error": err.Error(),
 		})
 	}
 
