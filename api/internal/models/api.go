@@ -1,7 +1,11 @@
 package models
 
 import (
+	"fmt"
 	"time"
+
+	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 )
 
 // RegisterRequest represents the payload for client registration
@@ -39,19 +43,11 @@ type Job struct {
 
 // JobResult represents the result of a completed job
 type JobResult struct {
-	Evaluation SerializedEvaluation `json:"evaluation"`
+	Evaluation Evaluation `json:"evaluation"`
 }
 
-// Evaluation represents an evaluation in the database
+// Evaluation represents an evaluation result
 type Evaluation struct {
-	Position  NormalizedPosition `json:"position" db:"position"`
-	Score     int                `json:"score" db:"score"`
-	Level     int                `json:"level" db:"level"`
-	DiscCount int                `json:"disc_count" db:"disc_count"`
-}
-
-// SerializedEvaluation represents an evaluation result
-type SerializedEvaluation struct {
 	Position   NormalizedPosition `json:"position"`
 	Level      int                `json:"level"`
 	Depth      int                `json:"depth"`
@@ -67,5 +63,29 @@ type LookupPositionsPayload struct {
 
 // EvaluationsPayload represents a batch of evaluations to submit
 type EvaluationsPayload struct {
-	Evaluations []SerializedEvaluation `json:"evaluations"`
+	Evaluations []Evaluation `json:"evaluations"`
+}
+
+// ScanRow scans a database row into an Evaluation struct
+func (e *Evaluation) ScanRow(rows *sqlx.Rows) error {
+	var positionBytes []byte
+	var bestMoves []int64
+
+	if err := rows.Scan(&positionBytes, &e.Level, &e.Depth, &e.Confidence, &e.Score, pq.Array(&bestMoves)); err != nil {
+		return fmt.Errorf("error scanning evaluation: %w", err)
+	}
+
+	var err error
+	e.Position, err = NewNormalizedPositionFromBytes(positionBytes)
+	if err != nil {
+		return fmt.Errorf("error parsing position: %w", err)
+	}
+
+	// Convert int64 array to int array
+	e.BestMoves = make([]int, len(bestMoves))
+	for i, move := range bestMoves {
+		e.BestMoves[i] = int(move)
+	}
+
+	return nil
 }

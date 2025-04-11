@@ -115,7 +115,7 @@ func (h *ClientHandler) SubmitJobResult(c *fiber.Ctx) error {
 	evalRepo := repository.NewEvaluationRepository(h.clientRepo, h.redis)
 
 	payload := models.EvaluationsPayload{
-		Evaluations: []models.SerializedEvaluation{result.Evaluation},
+		Evaluations: []models.Evaluation{result.Evaluation},
 	}
 
 	if err := evalRepo.SubmitEvaluations(c.Context(), payload); err != nil {

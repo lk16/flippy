@@ -48,12 +48,7 @@ func (h *EvaluationHandler) LookupPositions(c *fiber.Ctx) error {
 		})
 	}
 
-	positions := make([]string, len(payload.Positions))
-	for i, position := range payload.Positions {
-		positions[i] = position.String()
-	}
-
-	evaluations, err := h.evalRepo.LookupPositions(c.Context(), positions)
+	evaluations, err := h.evalRepo.LookupPositions(c.Context(), payload.Positions)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),

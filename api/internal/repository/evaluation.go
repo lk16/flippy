@@ -86,17 +86,35 @@ func (r *EvaluationRepository) SubmitEvaluations(ctx context.Context, payload mo
 }
 
 // LookupPositions looks up evaluations for given positions
-func (r *EvaluationRepository) LookupPositions(ctx context.Context, positions []string) ([]models.SerializedEvaluation, error) {
+func (r *EvaluationRepository) LookupPositions(ctx context.Context, positions []models.NormalizedPosition) ([]models.Evaluation, error) {
+	positionsBytes := make([][]byte, len(positions))
+	for i, position := range positions {
+		positionsBytes[i] = position.Bytes()
+	}
+
 	query := `
 		SELECT position, level, depth, confidence, score, best_moves
 		FROM edax
 		WHERE position = ANY($1)
 	`
 
-	var evaluations []models.SerializedEvaluation
-	err := r.db.SelectContext(ctx, &evaluations, query, positions)
+	rows, err := r.db.QueryxContext(ctx, query, pq.Array(positionsBytes))
 	if err != nil {
 		return nil, fmt.Errorf("error looking up positions: %w", err)
+	}
+	defer rows.Close()
+
+	evaluations := make([]models.Evaluation, 0)
+	for rows.Next() {
+		var eval models.Evaluation
+		if err := eval.ScanRow(rows); err != nil {
+			return nil, fmt.Errorf("error scanning evaluation: %w", err)
+		}
+		evaluations = append(evaluations, eval)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
 	return evaluations, nil
