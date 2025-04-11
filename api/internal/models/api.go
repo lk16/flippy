@@ -17,11 +17,12 @@ type RegisterResponse struct {
 
 // ClientStats represents client statistics
 type ClientStats struct {
-	ID                string    `json:"id" db:"id"`
-	Hostname          string    `json:"hostname" db:"hostname"`
-	GitCommit         string    `json:"git_commit" db:"git_commit"`
-	PositionsComputed int       `json:"positions_computed" db:"positions_computed"`
-	LastActive        time.Time `json:"last_active" db:"last_active"`
+	ID                string             `json:"id"`
+	Hostname          string             `json:"hostname"`
+	GitCommit         string             `json:"git_commit"`
+	PositionsComputed int                `json:"positions_computed"`
+	LastActive        time.Time          `json:"last_active"`
+	Position          NormalizedPosition `json:"position"`
 }
 
 // StatsResponse represents the response for client statistics

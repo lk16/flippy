@@ -6,15 +6,18 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/lk16/flippy/api/internal/models"
 	"github.com/lk16/flippy/api/internal/repository"
+	"github.com/redis/go-redis/v9"
 )
 
 type ClientHandler struct {
 	clientRepo *repository.ClientRepository
+	redis      *redis.Client
 }
 
-func NewClientHandler(clientRepo *repository.ClientRepository) *ClientHandler {
+func NewClientHandler(clientRepo *repository.ClientRepository, redis *redis.Client) *ClientHandler {
 	return &ClientHandler{
 		clientRepo: clientRepo,
+		redis:      redis,
 	}
 }
 
@@ -77,14 +80,7 @@ func (h *ClientHandler) GetJob(c *fiber.Ctx) error {
 		})
 	}
 
-	// Prune inactive clients first
-	if err := h.clientRepo.PruneInactiveClients(c.Context()); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	repo := repository.NewEvaluationRepository()
+	repo := repository.NewEvaluationRepository(h.clientRepo, h.redis)
 	job, err := repo.GetJob(c.Context(), clientID)
 
 	if err == repository.ErrNoJobsAvailable {
@@ -116,7 +112,7 @@ func (h *ClientHandler) SubmitJobResult(c *fiber.Ctx) error {
 		})
 	}
 
-	evalRepo := repository.NewEvaluationRepository()
+	evalRepo := repository.NewEvaluationRepository(h.clientRepo, h.redis)
 
 	payload := models.EvaluationsPayload{
 		Evaluations: []models.SerializedEvaluation{result.Evaluation},

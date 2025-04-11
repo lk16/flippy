@@ -20,8 +20,6 @@ func InitDB() error {
 		os.Getenv("FLIPPY_POSTGRES_DB"),
 	)
 
-	fmt.Println("Connecting to database with DSN:", dsn)
-
 	var err error
 	db, err = sqlx.Connect("postgres", dsn)
 	if err != nil {

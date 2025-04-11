@@ -6,22 +6,33 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
 	"github.com/lk16/flippy/api/internal/db"
 	"github.com/lk16/flippy/api/internal/models"
+	"github.com/redis/go-redis/v9"
+)
+
+const (
+	positionsKey = "positions_to_learn"
+	positionsTTL = 5 * time.Minute
 )
 
 // EvaluationRepository handles database operations for evaluations
 type EvaluationRepository struct {
-	db *sqlx.DB
+	db         *sqlx.DB
+	clientRepo *ClientRepository
+	redis      *redis.Client
 }
 
 // NewEvaluationRepository creates a new EvaluationRepository
-func NewEvaluationRepository() *EvaluationRepository {
+func NewEvaluationRepository(clientRepo *ClientRepository, redis *redis.Client) *EvaluationRepository {
 	return &EvaluationRepository{
-		db: db.GetDB(),
+		db:         db.GetDB(),
+		clientRepo: clientRepo,
+		redis:      redis,
 	}
 }
 
@@ -196,11 +207,11 @@ func sum(m map[int]int) int {
 // ErrNoJobsAvailable is returned when there are no more jobs to process
 var ErrNoJobsAvailable = errors.New("no jobs available")
 
-// GetJob retrieves the next available job from the database
-func (r *EvaluationRepository) GetJob(ctx context.Context, clientID string) (models.Job, error) {
+// refreshCachedAvailableJobs refreshes the cache of available jobs
+func (r *EvaluationRepository) refreshCachedAvailableJobs(ctx context.Context) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return models.Job{}, fmt.Errorf("error starting transaction: %w", err)
+		return fmt.Errorf("error starting transaction: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -220,7 +231,7 @@ func (r *EvaluationRepository) GetJob(ctx context.Context, clientID string) (mod
 	var rows []statRow
 	err = tx.SelectContext(ctx, &rows, query)
 	if err != nil {
-		return models.Job{}, fmt.Errorf("error getting stats: %w", err)
+		return fmt.Errorf("error getting stats: %w", err)
 	}
 
 	// Find learnable disc counts
@@ -231,9 +242,10 @@ func (r *EvaluationRepository) GetJob(ctx context.Context, clientID string) (mod
 		}
 	}
 
+	takenPositionsBytes := r.clientRepo.GetTakenPositionsBytes(ctx)
+
 	// Try to find job at different disc counts, starting with the lowest
-	var positionBytes []byte
-	var discCount int
+	var positionBytes [][]byte
 	for _, dc := range learnableDiscCounts {
 		learnLevel := getLearnLevel(dc)
 		query = `
@@ -241,58 +253,107 @@ func (r *EvaluationRepository) GetJob(ctx context.Context, clientID string) (mod
 			FROM edax
 			WHERE disc_count = $1
 			AND level < $2
-			AND position NOT IN (
-				SELECT position
-				FROM clients
-				WHERE position IS NOT NULL
-			)
+			AND position NOT IN ($3)
 			ORDER BY RANDOM()
-			LIMIT 1
+			LIMIT 500
 		`
 
-		err = tx.GetContext(ctx, &positionBytes, query, dc, learnLevel)
+		err = tx.SelectContext(ctx, &positionBytes, query, dc, learnLevel, pq.Array(takenPositionsBytes))
 
 		if err == sql.ErrNoRows {
 			continue
 		}
 
 		if err != nil {
-			return models.Job{}, fmt.Errorf("error getting position: %w", err)
+			return fmt.Errorf("error getting position: %w", err)
 		}
 
-		discCount = dc
 		break
 	}
 
-	if len(positionBytes) == 0 {
-		return models.Job{}, ErrNoJobsAvailable
+	positions := make([]models.NormalizedPosition, 0, len(positionBytes))
+	for _, positionBytes := range positionBytes {
+		position, err := models.NewNormalizedPositionFromBytes(positionBytes)
+		if err != nil {
+			return fmt.Errorf("error parsing position: %w", err)
+		}
+		positions = append(positions, position)
 	}
 
-	// Store the assigned job in client state
-	query = `
-		UPDATE clients
-		SET position = $1
-		WHERE id = $2
-	`
-
-	_, err = tx.ExecContext(ctx, query, positionBytes, clientID)
-	if err != nil {
-		return models.Job{}, fmt.Errorf("error updating client: %w", err)
+	// Convert positions to strings and push to Redis
+	positionStrings := make([]string, 0, len(positions))
+	for _, pos := range positions {
+		positionStrings = append(positionStrings, pos.String())
 	}
 
-	if err = tx.Commit(); err != nil {
-		return models.Job{}, fmt.Errorf("error committing transaction: %w", err)
+	if len(positionStrings) > 0 {
+		// Delete existing list and set new values atomically
+		err = r.redis.Del(ctx, positionsKey).Err()
+		if err != nil {
+			return fmt.Errorf("error deleting positions from Redis: %w", err)
+		}
+
+		// Push new positions to Redis
+		err = r.redis.RPush(ctx, positionsKey, positionStrings).Err()
+		if err != nil {
+			return fmt.Errorf("error pushing positions to Redis: %w", err)
+		}
+
+		// Set TTL
+		err = r.redis.Expire(ctx, positionsKey, positionsTTL).Err()
+		if err != nil {
+			return fmt.Errorf("error setting Redis TTL: %w", err)
+		}
 	}
 
-	position, err := models.NewNormalizedPositionFromBytes(positionBytes)
+	return nil
+}
+
+// createJobFromPosition creates a job from a position string
+func (r *EvaluationRepository) createJobFromPosition(ctx context.Context, clientID string, posStr string) (models.Job, error) {
+	position, err := models.NewNormalizedPositionFromString(posStr)
 	if err != nil {
 		return models.Job{}, fmt.Errorf("error parsing position: %w", err)
 	}
 
-	return models.Job{
+	job := models.Job{
 		Position: position,
-		Level:    getLearnLevel(discCount),
-	}, nil
+		Level:    getLearnLevel(position.CountDiscs()),
+	}
+
+	r.clientRepo.AssignJob(ctx, clientID, job)
+	return job, nil
+}
+
+// GetJob retrieves the next available job from the database
+func (r *EvaluationRepository) GetJob(ctx context.Context, clientID string) (models.Job, error) {
+	// First try to get a position from Redis
+	posStr, err := r.redis.LPop(ctx, positionsKey).Result()
+	if err == nil {
+		return r.createJobFromPosition(ctx, clientID, posStr)
+	}
+
+	if err != redis.Nil {
+		return models.Job{}, fmt.Errorf("error getting position from Redis: %w", err)
+	}
+
+	// If Redis is empty, try to refresh the cache
+	err = r.refreshCachedAvailableJobs(ctx)
+	if err != nil {
+		return models.Job{}, fmt.Errorf("error refreshing job cache: %w", err)
+	}
+
+	// Try Redis again after refresh
+	posStr, err = r.redis.LPop(ctx, positionsKey).Result()
+	if err == nil {
+		return r.createJobFromPosition(ctx, clientID, posStr)
+	}
+
+	if err == redis.Nil {
+		return models.Job{}, ErrNoJobsAvailable
+	}
+
+	return models.Job{}, fmt.Errorf("error getting position from Redis: %w", err)
 }
 
 // getLearnLevel returns the target level for a given disc count
