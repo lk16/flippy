@@ -8,10 +8,10 @@ import (
 	"sort"
 	"time"
 
-	"github.com/jmoiron/sqlx"
+	"github.com/gofiber/fiber/v2"
 	"github.com/lib/pq"
-	"github.com/lk16/flippy/api/internal/db"
 	"github.com/lk16/flippy/api/internal/models"
+	"github.com/lk16/flippy/api/internal/services"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -22,22 +22,20 @@ const (
 
 // EvaluationRepository handles database operations for evaluations
 type EvaluationRepository struct {
-	db         *sqlx.DB
-	clientRepo *ClientRepository
-	redis      *redis.Client
+	services *services.Services
 }
 
 // NewEvaluationRepository creates a new EvaluationRepository
-func NewEvaluationRepository(clientRepo *ClientRepository, redis *redis.Client) *EvaluationRepository {
+func NewEvaluationRepository(c *fiber.Ctx) *EvaluationRepository {
 	return &EvaluationRepository{
-		db:         db.GetDB(),
-		clientRepo: clientRepo,
-		redis:      redis,
+		services: c.Locals("services").(*services.Services),
 	}
 }
 
 // SubmitEvaluations submits a batch of evaluations
-func (r *EvaluationRepository) SubmitEvaluations(ctx context.Context, payload models.EvaluationsPayload) error {
+func (repo *EvaluationRepository) SubmitEvaluations(ctx context.Context, payload models.EvaluationsPayload) error {
+	pgConn := repo.services.Postgres
+
 	if len(payload.Evaluations) == 0 {
 		return nil
 	}
@@ -77,7 +75,7 @@ func (r *EvaluationRepository) SubmitEvaluations(ctx context.Context, payload mo
 		WHERE EXCLUDED.level > edax.level
 	`, valuesClause)
 
-	_, err := r.db.ExecContext(ctx, query, params...)
+	_, err := pgConn.ExecContext(ctx, query, params...)
 	if err != nil {
 		return fmt.Errorf("error submitting evaluations: %w", err)
 	}
@@ -86,7 +84,9 @@ func (r *EvaluationRepository) SubmitEvaluations(ctx context.Context, payload mo
 }
 
 // LookupPositions looks up evaluations for given positions
-func (r *EvaluationRepository) LookupPositions(ctx context.Context, positions []models.NormalizedPosition) ([]models.Evaluation, error) {
+func (repo *EvaluationRepository) LookupPositions(ctx context.Context, positions []models.NormalizedPosition) ([]models.Evaluation, error) {
+	pgConn := repo.services.Postgres
+
 	positionsBytes := make([][]byte, len(positions))
 	for i, position := range positions {
 		positionsBytes[i] = position.Bytes()
@@ -98,7 +98,7 @@ func (r *EvaluationRepository) LookupPositions(ctx context.Context, positions []
 		WHERE position = ANY($1)
 	`
 
-	rows, err := r.db.QueryxContext(ctx, query, pq.Array(positionsBytes))
+	rows, err := pgConn.QueryxContext(ctx, query, pq.Array(positionsBytes))
 	if err != nil {
 		return nil, fmt.Errorf("error looking up positions: %w", err)
 	}
@@ -121,10 +121,12 @@ func (r *EvaluationRepository) LookupPositions(ctx context.Context, positions []
 }
 
 // RefreshStatsView refreshes the materialized view for statistics
-func (r *EvaluationRepository) RefreshStatsView(ctx context.Context) error {
+func (repo *EvaluationRepository) RefreshStatsView(ctx context.Context) error {
+	pgConn := repo.services.Postgres
+
 	query := `REFRESH MATERIALIZED VIEW edax_stats_view`
 
-	_, err := r.db.ExecContext(ctx, query)
+	_, err := pgConn.ExecContext(ctx, query)
 	if err != nil {
 		return fmt.Errorf("error refreshing stats view: %w", err)
 	}
@@ -133,7 +135,9 @@ func (r *EvaluationRepository) RefreshStatsView(ctx context.Context) error {
 }
 
 // GetBookStats returns statistics about positions in the database
-func (r *EvaluationRepository) GetBookStats(ctx context.Context) ([][]string, error) {
+func (repo *EvaluationRepository) GetBookStats(ctx context.Context) ([][]string, error) {
+	pgConn := repo.services.Postgres
+
 	query := `
 		SELECT disc_count, level, count
 		FROM edax_stats_view
@@ -147,7 +151,7 @@ func (r *EvaluationRepository) GetBookStats(ctx context.Context) ([][]string, er
 	}
 
 	var stats []statRow
-	err := r.db.SelectContext(ctx, &stats, query)
+	err := pgConn.SelectContext(ctx, &stats, query)
 	if err != nil {
 		return nil, fmt.Errorf("error getting book stats: %w", err)
 	}
@@ -226,8 +230,11 @@ func sum(m map[int]int) int {
 var ErrNoJobsAvailable = errors.New("no jobs available")
 
 // refreshCachedAvailableJobs refreshes the cache of available jobs
-func (r *EvaluationRepository) refreshCachedAvailableJobs(ctx context.Context) error {
-	tx, err := r.db.BeginTxx(ctx, nil)
+func (repo *EvaluationRepository) refreshCachedAvailableJobs(ctx context.Context) error {
+	pgConn := repo.services.Postgres
+	redisConn := repo.services.Redis
+
+	tx, err := pgConn.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("error starting transaction: %w", err)
 	}
@@ -260,7 +267,8 @@ func (r *EvaluationRepository) refreshCachedAvailableJobs(ctx context.Context) e
 		}
 	}
 
-	takenPositionsBytes := r.clientRepo.GetTakenPositionsBytes(ctx)
+	clientRepo := NewClientRepositoryFromServices(repo.services)
+	takenPositionsBytes := clientRepo.GetTakenPositionsBytes(ctx)
 
 	// Try to find job at different disc counts, starting with the lowest
 	var positionBytes [][]byte
@@ -306,19 +314,19 @@ func (r *EvaluationRepository) refreshCachedAvailableJobs(ctx context.Context) e
 
 	if len(positionStrings) > 0 {
 		// Delete existing list and set new values atomically
-		err = r.redis.Del(ctx, positionsKey).Err()
+		err = redisConn.Del(ctx, positionsKey).Err()
 		if err != nil {
 			return fmt.Errorf("error deleting positions from Redis: %w", err)
 		}
 
 		// Push new positions to Redis
-		err = r.redis.RPush(ctx, positionsKey, positionStrings).Err()
+		err = redisConn.RPush(ctx, positionsKey, positionStrings).Err()
 		if err != nil {
 			return fmt.Errorf("error pushing positions to Redis: %w", err)
 		}
 
 		// Set TTL
-		err = r.redis.Expire(ctx, positionsKey, positionsTTL).Err()
+		err = redisConn.Expire(ctx, positionsKey, positionsTTL).Err()
 		if err != nil {
 			return fmt.Errorf("error setting Redis TTL: %w", err)
 		}
@@ -328,7 +336,7 @@ func (r *EvaluationRepository) refreshCachedAvailableJobs(ctx context.Context) e
 }
 
 // createJobFromPosition creates a job from a position string
-func (r *EvaluationRepository) createJobFromPosition(ctx context.Context, clientID string, posStr string) (models.Job, error) {
+func (repo *EvaluationRepository) createJobFromPosition(ctx context.Context, clientID string, posStr string) (models.Job, error) {
 	position, err := models.NewNormalizedPositionFromString(posStr)
 	if err != nil {
 		return models.Job{}, fmt.Errorf("error parsing position: %w", err)
@@ -339,16 +347,19 @@ func (r *EvaluationRepository) createJobFromPosition(ctx context.Context, client
 		Level:    getLearnLevel(position.CountDiscs()),
 	}
 
-	r.clientRepo.AssignJob(ctx, clientID, job)
+	clientRepo := NewClientRepositoryFromServices(repo.services)
+	clientRepo.AssignJob(ctx, clientID, job)
 	return job, nil
 }
 
 // GetJob retrieves the next available job from the database
-func (r *EvaluationRepository) GetJob(ctx context.Context, clientID string) (models.Job, error) {
+func (repo *EvaluationRepository) GetJob(ctx context.Context, clientID string) (models.Job, error) {
+	redisConn := repo.services.Redis
+
 	// First try to get a position from Redis
-	posStr, err := r.redis.LPop(ctx, positionsKey).Result()
+	posStr, err := redisConn.LPop(ctx, positionsKey).Result()
 	if err == nil {
-		return r.createJobFromPosition(ctx, clientID, posStr)
+		return repo.createJobFromPosition(ctx, clientID, posStr)
 	}
 
 	if err != redis.Nil {
@@ -356,15 +367,15 @@ func (r *EvaluationRepository) GetJob(ctx context.Context, clientID string) (mod
 	}
 
 	// If Redis is empty, try to refresh the cache
-	err = r.refreshCachedAvailableJobs(ctx)
+	err = repo.refreshCachedAvailableJobs(ctx)
 	if err != nil {
 		return models.Job{}, fmt.Errorf("error refreshing job cache: %w", err)
 	}
 
 	// Try Redis again after refresh
-	posStr, err = r.redis.LPop(ctx, positionsKey).Result()
+	posStr, err = redisConn.LPop(ctx, positionsKey).Result()
 	if err == nil {
-		return r.createJobFromPosition(ctx, clientID, posStr)
+		return repo.createJobFromPosition(ctx, clientID, posStr)
 	}
 
 	if err == redis.Nil {

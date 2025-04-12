@@ -7,23 +7,10 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/lk16/flippy/api/internal/models"
 	"github.com/lk16/flippy/api/internal/repository"
-	"github.com/redis/go-redis/v9"
 )
 
-type ClientHandler struct {
-	clientRepo *repository.ClientRepository
-	redis      *redis.Client
-}
-
-func NewClientHandler(clientRepo *repository.ClientRepository, redis *redis.Client) *ClientHandler {
-	return &ClientHandler{
-		clientRepo: clientRepo,
-		redis:      redis,
-	}
-}
-
 // RegisterClient handles client registration
-func (h *ClientHandler) RegisterClient(c *fiber.Ctx) error {
+func RegisterClient(c *fiber.Ctx) error {
 	var req models.RegisterRequest
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -31,7 +18,8 @@ func (h *ClientHandler) RegisterClient(c *fiber.Ctx) error {
 		})
 	}
 
-	resp, err := h.clientRepo.RegisterClient(c.Context(), req)
+	repo := repository.NewClientRepository(c)
+	resp, err := repo.RegisterClient(c.Context(), req)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -42,13 +30,14 @@ func (h *ClientHandler) RegisterClient(c *fiber.Ctx) error {
 }
 
 // GetClient handles client registration
-func (h *ClientHandler) getClient(c *fiber.Ctx) (string, error) {
+func GetClient(c *fiber.Ctx) (string, error) {
 	clientID := c.Get("client-id")
 	if clientID == "" {
 		return "", errors.New("missing client ID")
 	}
 
-	if _, err := h.clientRepo.GetClientStats(c.Context(), clientID); err != nil {
+	repo := repository.NewClientRepository(c)
+	if _, err := repo.GetClientStats(c.Context(), clientID); err != nil {
 		return "", err
 	}
 
@@ -56,15 +45,16 @@ func (h *ClientHandler) getClient(c *fiber.Ctx) (string, error) {
 }
 
 // Heartbeat handles client heartbeat updates
-func (h *ClientHandler) Heartbeat(c *fiber.Ctx) error {
-	clientID, err := h.getClient(c)
+func Heartbeat(c *fiber.Ctx) error {
+	clientID, err := GetClient(c)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": err.Error(),
 		})
 	}
 
-	if err := h.clientRepo.UpdateHeartbeat(c.Context(), clientID); err != nil {
+	repo := repository.NewClientRepository(c)
+	if err := repo.UpdateHeartbeat(c.Context(), clientID); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
 		})
@@ -74,8 +64,9 @@ func (h *ClientHandler) Heartbeat(c *fiber.Ctx) error {
 }
 
 // GetClients returns statistics for all clients
-func (h *ClientHandler) GetClients(c *fiber.Ctx) error {
-	stats, err := h.clientRepo.GetClientStatsList(c.Context())
+func GetClients(c *fiber.Ctx) error {
+	repo := repository.NewClientRepository(c)
+	stats, err := repo.GetClientStatsList(c.Context())
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -86,15 +77,15 @@ func (h *ClientHandler) GetClients(c *fiber.Ctx) error {
 }
 
 // GetJob handles job assignment to clients
-func (h *ClientHandler) GetJob(c *fiber.Ctx) error {
-	clientID, err := h.getClient(c)
+func GetJob(c *fiber.Ctx) error {
+	clientID, err := GetClient(c)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": err.Error(),
 		})
 	}
 
-	repo := repository.NewEvaluationRepository(h.clientRepo, h.redis)
+	repo := repository.NewEvaluationRepository(c)
 	job, err := repo.GetJob(c.Context(), clientID)
 
 	if err == repository.ErrNoJobsAvailable {
@@ -111,8 +102,8 @@ func (h *ClientHandler) GetJob(c *fiber.Ctx) error {
 }
 
 // SubmitJobResult handles job result submission
-func (h *ClientHandler) SubmitJobResult(c *fiber.Ctx) error {
-	clientID, err := h.getClient(c)
+func SubmitJobResult(c *fiber.Ctx) error {
+	clientID, err := GetClient(c)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": err.Error(),
@@ -126,7 +117,7 @@ func (h *ClientHandler) SubmitJobResult(c *fiber.Ctx) error {
 		})
 	}
 
-	evalRepo := repository.NewEvaluationRepository(h.clientRepo, h.redis)
+	evalRepo := repository.NewEvaluationRepository(c)
 
 	payload := models.EvaluationsPayload{
 		Evaluations: []models.Evaluation{result.Evaluation},
@@ -142,7 +133,8 @@ func (h *ClientHandler) SubmitJobResult(c *fiber.Ctx) error {
 	go evalRepo.RefreshStatsView(c.Context())
 
 	// Mark job as completed
-	if err := h.clientRepo.CompleteJob(c.Context(), clientID); err != nil {
+	repo := repository.NewClientRepository(c)
+	if err := repo.CompleteJob(c.Context(), clientID); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
 		})

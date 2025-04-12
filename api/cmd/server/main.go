@@ -8,33 +8,28 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
-	"github.com/lk16/flippy/api/internal/db"
 	"github.com/lk16/flippy/api/internal/handlers"
 	"github.com/lk16/flippy/api/internal/middleware"
-	"github.com/lk16/flippy/api/internal/repository"
+	"github.com/lk16/flippy/api/internal/services"
 )
 
 func main() {
 	// Initialize database
-	if err := db.InitDB(); err != nil {
+	postgres, err := services.InitPostgres()
+	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 
 	// Initialize Redis
-	if err := db.InitRedis(); err != nil {
+	redis, err := services.InitRedis()
+	if err != nil {
 		log.Fatalf("Failed to initialize Redis: %v", err)
 	}
-
-	// Create repositories
-	clientRepo := repository.NewClientRepository(db.GetRedis())
-	evalRepo := repository.NewEvaluationRepository(clientRepo, db.GetRedis())
 
 	// Get the path to the static files
 	staticDir := "../src/flippy/book/static"
 
 	// Create handlers
-	clientHandler := handlers.NewClientHandler(clientRepo, db.GetRedis())
-	evalHandler := handlers.NewEvaluationHandler(evalRepo)
 	htmlHandler := handlers.NewHTMLHandler(staticDir)
 
 	// Create auth config
@@ -48,6 +43,15 @@ func main() {
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  5 * time.Second,
 		BodyLimit:    1024 * 1024, // 1MB
+	})
+
+	// Setup connections to external services in Fiber app
+	app.Use(func(c *fiber.Ctx) error {
+		c.Locals("services", &services.Services{
+			Postgres: postgres,
+			Redis:    redis,
+		})
+		return c.Next()
 	})
 
 	// Add logging middleware
@@ -66,16 +70,16 @@ func main() {
 	apiGroup := app.Group("/api", middleware.AuthOrToken(authConfig))
 
 	// Client routes
-	apiGroup.Post("/learn-clients/register", clientHandler.RegisterClient)
-	apiGroup.Post("/learn-clients/heartbeat", clientHandler.Heartbeat)
-	apiGroup.Get("/learn-clients", clientHandler.GetClients)
-	apiGroup.Get("/job", clientHandler.GetJob)
-	apiGroup.Post("/job/result", clientHandler.SubmitJobResult)
+	apiGroup.Post("/learn-clients/register", handlers.RegisterClient)
+	apiGroup.Post("/learn-clients/heartbeat", handlers.Heartbeat)
+	apiGroup.Get("/learn-clients", handlers.GetClients)
+	apiGroup.Get("/job", handlers.GetJob)
+	apiGroup.Post("/job/result", handlers.SubmitJobResult)
 
 	// Evaluation routes
-	apiGroup.Post("/evaluations", evalHandler.SubmitEvaluations)
-	apiGroup.Post("/positions/lookup", evalHandler.LookupPositions)
-	apiGroup.Get("/stats/book", evalHandler.GetBookStats)
+	apiGroup.Post("/evaluations", handlers.SubmitEvaluations)
+	apiGroup.Post("/positions/lookup", handlers.LookupPositions)
+	apiGroup.Get("/stats/book", handlers.GetBookStats)
 
 	// HTML routes with basic auth
 	htmlGroup := app.Group("", middleware.BasicAuth(authConfig))

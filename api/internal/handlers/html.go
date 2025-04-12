@@ -6,6 +6,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+// TODO remove this handler struct
 type HTMLHandler struct {
 	staticDir string
 }
