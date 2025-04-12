@@ -1,28 +1,28 @@
 package handlers
 
 import (
+	"net/http"
 	"path/filepath"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/filesystem"
 )
 
-// TODO remove this handler struct
-type HTMLHandler struct {
-	staticDir string
-}
+const StaticDir = "../src/flippy/book/static"
 
-func NewHTMLHandler(staticDir string) *HTMLHandler {
-	return &HTMLHandler{
-		staticDir: staticDir,
-	}
+func StaticHandler() fiber.Handler {
+	return filesystem.New(filesystem.Config{
+		Root:   http.Dir(StaticDir),
+		Browse: false,
+	})
 }
 
 // ShowClients serves the clients.html page
-func (h *HTMLHandler) ShowClients(c *fiber.Ctx) error {
-	return c.SendFile(filepath.Join(h.staticDir, "clients.html"))
+func ClientsPage(c *fiber.Ctx) error {
+	return c.SendFile(filepath.Join(StaticDir, "clients.html"))
 }
 
 // ShowBook serves the book.html page
-func (h *HTMLHandler) ShowBook(c *fiber.Ctx) error {
-	return c.SendFile(filepath.Join(h.staticDir, "book.html"))
+func BookPage(c *fiber.Ctx) error {
+	return c.SendFile(filepath.Join(StaticDir, "book.html"))
 }

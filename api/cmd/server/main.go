@@ -2,12 +2,10 @@ package main
 
 import (
 	"log"
-	"net/http"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
-	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/lk16/flippy/api/internal/handlers"
 	"github.com/lk16/flippy/api/internal/middleware"
 	"github.com/lk16/flippy/api/internal/services"
@@ -25,12 +23,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize Redis: %v", err)
 	}
-
-	// Get the path to the static files
-	staticDir := "../src/flippy/book/static"
-
-	// Create handlers
-	htmlHandler := handlers.NewHTMLHandler(staticDir)
 
 	// Create auth config
 	authConfig := middleware.NewBasicAuthConfig()
@@ -60,12 +52,6 @@ func main() {
 	// Add CORS middleware
 	app.Use(cors.New())
 
-	// Serve static files
-	app.Use("/static", filesystem.New(filesystem.Config{
-		Root:   http.Dir(staticDir),
-		Browse: false,
-	}))
-
 	// Create API group with auth middleware
 	apiGroup := app.Group("/api", middleware.AuthOrToken(authConfig))
 
@@ -81,10 +67,13 @@ func main() {
 	apiGroup.Post("/positions/lookup", handlers.LookupPositions)
 	apiGroup.Get("/stats/book", handlers.GetBookStats)
 
+	// Serve static files
+	app.Use("/static", handlers.StaticHandler())
+
 	// HTML routes with basic auth
 	htmlGroup := app.Group("", middleware.BasicAuth(authConfig))
-	htmlGroup.Get("/", htmlHandler.ShowClients)
-	htmlGroup.Get("/book", htmlHandler.ShowBook)
+	htmlGroup.Get("/", handlers.ClientsPage)
+	htmlGroup.Get("/book", handlers.BookPage)
 
 	// Start server
 	log.Fatal(app.Listen("0.0.0.0:4444"))
