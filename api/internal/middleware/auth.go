@@ -1,53 +1,45 @@
 package middleware
 
 import (
-	"os"
-
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/basicauth"
+	"github.com/lk16/flippy/api/internal/config"
 )
 
-// BasicAuthConfig holds the configuration for basic auth
-type BasicAuthConfig struct {
-	Username string
-	Password string
-}
-
-// NewBasicAuthConfig creates a new basic auth config from environment variables
-func NewBasicAuthConfig() *BasicAuthConfig {
-	return &BasicAuthConfig{
-		Username: os.Getenv("FLIPPY_BOOK_SERVER_BASIC_AUTH_USER"),
-		Password: os.Getenv("FLIPPY_BOOK_SERVER_BASIC_AUTH_PASS"),
-	}
-}
-
 // BasicAuth middleware that checks for basic auth credentials
-func BasicAuth(config *BasicAuthConfig) fiber.Handler {
-	unauthorizedHandler := func(c *fiber.Ctx) error {
-		// This triggers the browser to show a login dialog
-		c.Set("WWW-Authenticate", `Basic realm="Restricted"`)
+func BasicAuth() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		cfg := c.Locals("config").(*config.Config)
 
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "Unauthorized",
+		username := cfg.BasicAuthUsername
+		password := cfg.BasicAuthPassword
+
+		unauthorizedHandler := func(c *fiber.Ctx) error {
+			// This triggers the browser to show a login dialog
+			c.Set("WWW-Authenticate", `Basic realm="Restricted"`)
+
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Unauthorized",
+			})
+		}
+
+		handler := basicauth.New(basicauth.Config{
+			Users: map[string]string{
+				username: password,
+			},
+			Realm:        "Restricted",
+			Unauthorized: unauthorizedHandler,
 		})
-	}
 
-	return basicauth.New(basicauth.Config{
-		Users: map[string]string{
-			config.Username: config.Password,
-		},
-		Realm:        "Restricted",
-		Unauthorized: unauthorizedHandler,
-	})
+		return handler(c)
+	}
 }
 
 // AuthOrToken middleware that accepts either basic auth or a token header
-func AuthOrToken(config *BasicAuthConfig) fiber.Handler {
-	// Get the expected token from environment
-	expectedToken := os.Getenv("FLIPPY_BOOK_SERVER_TOKEN")
-	basicAuth := BasicAuth(config)
-
+func AuthOrToken() fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		cfg := c.Locals("config").(*config.Config)
+
 		// Skip auth for /api/learn-clients/register
 		if c.Path() == "/api/learn-clients/register" {
 			return c.Next()
@@ -55,11 +47,11 @@ func AuthOrToken(config *BasicAuthConfig) fiber.Handler {
 
 		// Check for token header first
 		token := c.Get("x-token")
-		if token != "" && token == expectedToken {
+		if token != "" && token == cfg.Token {
 			return c.Next()
 		}
 
 		// If no valid token, try basic auth
-		return basicAuth(c)
+		return BasicAuth()(c)
 	}
 }

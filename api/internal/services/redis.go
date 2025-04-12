@@ -3,21 +3,14 @@ package services
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/redis/go-redis/v9"
 )
 
 // Connect initializes the Redis connection
-func InitRedis() (*redis.Client, error) {
-	// Get Redis URL from environment variable
-	redisURL := os.Getenv("FLIPPY_REDIS_URL")
-	if redisURL == "" {
-		return nil, fmt.Errorf("FLIPPY_REDIS_URL is not set")
-	}
-
+func InitRedis(url string) (*redis.Client, error) {
 	// Parse Redis URL
-	opts, err := redis.ParseURL(redisURL)
+	opts, err := redis.ParseURL(url)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing Redis URL: %w", err)
 	}
