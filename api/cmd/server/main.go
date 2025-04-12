@@ -5,10 +5,9 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/lk16/flippy/api/internal/config"
-	"github.com/lk16/flippy/api/internal/handlers"
 	"github.com/lk16/flippy/api/internal/middleware"
+	"github.com/lk16/flippy/api/internal/routes"
 	"github.com/lk16/flippy/api/internal/services"
 )
 
@@ -42,31 +41,8 @@ func main() {
 	// Add logging middleware
 	app.Use(middleware.Logging())
 
-	// Add CORS middleware
-	app.Use(cors.New())
-
-	// Create API group with auth middleware
-	apiGroup := app.Group("/api", middleware.AuthOrToken())
-
-	// Client routes
-	apiGroup.Post("/learn-clients/register", handlers.RegisterClient)
-	apiGroup.Post("/learn-clients/heartbeat", handlers.Heartbeat)
-	apiGroup.Get("/learn-clients", handlers.GetClients)
-	apiGroup.Get("/job", handlers.GetJob)
-	apiGroup.Post("/job/result", handlers.SubmitJobResult)
-
-	// Evaluation routes
-	apiGroup.Post("/evaluations", handlers.SubmitEvaluations)
-	apiGroup.Post("/positions/lookup", handlers.LookupPositions)
-	apiGroup.Get("/stats/book", handlers.GetBookStats)
-
-	// Serve static files
-	app.Use("/static", handlers.StaticHandler())
-
-	// HTML routes with basic auth
-	htmlGroup := app.Group("", middleware.BasicAuth())
-	htmlGroup.Get("/", handlers.ClientsPage)
-	htmlGroup.Get("/book", handlers.BookPage)
+	// Setup all routes
+	routes.SetupRoutes(app)
 
 	// Start server
 	address := cfg.ServerHost + ":" + cfg.ServerPort
