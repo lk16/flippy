@@ -58,6 +58,7 @@ class APIClient:
                 kwargs["json"] = json
 
         response = requests.get(f"{self.server_url}{path}", **kwargs)
+
         response.raise_for_status()
         return response
 
