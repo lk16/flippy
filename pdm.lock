@@ -5,7 +5,7 @@
 groups = ["default", "dev"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:2030d46c13a73ccc32610bb01f712b1f8937632a33252fb60ea53215fb45f95b"
+content_hash = "sha256:19ff37aceffe4d20ef4257981b6d1b0ca9175920161522abb9fa4803c72c7aa0"
 
 [[metadata.targets]]
 requires_python = "==3.12.*"
@@ -742,6 +742,16 @@ files = [
 ]
 
 [[package]]
+name = "pytz"
+version = "2025.2"
+summary = "World timezone definitions, modern and historical"
+groups = ["default"]
+files = [
+    {file = "pytz-2025.2-py2.py3-none-any.whl", hash = "sha256:5ddf76296dd8c44c26eb8f4b6f35488f3ccbf6fbbd7adee0b7262d43f0ec2f00"},
+    {file = "pytz-2025.2.tar.gz", hash = "sha256:360b9e3dbb49a209c21ad61809c7fb453643e048b38924c765813546746e81c3"},
+]
+
+[[package]]
 name = "pyyaml"
 version = "6.0.2"
 requires_python = ">=3.8"
@@ -933,6 +943,17 @@ dependencies = [
 files = [
     {file = "types-PyScreeze-1.0.1.20240822.tar.gz", hash = "sha256:ee44c1accffb42ec9ca2ab9f3e959077aed363c38557d979cb8bf02029c8b0e1"},
     {file = "types_PyScreeze-1.0.1.20240822-py3-none-any.whl", hash = "sha256:0641ffece1006ce43e0c111a336e14d515ae16b8275e8f9c33e7e0001455a81e"},
+]
+
+[[package]]
+name = "types-pytz"
+version = "2025.2.0.20250326"
+requires_python = ">=3.9"
+summary = "Typing stubs for pytz"
+groups = ["dev"]
+files = [
+    {file = "types_pytz-2025.2.0.20250326-py3-none-any.whl", hash = "sha256:3c397fd1b845cd2b3adc9398607764ced9e578a98a5d1fbb4a9bc9253edfb162"},
+    {file = "types_pytz-2025.2.0.20250326.tar.gz", hash = "sha256:deda02de24f527066fc8d6a19e284ab3f3ae716a42b4adb6b40e75e408c08d36"},
 ]
 
 [[package]]

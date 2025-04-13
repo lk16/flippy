@@ -1,5 +1,6 @@
 import json
 import os
+import pytz
 import requests
 import time
 import typer
@@ -134,20 +135,32 @@ class OthelloQuestDownloader:
         white_player = players[1]
 
         # Parse and format the date and time using datetime
-        created_datetime = datetime.fromisoformat(
+        utc_datetime = datetime.fromisoformat(
             game_data["created"].replace("Z", "+00:00")
         )
-        formatted_date = created_datetime.strftime("%Y.%m.%d")
-        formatted_time = created_datetime.strftime("%H:%M:%S")
+        utc_timezone = pytz.UTC
+        copenhagen_timezone = pytz.timezone("Europe/Copenhagen")
+
+        # Convert to Copenhagen time for filename
+        copenhagen_datetime = utc_datetime.replace(tzinfo=utc_timezone).astimezone(
+            copenhagen_timezone
+        )
+        formatted_date = copenhagen_datetime.strftime("%Y.%m.%d")
+        formatted_time = copenhagen_datetime.strftime("%H:%M:%S")
 
         board = Board.start()
 
         for entry in moves:
-            move = entry["m"]
-            if move == "-":
+            try:
+                entry = entry["m"]
+            except KeyError:
+                # If a player resigns, there is no move
+                continue
+
+            if entry == "-":
                 field = PASS_MOVE
             else:
-                field = Board.field_to_index(move)
+                field = Board.field_to_index(entry)
 
             board = board.do_move(field)
 
@@ -175,12 +188,16 @@ class OthelloQuestDownloader:
         # Add the moves
         move_line = []
 
-        for i, move in enumerate(moves):
+        for i, entry in enumerate(moves):
             move_number = (i // 2) + 1
             if i % 2 == 0:  # Black's move
                 move_line.append(f"{move_number}.")
 
-            move = move["m"]
+            try:
+                move = entry["m"]
+            except KeyError:
+                # If a player resigns, there is no move
+                continue
 
             if move == "-":
                 move = "--"
