@@ -1,12 +1,251 @@
+import json
 import os
 import requests
+import time
 import typer
+import websocket
 from datetime import datetime
 from itertools import count
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 from flippy.config import PgnConfig
+from flippy.othello.board import BLACK, WHITE, Board
 from flippy.othello.game import Game
+from flippy.othello.position import PASS_MOVE
+
+MSG_CONNECTED_PLAYERS = "f19683a8"
+MSG_ANNOUNCE_CLIENT = "efa2bd1b"
+MSG_ANNOUNCE_ACCOUNT = "b9345c05"
+MSG_GAME_TRANSCRIPT = "ba276087"
+
+
+class OthelloQuestDownloader:
+    def __init__(self) -> None:
+        self.ws: websocket.WebSocket | None = None
+        self.message_counter = 0
+        self.verbose = "DEBUG_OTHELLO_QUEST" in os.environ
+
+    def get_websocket_suffix(self) -> str:
+        timestamp = int(time.time() * 1000)
+        response = requests.get(
+            f"http://questgames.net:3002/socket.io/1/?t={timestamp}"
+        )
+        response.raise_for_status()
+        return response.text.split(":")[0]
+
+    def connect(self) -> None:
+        """Connect to the Othello Quest WebSocket server."""
+        suffix = self.get_websocket_suffix()
+        ws_url = f"ws://questgames.net:3002/socket.io/1/websocket/{suffix}"
+
+        self.ws = websocket.create_connection(ws_url)
+
+    def disconnect(self) -> None:
+        """Disconnect from the Othello Quest WebSocket server."""
+        if self.ws:
+            self.ws.close()
+            self.ws = None
+
+    def send_message(self, number: int, data: Dict[str, Any] | None) -> None:
+        """Send a message to the Othello Quest server."""
+        if not self.ws:
+            raise RuntimeError("Not connected to server")
+
+        if data is None:
+            message = f"{number}::"
+        else:
+            message = f"{number}:::{json.dumps(data)}"
+
+        if self.verbose:
+            print(f"> {message}")
+
+        self.ws.send(message)
+        self.message_counter += 1
+
+    def receive_message(self) -> tuple[int, Dict[str, Any] | None]:
+        """Receive a message from the Othello Quest server."""
+        if not self.ws:
+            raise RuntimeError("Not connected to server")
+
+        response = str(self.ws.recv())
+
+        if ":::" in response:
+            number_char, msg = response.split(":::", 1)
+        elif "::" in response:
+            number_char, msg = response.split("::", 1)
+        else:
+            print(f"Received unexpected message: {response}")
+            exit(1)
+
+        number = int(number_char)
+
+        if msg == "":
+            parsed_msg = None
+        else:
+            try:
+                parsed_msg = json.loads(msg)
+            except json.JSONDecodeError:
+                print(f"Received invalid JSON: {msg}")
+                exit(1)
+
+        print_response = True
+
+        if number == 5:
+            assert parsed_msg is not None
+
+            # Ignore update on number of connected players
+            if parsed_msg["name"] == MSG_CONNECTED_PLAYERS:
+                print_response = False
+
+        if self.verbose and print_response:
+            print(f"< {response}")
+
+        return number, parsed_msg
+
+    def wait_for_message_without_type(self, number: int) -> None:
+        while True:
+            recv_number, recv_msg = self.receive_message()
+
+            if recv_number == number and recv_msg is None:
+                return recv_msg
+
+    def wait_for_message_with_type(
+        self, number: int, message_type: Optional[str]
+    ) -> Dict[str, Any]:
+        while True:
+            recv_number, recv_msg = self.receive_message()
+
+            if (
+                recv_number == number
+                and recv_msg is not None
+                and recv_msg["name"] == message_type
+            ):
+                return recv_msg
+
+    def generate_pgn_file(self, data: Dict[str, Any]) -> str:
+        """Generate a PGN string from the game data."""
+        game_data = data["args"][0]
+        players = game_data["players"]
+        moves = game_data["position"]["moves"]
+
+        # First player is black, second is white
+        black_player = players[0]
+        white_player = players[1]
+
+        # Parse and format the date and time using datetime
+        created_datetime = datetime.fromisoformat(
+            game_data["created"].replace("Z", "+00:00")
+        )
+        formatted_date = created_datetime.strftime("%Y.%m.%d")
+        formatted_time = created_datetime.strftime("%H:%M:%S")
+
+        board = Board.start()
+
+        for entry in moves:
+            move = entry["m"]
+            if move == "-":
+                field = PASS_MOVE
+            else:
+                field = Board.field_to_index(move)
+
+            board = board.do_move(field)
+
+        black_discs = board.count(BLACK)
+        white_discs = board.count(WHITE)
+
+        # Create the PGN header
+        pgn = [
+            '[Event "Online game"]',
+            '[Site "questgames.net"]',
+            f'[Date "{formatted_date}"]',
+            f'[Time "{formatted_time}"]',
+            '[Round "-"]',
+            f'[White "{white_player["name"]}"]',
+            f'[Black "{black_player["name"]}"]',
+            f'[Result "{black_discs}-{white_discs}"]',
+            f'[WhiteRating "{white_player["oldR"]:.0f}"]',
+            f'[BlackRating "{black_player["oldR"]:.0f}"]',
+            '[Termination "normal"]',
+            f'[TimeControl "{game_data["tcb"] / 1000:.0f}"]',
+            f'[UTCDate "{formatted_date}"]',
+            "",
+        ]
+
+        # Add the moves
+        move_line = []
+
+        for i, move in enumerate(moves):
+            move_number = (i // 2) + 1
+            if i % 2 == 0:  # Black's move
+                move_line.append(f"{move_number}.")
+
+            move = move["m"]
+
+            if move == "-":
+                move = "--"
+
+            move_line.append(move)
+
+        # Combine everything
+        pgn.append(" ".join(move_line))
+        pgn_string = "\n".join(pgn)
+        return pgn_string
+
+    def run(self) -> str:
+        self.connect()
+        self.wait_for_message_without_type(1)
+
+        if self.verbose:
+            print("Got message indicating connection is established.")
+
+        # ---
+
+        message = {
+            "name": MSG_ANNOUNCE_CLIENT,
+            "args": [{"env": "WEB", "handicapV": "1", "gtype": "reversi"}],
+        }
+
+        self.send_message(5, message)
+        self.wait_for_message_with_type(5, MSG_CONNECTED_PLAYERS)
+
+        if self.verbose:
+            print("Announced client successfully.")
+
+        # ---
+
+        message = {
+            "name": MSG_ANNOUNCE_ACCOUNT,
+            "args": [{"gtype": "reversi", "pass": "3p2enzmwh6"}],
+        }
+
+        self.send_message(5, message)
+        msg = self.wait_for_message_with_type(5, MSG_ANNOUNCE_ACCOUNT)
+
+        if self.verbose:
+            print("Announced account successfully.")
+
+        token = msg["args"][0]["token"]
+        last_game = msg["args"][0]["lastGame"]
+
+        # ---
+
+        message = {
+            "name": MSG_GAME_TRANSCRIPT,
+            "args": [{"id": last_game, "user_id": "lk16_", "token": token}],
+        }
+
+        self.send_message(5, message)
+        msg = self.wait_for_message_with_type(5, MSG_GAME_TRANSCRIPT)
+
+        if self.verbose:
+            print("Got game transcript successfully.")
+
+        self.disconnect()
+
+        # ---
+
+        return self.generate_pgn_file(msg)
 
 
 class PgnOrganizer:
@@ -26,6 +265,11 @@ class PgnOrganizer:
 
         if newly_downloaded != 0:
             print(f"Downloaded {newly_downloaded} PGN files from playok")
+
+        newly_downloaded = self.download_from_othello_quest()
+
+        if newly_downloaded != 0:
+            print(f"Downloaded {newly_downloaded} PGN files from othello quest")
 
     def move_from_source_folders(self) -> int:
         pgn_files: list[tuple[Path, datetime]] = []
@@ -115,6 +359,19 @@ class PgnOrganizer:
             file.write_text(raw_pgn)
 
         return new_files
+
+    def download_from_othello_quest(self) -> int:
+        downloader = OthelloQuestDownloader()
+        pgn_string = downloader.run()
+        game = Game.from_string(pgn_string)
+        file = self.get_organized_path(game, datetime.now())
+        file.parent.mkdir(exist_ok=True, parents=True)
+
+        if file.exists():
+            return 0
+
+        file.write_text(pgn_string)
+        return 1
 
 
 app = typer.Typer(pretty_exceptions_enable=False)
