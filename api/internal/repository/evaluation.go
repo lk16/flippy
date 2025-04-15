@@ -16,8 +16,11 @@ import (
 )
 
 const (
-	positionsKey = "positions_to_learn"
-	positionsTTL = 5 * time.Minute
+	positionsKey        = "positions_to_learn"
+	positionsTTL        = 5 * time.Minute
+	cacheRefreshLockKey = "positions_to_learn_refresh_lock"
+	cacheRefreshLockTTL = 10 * time.Second
+	popRetryInterval    = 200 * time.Millisecond
 )
 
 // EvaluationRepository handles database operations for evaluations
@@ -352,11 +355,10 @@ func (repo *EvaluationRepository) createJobFromPosition(ctx context.Context, cli
 	return job, nil
 }
 
-// GetJob retrieves the next available job from the database
-func (repo *EvaluationRepository) GetJob(ctx context.Context, clientID string) (models.Job, error) {
+// tryPopJob attempts to get a job from Redis
+func (repo *EvaluationRepository) tryPopJob(ctx context.Context, clientID string) (models.Job, error) {
 	redisConn := repo.services.Redis
 
-	// First try to get a position from Redis
 	posStr, err := redisConn.LPop(ctx, positionsKey).Result()
 	if err == nil {
 		return repo.createJobFromPosition(ctx, clientID, posStr)
@@ -366,23 +368,51 @@ func (repo *EvaluationRepository) GetJob(ctx context.Context, clientID string) (
 		return models.Job{}, fmt.Errorf("error getting position from Redis: %w", err)
 	}
 
-	// If Redis is empty, try to refresh the cache
-	err = repo.refreshCachedAvailableJobs(ctx)
+	return models.Job{}, ErrNoJobsAvailable
+}
+
+// GetJob retrieves the next available job from the database
+func (repo *EvaluationRepository) GetJob(ctx context.Context, clientID string) (models.Job, error) {
+	// First try to get a position from Redis
+	job, err := repo.tryPopJob(ctx, clientID)
+	if err != ErrNoJobsAvailable {
+		return job, err
+	}
+
+	// Try to acquire the lock for cache refresh
+	redisConn := repo.services.Redis
+	lockAcquired, err := redisConn.SetNX(ctx, cacheRefreshLockKey, "1", cacheRefreshLockTTL).Result()
 	if err != nil {
-		return models.Job{}, fmt.Errorf("error refreshing job cache: %w", err)
+		return models.Job{}, fmt.Errorf("error acquiring cache refresh lock: %w", err)
 	}
 
-	// Try Redis again after refresh
-	posStr, err = redisConn.LPop(ctx, positionsKey).Result()
-	if err == nil {
-		return repo.createJobFromPosition(ctx, clientID, posStr)
+	if lockAcquired {
+		// We got the lock, we're responsible for refreshing the cache
+
+		// Ensure lock is released
+		defer redisConn.Del(ctx, cacheRefreshLockKey)
+
+		err = repo.refreshCachedAvailableJobs(ctx)
+		if err != nil {
+			return models.Job{}, fmt.Errorf("error refreshing job cache: %w", err)
+		}
+
+		// No need to retry, we just refreshed the cache.
+		return repo.tryPopJob(ctx, clientID)
 	}
 
-	if err == redis.Nil {
-		return models.Job{}, ErrNoJobsAvailable
+	// We are more patient in case we don't get the lock,
+	// because we can't distuingish the refresh leading to no jobs available and refresh not being done.
+	for i := 0; i < 10; i++ {
+		job, err := repo.tryPopJob(ctx, clientID)
+		if err != ErrNoJobsAvailable {
+			return job, err
+		}
+		time.Sleep(popRetryInterval)
 	}
 
-	return models.Job{}, fmt.Errorf("error getting position from Redis: %w", err)
+	// If we didn't get the lock, return no jobs available
+	return models.Job{}, ErrNoJobsAvailable
 }
 
 // getLearnLevel returns the target level for a given disc count
