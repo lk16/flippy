@@ -61,9 +61,6 @@ func SubmitJobResult(c *fiber.Ctx) error {
 		})
 	}
 
-	// Refresh stats view in background
-	go evalRepo.RefreshStatsView(c.Context())
-
 	// Mark job as completed
 	repo := repository.NewClientRepository(c)
 	if err := repo.CompleteJob(c.Context(), clientID); err != nil {
