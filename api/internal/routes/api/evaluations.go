@@ -22,8 +22,5 @@ func SubmitEvaluations(c *fiber.Ctx) error {
 		})
 	}
 
-	// Refresh stats view in background
-	go repo.RefreshStatsView(c.Context())
-
 	return c.SendStatus(fiber.StatusOK)
 }

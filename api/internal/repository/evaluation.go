@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -21,6 +22,7 @@ const (
 	cacheRefreshLockKey = "positions_to_learn_refresh_lock"
 	cacheRefreshLockTTL = 10 * time.Second
 	popRetryInterval    = 200 * time.Millisecond
+	bookStatsKey        = "book_stats"
 )
 
 // EvaluationRepository handles database operations for evaluations
@@ -32,6 +34,12 @@ type EvaluationRepository struct {
 func NewEvaluationRepository(c *fiber.Ctx) *EvaluationRepository {
 	return &EvaluationRepository{
 		services: c.Locals("services").(*services.Services),
+	}
+}
+
+func NewEvaluationRepositoryFromServices(services *services.Services) *EvaluationRepository {
+	return &EvaluationRepository{
+		services: services,
 	}
 }
 
@@ -66,6 +74,11 @@ func (repo *EvaluationRepository) SubmitEvaluations(ctx context.Context, payload
 	}
 
 	query := fmt.Sprintf(`
+		WITH current_level AS (
+			SELECT level
+			FROM edax
+			WHERE position = $1
+		)
 		INSERT INTO edax (position, disc_count, level, depth, confidence, score, best_moves)
 		VALUES %s
 		ON CONFLICT (position)
@@ -76,11 +89,43 @@ func (repo *EvaluationRepository) SubmitEvaluations(ctx context.Context, payload
 			score = EXCLUDED.score,
 			best_moves = EXCLUDED.best_moves
 		WHERE EXCLUDED.level > edax.level
+		RETURNING
+			(SELECT level FROM current_level) as old_level,
+			level as new_level,
+			disc_count;
 	`, valuesClause)
 
-	_, err := pgConn.ExecContext(ctx, query, params...)
+	rows, err := pgConn.QueryxContext(ctx, query, params...)
 	if err != nil {
 		return fmt.Errorf("error submitting evaluations: %w", err)
+	}
+	defer rows.Close()
+
+	redisChanges := make(map[string]int)
+
+	for rows.Next() {
+		var oldLevel sql.NullInt64
+		var newLevel, discCount int
+		if err := rows.Scan(&oldLevel, &newLevel, &discCount); err != nil {
+			return fmt.Errorf("error scanning evaluation: %w", err)
+		}
+
+		if oldLevel.Valid {
+			redisChanges[fmt.Sprintf("%d:%d", discCount, oldLevel.Int64)]--
+		}
+		redisChanges[fmt.Sprintf("%d:%d", discCount, newLevel)]++
+	}
+
+	redisConn := repo.services.Redis
+
+	// Update Redis in a single pipeline
+	pipe := redisConn.Pipeline()
+	for key, count := range redisChanges {
+		pipe.HIncrBy(ctx, bookStatsKey, key, int64(count))
+	}
+	_, err = pipe.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("error updating Redis stats: %w", err)
 	}
 
 	return nil
@@ -123,28 +168,14 @@ func (repo *EvaluationRepository) LookupPositions(ctx context.Context, positions
 	return evaluations, nil
 }
 
-// RefreshStatsView refreshes the materialized view for statistics
-func (repo *EvaluationRepository) RefreshStatsView(ctx context.Context) error {
+func (repo *EvaluationRepository) RefreshBookStats(ctx context.Context) error {
 	pgConn := repo.services.Postgres
-
-	query := `REFRESH MATERIALIZED VIEW edax_stats_view`
-
-	_, err := pgConn.ExecContext(ctx, query)
-	if err != nil {
-		return fmt.Errorf("error refreshing stats view: %w", err)
-	}
-
-	return nil
-}
-
-// GetBookStats returns statistics about positions in the database
-func (repo *EvaluationRepository) GetBookStats(ctx context.Context) ([][]string, error) {
-	pgConn := repo.services.Postgres
+	redisConn := repo.services.Redis
 
 	query := `
-		SELECT disc_count, level, count
-		FROM edax_stats_view
-		ORDER BY disc_count, level
+		SELECT disc_count, level, count(*)
+		FROM edax
+		GROUP BY disc_count, level
 	`
 
 	type statRow struct {
@@ -156,23 +187,61 @@ func (repo *EvaluationRepository) GetBookStats(ctx context.Context) ([][]string,
 	var stats []statRow
 	err := pgConn.SelectContext(ctx, &stats, query)
 	if err != nil {
-		return nil, fmt.Errorf("error getting book stats: %w", err)
+		return fmt.Errorf("error loading book stats: %w", err)
 	}
 
-	// Group stats by disc count and level
+	// Create a map to store the stats
+	statsMap := make(map[string]interface{})
+	for _, stat := range stats {
+		key := fmt.Sprintf("%d:%d", stat.DiscCount, stat.Level)
+		statsMap[key] = stat.Count
+	}
+
+	// Store in Redis hash
+	err = redisConn.HSet(ctx, bookStatsKey, statsMap).Err()
+	if err != nil {
+		return fmt.Errorf("error storing book stats in Redis: %w", err)
+	}
+
+	return nil
+}
+
+// GetBookStats returns statistics about positions in the database
+func (repo *EvaluationRepository) GetBookStats(ctx context.Context) ([][]string, error) {
+	redisConn := repo.services.Redis
+
+	// Get all stats from Redis
+	stats, err := redisConn.HGetAll(ctx, bookStatsKey).Result()
+	if err != nil {
+		return nil, fmt.Errorf("error getting book stats from Redis: %w", err)
+	}
+
 	discCounts := make(map[int]bool)
 	levels := make(map[int]bool)
 	lookup := make(map[[2]int]int)
 	levelTotals := make(map[int]int)
 	discTotals := make(map[int]int)
 
-	for _, row := range stats {
-		discCounts[row.DiscCount] = true
-		levels[row.Level] = true
-		lookup[[2]int{row.DiscCount, row.Level}] = row.Count
+	for key, value := range stats {
+		// Parse disc_count:level key
+		var discCount, level int
+		_, err := fmt.Sscanf(key, "%d:%d", &discCount, &level)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing book stats key: %w", err)
+		}
 
-		levelTotals[row.Level] += row.Count
-		discTotals[row.DiscCount] += row.Count
+		// Parse count value
+		count, err := strconv.Atoi(value)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing book stats value: %w", err)
+		}
+
+		discCounts[discCount] = true
+		levels[level] = true
+		lookup[[2]int{discCount, level}] = count
+
+		levelTotals[level] += count
+		discTotals[discCount] += count
 	}
 
 	// Convert sets to sorted slices
@@ -243,17 +312,20 @@ func (repo *EvaluationRepository) refreshCachedAvailableJobs(ctx context.Context
 	}
 	defer tx.Rollback()
 
+	// TODO use repo.GetBookStats() instead of calling DB directly
+
 	// Find disc counts that have positions needing work
 	query := `
-		SELECT disc_count, level
-		FROM edax_stats_view
-		WHERE count > 0
+		SELECT disc_count, level, count(*)
+		FROM edax
+		GROUP BY disc_count, level
 		ORDER BY disc_count, level
 	`
 
 	type statRow struct {
 		DiscCount int `db:"disc_count"`
 		Level     int `db:"level"`
+		Count     int `db:"count"`
 	}
 
 	var rows []statRow
