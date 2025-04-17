@@ -13,9 +13,9 @@ func SetupRoutes(app *fiber.App) {
 	apiGroup.Post("/learn-clients/register", RegisterClient)
 	apiGroup.Post("/learn-clients/heartbeat", Heartbeat)
 	apiGroup.Get("/learn-clients", GetClients)
+	apiGroup.Get("/learn-clients/job", GetJob)
 
 	// Job routes
-	apiGroup.Get("/job", GetJob)
 	apiGroup.Post("/job/result", SubmitJobResult)
 
 	// Evaluation routes

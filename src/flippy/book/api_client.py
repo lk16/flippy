@@ -98,7 +98,7 @@ class APIClient:
         response.raise_for_status()
 
     def get_learn_job(self, client_id: str) -> Optional[Job]:
-        response = self._get("/api/job", client_id=client_id)
+        response = self._get("/api/learn-clients/job", client_id=client_id)
 
         if response.text == "null":
             return None

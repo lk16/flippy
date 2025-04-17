@@ -8,31 +8,6 @@ import (
 	"github.com/lk16/flippy/api/internal/repository"
 )
 
-// GetJob handles job assignment to clients
-func GetJob(c *fiber.Ctx) error {
-	clientID, err := GetClient(c)
-	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	repo := repository.NewEvaluationRepository(c)
-	job, err := repo.GetJob(c.Context(), clientID)
-
-	if err == repository.ErrNoJobsAvailable {
-		return c.Status(fiber.StatusOK).JSON(nil)
-	}
-
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	return c.Status(fiber.StatusOK).JSON(job)
-}
-
 // SubmitJobResult handles job result submission
 func SubmitJobResult(c *fiber.Ctx) error {
 	clientID, err := GetClient(c)
