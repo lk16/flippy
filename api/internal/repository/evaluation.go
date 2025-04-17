@@ -389,6 +389,9 @@ func (repo *EvaluationRepository) popJobFromRedis(ctx context.Context, clientID 
 	// Execute the transaction
 	_, err := tx.Exec(ctx)
 	if err != nil {
+		if err == redis.Nil {
+			return models.Job{}, 0, ErrNoJobsAvailable
+		}
 		return models.Job{}, 0, fmt.Errorf("error executing Redis transaction: %w", err)
 	}
 

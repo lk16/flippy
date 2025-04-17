@@ -59,7 +59,7 @@ func main() {
 	// Connect to services
 	services, err := services.GetServices(cfg)
 	if err != nil {
-		log.Fatalf("Failed to initialize services: %v", err)
+		log.Fatalf("Failed to connect to services: %v", err)
 	}
 
 	// Setup connections to external services and config in Fiber app
