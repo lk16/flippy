@@ -35,9 +35,30 @@ class APIClient:
     The caller should store it and pass as arguments when necessary.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, debug: bool = False) -> None:
         self.server_url = get_book_server_url()
         self.token = get_book_server_token()
+        self.debug = debug
+
+    def _print_request_and_response(self, response: Response) -> None:
+        request = response.request
+
+        request_line = f"curl -X {request.method} '{request.url}'"
+
+        for header, value in request.headers.items():
+            request_line += f" -H '{header}: {value}'"
+
+        if request.body:
+            # All payloads we currently send are JSON
+            assert isinstance(request.body, bytes)
+            body = request.body.decode("utf-8")
+            request_line += f" -d '{body}'"
+
+        print("request:")
+        print(request_line)
+
+        print(f"response (status {response.status_code}):")
+        print(response.text)
 
     def _get(
         self,
@@ -59,6 +80,9 @@ class APIClient:
 
         response = requests.get(f"{self.server_url}{path}", **kwargs)
 
+        if self.debug:
+            self._print_request_and_response(response)
+
         response.raise_for_status()
         return response
 
@@ -79,6 +103,9 @@ class APIClient:
 
         response = requests.post(f"{self.server_url}{path}", **kwargs)
         response.raise_for_status()
+
+        if self.debug:
+            self._print_request_and_response(response)
 
         return response
 

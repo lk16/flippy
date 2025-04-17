@@ -16,11 +16,12 @@ from flippy.othello.position import NormalizedPosition
 
 
 class BookLearningClient:
-    def __init__(self) -> None:
-        self.api_client = APIClient()
+    def __init__(self, debug: bool) -> None:
+        self.api_client = APIClient(debug)
         self.client_id: str | None = None
         self.finished_job_count = 0
         self.total_job_time = 0.0  # seconds
+        self.debug = debug
 
         threading.Thread(target=self._heartbeat_loop, daemon=True).start()
 

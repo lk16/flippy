@@ -11,8 +11,10 @@ app = typer.Typer(pretty_exceptions_enable=False)
 
 
 @app.command()
-def client() -> None:
-    BookLearningClient().run()
+def client(
+    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode"),
+) -> None:
+    BookLearningClient(debug).run()
 
 
 @app.command()
