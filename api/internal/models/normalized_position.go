@@ -130,3 +130,8 @@ func (n NormalizedPosition) Opponent() uint64 {
 func (n NormalizedPosition) CountDiscs() int {
 	return n.position.CountDiscs()
 }
+
+// TargetLearnLevel computes the level we should learn a position to
+func (n NormalizedPosition) TargetLearnLevel() int {
+	return n.position.TargetLearnLevel()
+}

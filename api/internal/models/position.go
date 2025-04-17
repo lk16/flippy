@@ -120,3 +120,25 @@ func (p Position) Opponent() uint64 {
 func (p Position) CountDiscs() int {
 	return bits.OnesCount64(p.player | p.opponent)
 }
+
+// TargetLearnLevel computes the level we should learn a position to
+func (p Position) TargetLearnLevel() int {
+	return LearnLevelFromDiscCount(p.CountDiscs())
+}
+
+// LearnLevelFromDiscCount computes the level we should learn a position to based on the number of discs on the board
+func LearnLevelFromDiscCount(discCount int) int {
+	if discCount <= 12 {
+		return 40
+	}
+
+	if discCount <= 16 {
+		return 36
+	}
+
+	if discCount <= 20 {
+		return 34
+	}
+
+	return 32
+}

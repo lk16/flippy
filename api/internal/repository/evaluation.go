@@ -307,18 +307,14 @@ func (repo *EvaluationRepository) RefillJobCache(ctx context.Context) error {
 	}
 
 	if !lockAcquired {
-		log.Printf("skipping cache refresh - another process is already refreshing")
 		return nil
 	}
 
 	// Ensure lock is released
 	defer func() {
 		if err := redisConn.Del(ctx, constants.CacheRefreshLockKey).Err(); err != nil {
-			log.Printf("error releasing cache refresh lock: %v", err)
 		}
 	}()
-
-	log.Printf("starting job cache refresh")
 
 	clientRepo := NewClientRepositoryFromServices(repo.services)
 	takenPositionsBytes := clientRepo.GetTakenPositionsBytes(ctx)
@@ -327,7 +323,7 @@ func (repo *EvaluationRepository) RefillJobCache(ctx context.Context) error {
 
 	// Try to find job at different disc counts, starting with the lowest
 	for discCount := 4; discCount <= 64; discCount++ {
-		learnLevel := getLearnLevel(discCount)
+		learnLevel := models.LearnLevelFromDiscCount(discCount)
 		query := `
 			SELECT position
 			FROM edax
@@ -418,7 +414,7 @@ func (repo *EvaluationRepository) popJobFromRedis(ctx context.Context, clientID 
 
 	job := models.Job{
 		Position: position,
-		Level:    getLearnLevel(position.CountDiscs()),
+		Level:    position.TargetLearnLevel(),
 	}
 
 	clientRepo := NewClientRepositoryFromServices(repo.services)
@@ -435,7 +431,6 @@ func (repo *EvaluationRepository) GetJob(ctx context.Context, clientID string) (
 	}
 
 	// Refill cache if it's running low
-	log.Printf("remaining job count: %d", remainingJobCount)
 	if remainingJobCount <= constants.RefillThreshold {
 		go func() {
 			refreshCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -449,21 +444,4 @@ func (repo *EvaluationRepository) GetJob(ctx context.Context, clientID string) (
 	}
 
 	return job, err
-}
-
-// getLearnLevel returns the target level for a given disc count
-func getLearnLevel(discCount int) int {
-	if discCount <= 12 {
-		return 40
-	}
-
-	if discCount <= 16 {
-		return 36
-	}
-
-	if discCount <= 20 {
-		return 34
-	}
-
-	return 32
 }

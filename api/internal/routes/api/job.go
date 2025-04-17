@@ -18,16 +18,42 @@ func GetJob(c *fiber.Ctx) error {
 	}
 
 	repo := repository.NewEvaluationRepository(c)
-	job, err := repo.GetJob(c.Context(), clientID)
 
-	if err == repository.ErrNoJobsAvailable {
-		return c.Status(fiber.StatusOK).JSON(nil)
-	}
+	var job models.Job
 
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
+	for {
+		job, err = repo.GetJob(c.Context(), clientID)
+
+		if err == repository.ErrNoJobsAvailable {
+			return c.Status(fiber.StatusOK).JSON(nil)
+		}
+
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+
+		// Prevent learning a position that has already been learned
+		dbEntries, err := repo.LookupPositions(c.Context(), []models.NormalizedPosition{job.Position})
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+
+		// If position is already in database, check if we need to learn it to a higher level
+		if len(dbEntries) > 0 {
+			currentLevel := dbEntries[0].Level
+			targetLevel := job.Position.TargetLearnLevel()
+
+			if targetLevel > currentLevel {
+				continue
+			}
+		}
+
+		// This is a valid job
+		break
 	}
 
 	return c.Status(fiber.StatusOK).JSON(job)
