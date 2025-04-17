@@ -1,5 +1,5 @@
 async function loadStats() {
-    const response = await fetch('/api/stats/book');
+    const response = await fetch('/api/positions/stats');
     const data = await response.json();
 
     const table = document.getElementById('statsTable');
