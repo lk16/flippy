@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sort"
 	"strconv"
 	"time"
 
@@ -207,7 +206,7 @@ func (repo *EvaluationRepository) RefreshBookStats(ctx context.Context) error {
 }
 
 // GetBookStats returns statistics about positions in the database
-func (repo *EvaluationRepository) GetBookStats(ctx context.Context) ([][]string, error) {
+func (repo *EvaluationRepository) GetBookStats(ctx context.Context) ([]models.BookStats, error) {
 	redisConn := repo.services.Redis
 
 	// Get all stats from Redis
@@ -216,86 +215,27 @@ func (repo *EvaluationRepository) GetBookStats(ctx context.Context) ([][]string,
 		return nil, fmt.Errorf("error getting book stats from Redis: %w", err)
 	}
 
-	discCounts := make(map[int]bool)
-	levels := make(map[int]bool)
-	lookup := make(map[[2]int]int)
-	levelTotals := make(map[int]int)
-	discTotals := make(map[int]int)
+	bookStats := make([]models.BookStats, 0)
 
 	for key, value := range stats {
+		var bookStat models.BookStats
+
 		// Parse disc_count:level key
-		var discCount, level int
-		_, err := fmt.Sscanf(key, "%d:%d", &discCount, &level)
+		_, err := fmt.Sscanf(key, "%d:%d", &bookStat.DiscCount, &bookStat.Level)
 		if err != nil {
 			return nil, fmt.Errorf("error parsing book stats key: %w", err)
 		}
 
 		// Parse count value
-		count, err := strconv.Atoi(value)
+		bookStat.Count, err = strconv.Atoi(value)
 		if err != nil {
 			return nil, fmt.Errorf("error parsing book stats value: %w", err)
 		}
 
-		discCounts[discCount] = true
-		levels[level] = true
-		lookup[[2]int{discCount, level}] = count
-
-		levelTotals[level] += count
-		discTotals[discCount] += count
+		bookStats = append(bookStats, bookStat)
 	}
 
-	// Convert sets to sorted slices
-	discCountsSorted := make([]int, 0, len(discCounts))
-	for dc := range discCounts {
-		discCountsSorted = append(discCountsSorted, dc)
-	}
-	sort.Ints(discCountsSorted)
-
-	levelsSorted := make([]int, 0, len(levels))
-	for l := range levels {
-		levelsSorted = append(levelsSorted, l)
-	}
-	sort.Ints(levelsSorted)
-
-	// Build the table
-	table := make([][]string, 0, len(discCountsSorted)+2)
-
-	// Header row
-	header := []string{""}
-	for _, level := range levelsSorted {
-		header = append(header, fmt.Sprintf("level %d", level))
-	}
-	header = append(header, "Total")
-	table = append(table, header)
-
-	// Data rows
-	for _, discs := range discCountsSorted {
-		row := []string{fmt.Sprintf("%d discs", discs)}
-		for _, level := range levelsSorted {
-			count := lookup[[2]int{discs, level}]
-			row = append(row, fmt.Sprintf("%d", count))
-		}
-		row = append(row, fmt.Sprintf("%d", discTotals[discs]))
-		table = append(table, row)
-	}
-
-	// Total row
-	totalRow := []string{"Total"}
-	for _, level := range levelsSorted {
-		totalRow = append(totalRow, fmt.Sprintf("%d", levelTotals[level]))
-	}
-	totalRow = append(totalRow, fmt.Sprintf("%d", sum(levelTotals)))
-	table = append(table, totalRow)
-
-	return table, nil
-}
-
-func sum(m map[int]int) int {
-	total := 0
-	for _, v := range m {
-		total += v
-	}
-	return total
+	return bookStats, nil
 }
 
 // ErrNoJobsAvailable is returned when there are no more jobs to process
