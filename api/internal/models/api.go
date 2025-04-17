@@ -89,3 +89,9 @@ func (e *Evaluation) ScanRow(rows *sqlx.Rows) error {
 
 	return nil
 }
+
+type BookStats struct {
+	DiscCount int `json:"disc_count"`
+	Level     int `json:"level"`
+	Count     int `json:"count"`
+}

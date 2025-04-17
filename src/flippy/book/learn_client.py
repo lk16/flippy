@@ -87,10 +87,11 @@ class BookLearningClient:
                 if e.response.status_code == 401:
                     # Server restarted, re-register in next loop iteration
                     self.client_id = None
-                else:
-                    raise e
 
-            except Exception as e:
+                time.sleep(5)  # Back off on error
+                print(f"Error: {e}")
+
+            except requests.RequestException as e:
                 print(f"Error: {e}")
                 time.sleep(5)  # Back off on error
 

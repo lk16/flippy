@@ -98,16 +98,16 @@ class APIClient:
         response.raise_for_status()
 
     def get_learn_job(self, client_id: str) -> Optional[Job]:
-        response = self._get("/api/job", client_id=client_id)
+        response = self._get("/api/learn-clients/job", client_id=client_id)
 
         if response.text == "null":
             return None
 
         return Job.model_validate_json(response.text)
 
-    def submit_job_result(self, client_id: str, payload: JobResult) -> None:
-        response = self._post("/api/job/result", client_id=client_id, json=payload)
-        response.raise_for_status()
+    def submit_job_result(self, client_id: str, job_result: JobResult) -> None:
+        evaluation = SerializedEvaluation.to_evaluation(job_result.evaluation)
+        self.save_learned_evaluations([evaluation], client_id=client_id)
 
     def lookup_positions(self, positions: set[NormalizedPosition]) -> EdaxEvaluations:
         all_parsed: list[SerializedEvaluation] = []
@@ -135,7 +135,9 @@ class APIClient:
 
         return evaluations
 
-    def save_learned_evaluations(self, evaluations: list[EdaxEvaluation]) -> None:
+    def save_learned_evaluations(
+        self, evaluations: list[EdaxEvaluation], client_id: Optional[str] = None
+    ) -> None:
         if not evaluations:
             return
 
@@ -144,4 +146,4 @@ class APIClient:
         ]
         payload = EvaluationsPayload(evaluations=serialized)
 
-        self._post("/api/evaluations", json=payload)
+        self._post("/api/positions/evaluations", client_id=client_id, json=payload)

@@ -25,3 +25,35 @@ func LookupPositions(c *fiber.Ctx) error {
 
 	return c.Status(fiber.StatusOK).JSON(evaluations)
 }
+
+// SubmitEvaluations handles submission of evaluation results
+func SubmitEvaluations(c *fiber.Ctx) error {
+	var payload models.EvaluationsPayload
+	if err := c.BodyParser(&payload); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
+	}
+
+	repo := repository.NewEvaluationRepository(c)
+	if err := repo.SubmitEvaluations(c.Context(), payload); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.SendStatus(fiber.StatusOK)
+}
+
+// GetBookStats returns statistics about the book
+func GetBookStats(c *fiber.Ctx) error {
+	repo := repository.NewEvaluationRepository(c)
+	stats, err := repo.GetBookStats(c.Context())
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(stats)
+}

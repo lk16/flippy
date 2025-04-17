@@ -13,17 +13,10 @@ func SetupRoutes(app *fiber.App) {
 	apiGroup.Post("/learn-clients/register", RegisterClient)
 	apiGroup.Post("/learn-clients/heartbeat", Heartbeat)
 	apiGroup.Get("/learn-clients", GetClients)
-
-	// Job routes
-	apiGroup.Get("/job", GetJob)
-	apiGroup.Post("/job/result", SubmitJobResult)
-
-	// Evaluation routes
-	apiGroup.Post("/evaluations", SubmitEvaluations)
+	apiGroup.Get("/learn-clients/job", GetJob)
 
 	// Position routes
+	apiGroup.Post("/positions/evaluations", SubmitEvaluations)
 	apiGroup.Post("/positions/lookup", LookupPositions)
-
-	// Stats routes
-	apiGroup.Get("/stats/book", GetBookStats)
+	apiGroup.Get("/positions/stats", GetBookStats)
 }
