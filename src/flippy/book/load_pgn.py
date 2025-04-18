@@ -6,7 +6,7 @@ from flippy import PROJECT_ROOT
 from flippy.book import MIN_LEARN_LEVEL
 from flippy.book.api_client import APIClient
 from flippy.config import PgnConfig
-from flippy.edax.process import start_evaluation_sync
+from flippy.edax.process import evaluate_blocking
 from flippy.edax.types import EdaxRequest
 from flippy.othello.game import Game
 from flippy.othello.position import NormalizedPosition
@@ -79,7 +79,7 @@ def learn_new_positions(positions: set[NormalizedPosition]) -> None:
         request = EdaxRequest(set(chunk), MIN_LEARN_LEVEL, source=None)
 
         before = datetime.now()
-        edax_evaluations = start_evaluation_sync(request)
+        edax_evaluations = evaluate_blocking(request)
         after = datetime.now()
 
         seconds = (after - before).total_seconds()

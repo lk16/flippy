@@ -11,7 +11,7 @@ from typing import Any, Optional
 from flippy.arguments import Arguments
 from flippy.book import MAX_UI_SEARCH_LEVEL, MIN_UI_SEARCH_LEVEL
 from flippy.book.api_client import APIClient
-from flippy.edax.process import start_evaluation
+from flippy.edax.process import evaluate_non_blocking
 from flippy.edax.types import EdaxEvaluations, EdaxRequest, EdaxResponse
 from flippy.mode.base import BaseMode
 from flippy.othello.board import BLACK, Board
@@ -368,4 +368,4 @@ class PGNMode(BaseMode):
 
         # Ignoring type error is fine here since start_evaluation expects Queue[EdaxResponse],
         # but we have Queue[EdaxResponse | EdaxEvaluations]. EdaxResponse is a subset of our queue's types.
-        start_evaluation(request, self.recv_queue)  # type:ignore[arg-type]
+        evaluate_non_blocking(request, self.recv_queue)  # type:ignore[arg-type]

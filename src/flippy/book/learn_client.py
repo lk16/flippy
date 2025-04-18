@@ -10,7 +10,7 @@ from flippy.book.models import (
     JobResult,
     SerializedEvaluation,
 )
-from flippy.edax.process import start_evaluation_sync
+from flippy.edax.process import evaluate_blocking
 from flippy.edax.types import EdaxRequest
 from flippy.othello.position import NormalizedPosition
 
@@ -101,7 +101,7 @@ class BookLearningClient:
         request = EdaxRequest({position}, job.level, source=None)
 
         before = datetime.now()
-        evaluations = start_evaluation_sync(request)
+        evaluations = evaluate_blocking(request)
         after = datetime.now()
 
         computation_time = (after - before).total_seconds()
