@@ -11,7 +11,9 @@ from flippy.edax.types import EdaxEvaluation, EdaxEvaluations, EdaxRequest, Edax
 from flippy.othello.position import NormalizedPosition, Position
 
 
-def start_evaluation(request: EdaxRequest, recv_queue: Queue[EdaxResponse]) -> None:
+def evaluate_non_blocking(
+    request: EdaxRequest, recv_queue: Queue[EdaxResponse]
+) -> None:
     proc = EdaxProcess(request, recv_queue)
 
     if not request.positions:
@@ -20,7 +22,7 @@ def start_evaluation(request: EdaxRequest, recv_queue: Queue[EdaxResponse]) -> N
     multiprocessing.Process(target=proc.search).start()
 
 
-def start_evaluation_sync(request: EdaxRequest) -> EdaxEvaluations:
+def evaluate_blocking(request: EdaxRequest) -> EdaxEvaluations:
     if not request.positions:
         return EdaxEvaluations()
 

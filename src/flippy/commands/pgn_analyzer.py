@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Annotated
 
 from flippy.book.api_client import APIClient
-from flippy.edax.process import start_evaluation_sync
+from flippy.edax.process import evaluate_blocking
 from flippy.edax.types import EdaxEvaluations, EdaxRequest
 from flippy.othello.board import BLACK, WHITE, Board
 from flippy.othello.game import Game
@@ -50,7 +50,7 @@ class PgnAnanlyzer:
     ) -> EdaxEvaluations:
         request_positions = self.evaluations.get_missing(all_positions)
         request = EdaxRequest(request_positions, self.level, source=None)
-        return start_evaluation_sync(request)
+        return evaluate_blocking(request)
 
     def _get_colored_score(self, score: int, board: Board) -> str:
         if score == 0:
