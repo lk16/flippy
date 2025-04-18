@@ -10,39 +10,73 @@ from flippy.config import get_edax_path, get_edax_verbose
 from flippy.edax.types import EdaxEvaluation, EdaxEvaluations, EdaxRequest, EdaxResponse
 from flippy.othello.position import NormalizedPosition, Position
 
+TABLE_BORDER = (
+    "------+-----+--------------+-------------+----------+---------------------"
+)
+
 
 def evaluate_non_blocking(
     request: EdaxRequest, recv_queue: Queue[EdaxResponse]
 ) -> None:
-    proc = EdaxProcess(request, recv_queue)
-
     if not request.positions:
         return
 
-    multiprocessing.Process(target=proc.search).start()
+    process = EdaxProcessManager.get_instance().get_process(request.level)
+    multiprocessing.Process(target=process.evaluate, args=(request, recv_queue)).start()
 
 
 def evaluate_blocking(request: EdaxRequest) -> EdaxEvaluations:
     if not request.positions:
         return EdaxEvaluations()
 
-    return EdaxProcess(request, Queue())._search_sync()
+    process = EdaxProcessManager.get_instance().get_process(request.level)
+    evaluations = process.evaluate(request)
+
+    # We always return evaluations in the blocking case.
+    assert evaluations is not None
+
+    return evaluations
+
+
+class EdaxProcessManager:
+    _instance: Optional[EdaxProcessManager] = None
+    _process: Optional[EdaxProcess] = None
+    _current_level: Optional[int] = None
+
+    @classmethod
+    def get_instance(cls) -> EdaxProcessManager:
+        if cls._instance is None:
+            cls._instance = EdaxProcessManager()
+        return cls._instance
+
+    def get_process(self, level: int) -> EdaxProcess:
+        if self._process is None or self._current_level != level:
+            if self._process is not None:
+                self._process.close()
+            self._process = EdaxProcess(level)
+            self._current_level = level
+        return self._process
+
+    def close(self) -> None:
+        if self._process is not None:
+            self._process.close()
+            self._process = None
+            self._current_level = None
 
 
 class EdaxProcess:
-    def __init__(self, request: EdaxRequest, send_queue: Queue[EdaxResponse]) -> None:
-        self.request = request
-        self.send_queue = send_queue
+    def __init__(self, level: int) -> None:
+        self.level = level
         self.edax_path = get_edax_path()
         self.verbose = get_edax_verbose()
+        self.proc: Optional[subprocess.Popen[bytes]] = None
+        self._start_process()
 
-    def _search_sync(self) -> EdaxEvaluations:
-        command = (
-            f"{self.edax_path} -solve /dev/stdin -level {self.request.level} -verbose 3"
-        )
+    def _start_process(self) -> None:
+        command = f"{self.edax_path} -solve /dev/stdin -level {self.level} -verbose 3"
         cwd = self.edax_path.parent.parent
 
-        proc = subprocess.Popen(
+        self.proc = subprocess.Popen(
             command.split(),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -50,89 +84,80 @@ class EdaxProcess:
             cwd=cwd,
         )
 
-        assert proc.stdin
-        assert proc.stdout
-
-        proc_input = "".join(
-            position.to_problem() for position in self.request.positions
-        )
-        proc.stdin.write(proc_input.encode())
-        proc.stdin.close()
+        assert self.proc.stdin
+        assert self.proc.stdout
 
         if self.verbose:
-            print(f"Running command: {command}")
+            print(f"Started Edax process: {command}")
             print(f"CWD: {cwd}")
+
+    def evaluate(
+        self, request: EdaxRequest, send_queue: Optional[Queue[EdaxResponse]] = None
+    ) -> Optional[EdaxEvaluations]:
+        if not request.positions:
+            return EdaxEvaluations() if send_queue is None else None
+
+        assert self.proc and self.proc.stdin and self.proc.stdout
+
+        # Make list such that we are sure order is maintained.
+        positions_list = list(request.positions)
+
+        proc_input = "".join(position.to_problem() for position in positions_list)
+        self.proc.stdin.write(proc_input.encode())
+        self.proc.stdin.flush()
+
+        if self.verbose:
             print(f"Input: {proc_input}")
 
         lines: list[str] = []
 
-        while True:
-            raw_line = proc.stdout.readline()
-            if raw_line == b"":
-                break
-            line = raw_line.decode()
-            lines.append(line)
-
-        if self.verbose:
-            for line in lines:
-                print(f"Output: {line.rstrip()}")
+        table_borders_seen = 0
+        positions_index = 0
 
         evaluations = EdaxEvaluations()
-        total_read_lines = 0
-        for position in self.request.positions:
-            remaining_lines = lines[total_read_lines:]
-            evaluation, read_lines = self.__parse_output_lines(
-                remaining_lines, position
-            )
-            total_read_lines += read_lines
-            evaluations[position] = evaluation
 
-        return evaluations
+        while positions_index < len(positions_list):
+            raw_line = self.proc.stdout.readline()
+            if raw_line == b"":
+                # We have reached the end of the output.
+                # We should never get here.
+                raise ValueError("Unexpected end of output")
+            line = raw_line.decode().rstrip()
+            lines.append(line)
 
-    def search(self) -> None:
-        # Catching user interrupt prevents the subproces stacktrace cluttering the output.
-        try:
-            evaluations = self._search_sync()
-            message = EdaxResponse(self.request, evaluations)
-            self.send_queue.put_nowait(message)
-        except KeyboardInterrupt:
-            pass
+            if self.verbose:
+                print(f"Output: {line}")
 
-    # TODO #26 write tests for Edax output parser
-    def __parse_output_lines(
-        self, lines: list[str], normalized: NormalizedPosition
-    ) -> tuple[EdaxEvaluation, int]:
-        evaluation: Optional[EdaxEvaluation] = None
+            if line == TABLE_BORDER:
+                table_borders_seen += 1
 
-        for read_lines, line in enumerate(lines):
-            if line.startswith("*** problem") and read_lines > 2:
-                break
+            if table_borders_seen == 2:
+                position = positions_list[positions_index]
+                evaluation = self.__parse_output_line(lines[-3], position)
+                evaluations[position] = evaluation
 
-            line_evaluation = self.__parse_output_line(line, normalized)
-            if line_evaluation is not None:
-                evaluation = line_evaluation
+                table_borders_seen = 0
+                positions_index += 1
 
-        assert evaluation
-        return evaluation, read_lines
+        if send_queue is None:
+            return evaluations
+        else:
+            message = EdaxResponse(request, evaluations)
+            send_queue.put_nowait(message)
+            return None
+
+    def close(self) -> None:
+        if self.proc is not None:
+            self.proc.terminate()
+            self.proc.wait()
+            self.proc = None
 
     # TODO #26 write tests for Edax output parser
     def __parse_output_line(
         self, line: str, normalized: NormalizedPosition
-    ) -> Optional[EdaxEvaluation]:
-        if (
-            line == "\n"
-            or "positions;" in line
-            or "/dev/stdin" in line
-            or "-----" in line
-        ):
-            return None
-
+    ) -> EdaxEvaluation:
         columns = re.sub(r"\s+", " ", line).strip().split(" ")
-
-        try:
-            score = int(columns[1].strip("<>"))
-        except ValueError:
-            return None
+        score = int(columns[1].strip("<>"))
 
         best_fields = line[53:].strip().split(" ")
         best_moves = Position.fields_to_indexes(best_fields)
@@ -146,7 +171,7 @@ class EdaxProcess:
         return EdaxEvaluation(
             position=normalized.to_position(),
             depth=depth,
-            level=self.request.level,
+            level=self.level,
             confidence=confidence,
             score=score,
             best_moves=best_moves,
