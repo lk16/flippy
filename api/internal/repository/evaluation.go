@@ -54,15 +54,20 @@ func (repo *EvaluationRepository) SubmitEvaluations(ctx context.Context, payload
 	valuesClause := ""
 	params := make([]interface{}, 0, len(payload.Evaluations)*7)
 
+	positionBytesList := make([][]byte, len(payload.Evaluations))
+	for i, eval := range payload.Evaluations {
+		positionBytesList[i] = eval.Position.Bytes()
+	}
+
 	for i, eval := range payload.Evaluations {
 		if i > 0 {
 			valuesClause += ", "
 		}
 		valuesClause += fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d)",
-			i*7+1, i*7+2, i*7+3, i*7+4, i*7+5, i*7+6, i*7+7)
+			i*7+2, i*7+3, i*7+4, i*7+5, i*7+6, i*7+7, i*7+8)
 
 		params = append(params,
-			eval.Position.Bytes(),
+			positionBytesList[i],
 			eval.Position.CountDiscs(),
 			eval.Level,
 			eval.Depth,
@@ -72,11 +77,14 @@ func (repo *EvaluationRepository) SubmitEvaluations(ctx context.Context, payload
 		)
 	}
 
+	// Add positions array as first parameter
+	params = append([]interface{}{pq.Array(positionBytesList)}, params...)
+
 	query := fmt.Sprintf(`
-		WITH current_level AS (
-			SELECT level
+		WITH current_levels AS (
+			SELECT position, level
 			FROM edax
-			WHERE position = $1
+			WHERE position = ANY($1)
 		)
 		INSERT INTO edax (position, disc_count, level, depth, confidence, score, best_moves)
 		VALUES %s
@@ -89,7 +97,7 @@ func (repo *EvaluationRepository) SubmitEvaluations(ctx context.Context, payload
 			best_moves = EXCLUDED.best_moves
 		WHERE EXCLUDED.level > edax.level
 		RETURNING
-			(SELECT level FROM current_level) as old_level,
+			(SELECT level FROM current_levels WHERE position = edax.position) as old_level,
 			level as new_level,
 			disc_count;
 	`, valuesClause)
