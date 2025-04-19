@@ -217,7 +217,7 @@ func TestNormalizedPosition_Normalized(t *testing.T) {
 			assert.Equal(t, normalized.Position(), rotated)
 			assert.Equal(t, 0, rotation)
 		} else {
-			assert.True(t, normalized.Position().Equals(rotated.Normalized()))
+			assert.True(t, normalized.Position().equals(rotated.Normalized()))
 			assert.NotEqual(t, 0, rotation)
 		}
 

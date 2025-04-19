@@ -85,6 +85,11 @@ func (p Position) rotate(rotation int) Position {
 	}
 }
 
+func (p Position) unrotate(rotation int) Position {
+	reverseRotation := []int{0, 1, 2, 3, 4, 6, 5, 7}
+	return p.rotate(reverseRotation[rotation])
+}
+
 func (p Position) isLessThan(other Position) bool {
 	if p.player < other.player {
 		return true
@@ -95,7 +100,7 @@ func (p Position) isLessThan(other Position) bool {
 	return false
 }
 
-func (p Position) Equals(other Position) bool {
+func (p Position) equals(other Position) bool {
 	return p.player == other.player && p.opponent == other.opponent
 }
 
@@ -118,8 +123,7 @@ func (p Position) Normalize() (Position, int) {
 
 // IsNormalized checks if the position is normalized
 func (p Position) IsNormalized() bool {
-	normalized := p.Normalized()
-	return normalized.player == p.player && normalized.opponent == p.opponent
+	return p.Normalized().equals(p)
 }
 
 // Player returns the player bitboard
