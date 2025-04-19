@@ -37,3 +37,6 @@ func getEnvMust(key string) string {
 	}
 	return value
 }
+
+// StaticDir is the path to the static directory
+var StaticDir = "../src/flippy/book/static"
