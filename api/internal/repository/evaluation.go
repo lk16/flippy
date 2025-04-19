@@ -229,6 +229,12 @@ func (repo *EvaluationRepository) GetBookStats(ctx context.Context) ([]models.Bo
 		if err != nil {
 			return nil, fmt.Errorf("error building initial book stats: %w", err)
 		}
+
+		// Try reading from Redis again after building stats
+		stats, err = redisConn.HGetAll(ctx, bookStatsKey).Result()
+		if err != nil {
+			return nil, fmt.Errorf("error getting book stats from Redis after build: %w", err)
+		}
 	}
 
 	bookStats := make([]models.BookStats, 0)

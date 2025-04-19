@@ -106,6 +106,48 @@ func TestLookupPositions(t *testing.T) {
 	}
 }
 
-// TODO add tests for submit evaluations
+func TestPositionStatsNoAuth(t *testing.T) {
+	baseURL := tests.BaseURL
 
-// TODO add tests for get book stats
+	req, err := http.NewRequest(http.MethodGet, baseURL+"/api/positions/stats", nil)
+	assert.NoError(t, err)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	assert.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestPositionStatsOk(t *testing.T) {
+	baseURL := tests.BaseURL
+
+	req, err := http.NewRequest(http.MethodGet, baseURL+"/api/positions/stats", nil)
+	assert.NoError(t, err)
+
+	req.Header.Set("x-token", tests.TestToken)
+
+	// Run the request twice
+	// The first time it will build the stats and store them in Redis
+	// The second time it will read from Redis
+	// Both responses should be the same
+	for i := 0; i < 2; i++ {
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		assert.NoError(t, err)
+
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var response []models.BookStats
+		err = json.NewDecoder(resp.Body).Decode(&response)
+		assert.NoError(t, err)
+
+		assert.Equal(t, 5, len(response))
+	}
+}
+
+// TODO add tests for submit evaluations
