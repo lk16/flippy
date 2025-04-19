@@ -5,14 +5,13 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
+	"github.com/lk16/flippy/api/internal/config"
 )
-
-const StaticDir = "../src/flippy/book/static"
 
 // staticHandler serves static files
 func staticHandler() fiber.Handler {
 	return filesystem.New(filesystem.Config{
-		Root:   http.Dir(StaticDir),
+		Root:   http.Dir(config.StaticDir),
 		Browse: false,
 	})
 }

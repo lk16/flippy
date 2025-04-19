@@ -7,10 +7,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestRootEndpoint(t *testing.T) {
-	client := http.DefaultClient
+func TestVersionEndpoint(t *testing.T) {
+	resp, err := http.Get(BaseURL + "/version")
 
-	resp, err := client.Get("http://localhost:3000/version")
+	// TODO check actual version
 
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
