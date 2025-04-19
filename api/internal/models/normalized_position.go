@@ -29,7 +29,7 @@ func NewNormalizedPositionFromString(s string) (NormalizedPosition, error) {
 		return NormalizedPosition{}, fmt.Errorf("invalid opponent position: %w", err)
 	}
 
-	return newNormalizedPosition(player, opponent)
+	return NewNormalizedPositionFromUint64s(player, opponent)
 }
 
 // NewNormalizedPositionFromBytes creates a new normalized position from a byte slice
@@ -41,7 +41,7 @@ func NewNormalizedPositionFromBytes(b []byte) (NormalizedPosition, error) {
 	player := binary.LittleEndian.Uint64(b[:8])
 	opponent := binary.LittleEndian.Uint64(b[8:])
 
-	return newNormalizedPosition(player, opponent)
+	return NewNormalizedPositionFromUint64s(player, opponent)
 }
 
 // NewNormalizedPositionEmpty creates a new normalized position with no discs
@@ -56,8 +56,8 @@ func NewNormalizedPositionEmpty() NormalizedPosition {
 	}
 }
 
-// newNormalizedPosition creates a new normalized position from a player and opponent bitboard
-func newNormalizedPosition(player, opponent uint64) (NormalizedPosition, error) {
+// NewNormalizedPositionFromUint64s creates a new normalized position from a player and opponent bitboard
+func NewNormalizedPositionFromUint64s(player, opponent uint64) (NormalizedPosition, error) {
 
 	pos, err := NewPosition(player, opponent)
 	if err != nil {

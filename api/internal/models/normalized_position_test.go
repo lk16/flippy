@@ -207,7 +207,7 @@ func TestNormalizedPosition_MarshalJSON(t *testing.T) {
 }
 
 func TestNormalizedPosition_Normalized(t *testing.T) {
-	normalized, err := newNormalizedPosition(0x8000000, 0x3810000000)
+	normalized, err := NewNormalizedPositionFromUint64s(0x8000000, 0x3810000000)
 	assert.NoError(t, err)
 
 	for rotation := 0; rotation < 8; rotation++ {

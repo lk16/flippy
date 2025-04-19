@@ -22,8 +22,11 @@ while ! docker compose -f $COMPOSE_FILE ps test-postgres | grep -q "healthy"; do
     sleep 1
 done
 
-# Initialize database
+# Initialize database schema
 docker compose -f $COMPOSE_FILE exec -T test-postgres psql -U pg-test-user -d pg-test-db < ../schema.sql
+
+# Load test data
+docker compose -f $COMPOSE_FILE exec -T test-postgres psql -U pg-test-user -d pg-test-db < ./test_data.sql
 
 # Start application
 docker compose -f $COMPOSE_FILE up -d --build test-app
