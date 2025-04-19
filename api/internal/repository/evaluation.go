@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
@@ -160,22 +161,20 @@ func (repo *EvaluationRepository) LookupPositions(ctx context.Context, positions
 	defer rows.Close()
 
 	evaluations := make([]models.Evaluation, 0)
-	for rows.Next() {
-		var eval models.Evaluation
-		if err := eval.ScanRow(rows); err != nil {
-			return nil, fmt.Errorf("error scanning evaluation: %w", err)
-		}
-		evaluations = append(evaluations, eval)
-	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rows: %w", err)
+	for rows.Next() {
+		var evaluation models.Evaluation
+		err = rows.StructScan(&evaluation)
+		if err != nil {
+			return nil, fmt.Errorf("error scanning evaluations: %w", err)
+		}
+		evaluations = append(evaluations, evaluation)
 	}
 
 	return evaluations, nil
 }
 
-func (repo *EvaluationRepository) RefreshBookStats(ctx context.Context) error {
+func (repo *EvaluationRepository) buildInitialBookStats(ctx context.Context) error {
 	pgConn := repo.services.Postgres
 	redisConn := repo.services.Redis
 
@@ -207,6 +206,8 @@ func (repo *EvaluationRepository) RefreshBookStats(ctx context.Context) error {
 	// Store in Redis hash
 	err = redisConn.HSet(ctx, bookStatsKey, statsMap).Err()
 	if err != nil {
+		log.Printf("statsMap = %+v", statsMap)
+
 		return fmt.Errorf("error storing book stats in Redis: %w", err)
 	}
 
@@ -221,6 +222,13 @@ func (repo *EvaluationRepository) GetBookStats(ctx context.Context) ([]models.Bo
 	stats, err := redisConn.HGetAll(ctx, bookStatsKey).Result()
 	if err != nil {
 		return nil, fmt.Errorf("error getting book stats from Redis: %w", err)
+	}
+
+	if len(stats) == 0 {
+		err = repo.buildInitialBookStats(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("error building initial book stats: %w", err)
+		}
 	}
 
 	bookStats := make([]models.BookStats, 0)

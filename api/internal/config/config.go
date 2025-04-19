@@ -14,6 +14,7 @@ type Config struct {
 	BasicAuthUsername string
 	BasicAuthPassword string
 	Token             string
+	Prefork           bool
 }
 
 // LoadConfig loads configuration from environment variables
@@ -26,6 +27,7 @@ func LoadConfig() *Config {
 		BasicAuthUsername: getEnvMust("FLIPPY_BOOK_SERVER_BASIC_AUTH_USER"),
 		BasicAuthPassword: getEnvMust("FLIPPY_BOOK_SERVER_BASIC_AUTH_PASS"),
 		Token:             getEnvMust("FLIPPY_BOOK_SERVER_TOKEN"),
+		Prefork:           getEnvMustBool("FLIPPY_BOOK_SERVER_PREFORK"),
 	}
 }
 
@@ -37,3 +39,16 @@ func getEnvMust(key string) string {
 	}
 	return value
 }
+
+func getEnvMustBool(key string) bool {
+	value := getEnvMust(key)
+
+	if value != "true" && value != "false" {
+		log.Fatalf("Environment variable %s must be \"true\" or \"false\"", key)
+	}
+
+	return value == "true"
+}
+
+// StaticDir is the path to the static directory
+var StaticDir = "./static"

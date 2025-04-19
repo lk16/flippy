@@ -58,9 +58,6 @@ func NewNormalizedPositionEmpty() NormalizedPosition {
 
 // newNormalizedPosition creates a new normalized position from a player and opponent bitboard
 func newNormalizedPosition(player, opponent uint64) (NormalizedPosition, error) {
-	if player&opponent != 0 {
-		return NormalizedPosition{}, fmt.Errorf("invalid normalized position: player and opponent discs cannot overlap")
-	}
 
 	pos, err := NewPosition(player, opponent)
 	if err != nil {
@@ -126,7 +123,32 @@ func (n NormalizedPosition) Opponent() uint64 {
 	return n.position.Opponent()
 }
 
+// Position returns the underlying position
+func (n NormalizedPosition) Position() Position {
+	return n.position
+}
+
 // CountDiscs returns the number of discs on the board
 func (n NormalizedPosition) CountDiscs() int {
 	return n.position.CountDiscs()
+}
+
+// Scan implements the sql.Scanner interface for NormalizedPosition
+func (n *NormalizedPosition) Scan(value interface{}) error {
+	if value == nil {
+		return fmt.Errorf("cannot scan nil into NormalizedPosition")
+	}
+
+	bytes, ok := value.([]byte)
+	if !ok {
+		return fmt.Errorf("cannot scan %T into NormalizedPosition", value)
+	}
+
+	pos, err := NewNormalizedPositionFromBytes(bytes)
+	if err != nil {
+		return fmt.Errorf("error scanning position: %w", err)
+	}
+
+	*n = pos
+	return nil
 }

@@ -1,9 +1,9 @@
-name: Python package
+name: Lint and test
 
 on: [push, pull_request]
 
 jobs:
-  build:
+  python:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -30,3 +30,17 @@ jobs:
       run: |
         pdm install --production
         pdm run pytest --color=yes --cov=src/flippy --cov-report=term-missing -x -vv
+
+  go:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Run Go tests
+      run: |
+        cd api
+        chmod +x test.sh
+        ./test.sh
