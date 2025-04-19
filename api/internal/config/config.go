@@ -51,4 +51,4 @@ func getEnvMustBool(key string) bool {
 }
 
 // StaticDir is the path to the static directory
-var StaticDir = "../src/flippy/book/static"
+var StaticDir = "./static"
