@@ -1,0 +1,56 @@
+services:
+  test-app:
+    build:
+      context: .
+      dockerfile: test.Dockerfile
+    environment:
+      - FLIPPY_BOOK_SERVER_HOST=0.0.0.0
+      - FLIPPY_BOOK_SERVER_PORT=3000
+      - FLIPPY_REDIS_URL=redis://test-redis:6379
+      - FLIPPY_POSTGRES_URL=postgres://pg-test-user:pg-test-password@test-postgres:5432/pg-test-db?sslmode=disable
+      - FLIPPY_BOOK_SERVER_TOKEN=test-token
+      - FLIPPY_BOOK_SERVER_BASIC_AUTH_USER=test-user
+      - FLIPPY_BOOK_SERVER_BASIC_AUTH_PASS=test-password
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+    networks:
+      - flippy-test-network
+    depends_on:
+      - test-postgres
+      - test-redis
+
+  test-postgres:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: pg-test-user
+      POSTGRES_PASSWORD: pg-test-password
+      POSTGRES_DB: pg-test-db
+    ports:
+      - "5433:5432"
+    networks:
+      - flippy-test-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pg-test-user"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  test-redis:
+    image: redis:7
+    ports:
+      - "6380:6379"
+    networks:
+      - flippy-test-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+networks:
+  flippy-test-network:
+    driver: bridge
