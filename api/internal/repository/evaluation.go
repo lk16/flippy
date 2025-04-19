@@ -161,16 +161,14 @@ func (repo *EvaluationRepository) LookupPositions(ctx context.Context, positions
 	defer rows.Close()
 
 	evaluations := make([]models.Evaluation, 0)
-	for rows.Next() {
-		var eval models.Evaluation
-		if err := eval.ScanRow(rows); err != nil {
-			return nil, fmt.Errorf("error scanning evaluation: %w", err)
-		}
-		evaluations = append(evaluations, eval)
-	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rows: %w", err)
+	for rows.Next() {
+		var evaluation models.Evaluation
+		err = rows.StructScan(&evaluation)
+		if err != nil {
+			return nil, fmt.Errorf("error scanning evaluations: %w", err)
+		}
+		evaluations = append(evaluations, evaluation)
 	}
 
 	return evaluations, nil

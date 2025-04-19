@@ -2,10 +2,9 @@ package models
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
-
-	"github.com/jmoiron/sqlx"
-	"github.com/lib/pq"
 )
 
 // RegisterRequest represents the payload for client registration
@@ -48,12 +47,46 @@ type JobResult struct {
 
 // Evaluation represents an evaluation result
 type Evaluation struct {
-	Position   NormalizedPosition `json:"position"`
-	Level      int                `json:"level"`
-	Depth      int                `json:"depth"`
-	Confidence float64            `json:"confidence"`
-	Score      int                `json:"score"`
-	BestMoves  []int              `json:"best_moves"`
+	Position   NormalizedPosition `json:"position" db:"position"`
+	Level      int                `json:"level" db:"level"`
+	Depth      int                `json:"depth" db:"depth"`
+	Confidence float64            `json:"confidence" db:"confidence"`
+	Score      int                `json:"score" db:"score"`
+	BestMoves  BestMoves          `json:"best_moves" db:"best_moves"`
+}
+
+// BestMoves is a slice of BestMove that implements sql.Scanner
+type BestMoves []int
+
+// Scan implements the sql.Scanner interface for BestMoves
+func (b *BestMoves) Scan(value interface{}) error {
+	bytes, ok := value.([]byte)
+	if !ok {
+		return fmt.Errorf("cannot scan %T into BestMoves", value)
+	}
+
+	if bytes == nil {
+		return fmt.Errorf("cannot scan nil into BestMoves")
+	}
+
+	s := string(bytes)
+
+	// We should have a string that looks like "{1,2,3}"
+	s = strings.Trim(s, "{}")
+
+	parts := strings.Split(s, ",")
+
+	moves := make([]int, len(parts))
+	for i, part := range parts {
+		move, err := strconv.Atoi(part)
+		if err != nil {
+			return fmt.Errorf("cannot convert %s to int: %w", part, err)
+		}
+		moves[i] = move
+	}
+	*b = moves
+
+	return nil
 }
 
 // LookupPositionsPayload represents a request to look up positions
@@ -64,30 +97,6 @@ type LookupPositionsPayload struct {
 // EvaluationsPayload represents a batch of evaluations to submit
 type EvaluationsPayload struct {
 	Evaluations []Evaluation `json:"evaluations"`
-}
-
-// ScanRow scans a database row into an Evaluation struct
-func (e *Evaluation) ScanRow(rows *sqlx.Rows) error {
-	var positionBytes []byte
-	var bestMoves []int64
-
-	if err := rows.Scan(&positionBytes, &e.Level, &e.Depth, &e.Confidence, &e.Score, pq.Array(&bestMoves)); err != nil {
-		return fmt.Errorf("error scanning evaluation: %w", err)
-	}
-
-	var err error
-	e.Position, err = NewNormalizedPositionFromBytes(positionBytes)
-	if err != nil {
-		return fmt.Errorf("error parsing position: %w", err)
-	}
-
-	// Convert int64 array to int array
-	e.BestMoves = make([]int, len(bestMoves))
-	for i, move := range bestMoves {
-		e.BestMoves[i] = int(move)
-	}
-
-	return nil
 }
 
 type BookStats struct {
