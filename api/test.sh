@@ -26,8 +26,14 @@ done
 docker compose -f $COMPOSE_FILE exec -T test-postgres psql -U pg-test-user -d pg-test-db < ../schema.sql
 
 # Start application
-docker compose -f $COMPOSE_FILE build test-app
-docker compose -f $COMPOSE_FILE up -d test-app
+docker compose -f $COMPOSE_FILE up -d --build test-app
+
+# Wait for server to be ready
+echo "Waiting for server to be ready..."
+while ! curl -s http://localhost:3000/version > /dev/null; do
+    sleep 1
+done
+echo "Server is ready"
 
 # Run tests
 echo "Running tests..."

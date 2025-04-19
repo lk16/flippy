@@ -11,15 +11,13 @@ services:
       - FLIPPY_BOOK_SERVER_TOKEN=test-token
       - FLIPPY_BOOK_SERVER_BASIC_AUTH_USER=test-user
       - FLIPPY_BOOK_SERVER_BASIC_AUTH_PASS=test-password
+      - FLIPPY_BOOK_SERVER_PREFORK=false
     ports:
       - "3000:3000"
     volumes:
       - .:/app
     networks:
       - flippy-test-network
-    depends_on:
-      - test-postgres
-      - test-redis
 
   test-postgres:
     image: postgres:latest

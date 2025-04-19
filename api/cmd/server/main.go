@@ -17,7 +17,7 @@ func main() {
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
-		Prefork:      true,
+		Prefork:      cfg.Prefork,
 		Concurrency:  256 * 1024, // Maximum number of concurrent connections per worker
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
