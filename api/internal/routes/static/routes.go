@@ -1,4 +1,4 @@
-package routes
+package static
 
 import (
 	"net/http"
@@ -9,10 +9,14 @@ import (
 
 const StaticDir = "../src/flippy/book/static"
 
-// StaticHandler serves static files
-func StaticHandler() fiber.Handler {
+// staticHandler serves static files
+func staticHandler() fiber.Handler {
 	return filesystem.New(filesystem.Config{
 		Root:   http.Dir(StaticDir),
 		Browse: false,
 	})
+}
+
+func SetupRoutes(app *fiber.App) {
+	app.Use("/static", staticHandler())
 }
