@@ -16,6 +16,7 @@ services:
       - "3000:3000"
     volumes:
       - .:/app
+      - go-cache:/go/cache
     networks:
       - flippy-test-network
 
@@ -52,3 +53,6 @@ services:
 networks:
   flippy-test-network:
     driver: bridge
+
+volumes:
+  go-cache:
