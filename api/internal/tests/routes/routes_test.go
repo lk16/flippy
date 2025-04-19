@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/lk16/flippy/api/internal/tests"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -15,7 +16,7 @@ func TestRootEndpoint(t *testing.T) {
 		},
 	}
 
-	resp, err := client.Get(BaseURL)
+	resp, err := client.Get(tests.BaseURL)
 
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusFound, resp.StatusCode)
