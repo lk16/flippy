@@ -6,11 +6,12 @@ import (
 	"testing"
 
 	"github.com/lk16/flippy/api/internal/routes/version"
+	"github.com/lk16/flippy/api/internal/tests"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestVersionEndpoint(t *testing.T) {
-	resp, err := http.Get(BaseURL + "/version")
+	resp, err := http.Get(tests.BaseURL + "/version")
 
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
