@@ -10,10 +10,10 @@ import (
 
 func SetupRoutes(app *fiber.App) {
 	clientsGroup := app.Group("/clients", middleware.BasicAuth())
-	clientsGroup.Get("/", ClientsPage)
+	clientsGroup.Get("/", clientsPage)
 }
 
-// ClientsPage serves the clients.html page
-func ClientsPage(c *fiber.Ctx) error {
+// clientsPage serves the clients.html page
+func clientsPage(c *fiber.Ctx) error {
 	return c.SendFile(filepath.Join(config.StaticDir, "clients.html"))
 }
