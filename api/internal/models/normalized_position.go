@@ -58,6 +58,7 @@ func NewNormalizedPositionEmpty() NormalizedPosition {
 
 // newNormalizedPosition creates a new normalized position from a player and opponent bitboard
 func newNormalizedPosition(player, opponent uint64) (NormalizedPosition, error) {
+
 	pos, err := NewPosition(player, opponent)
 	if err != nil {
 		return NormalizedPosition{}, fmt.Errorf("invalid normalized position: %w", err)
@@ -120,6 +121,11 @@ func (n NormalizedPosition) Player() uint64 {
 // Opponent returns the opponent bitboard
 func (n NormalizedPosition) Opponent() uint64 {
 	return n.position.Opponent()
+}
+
+// Position returns the underlying position
+func (n NormalizedPosition) Position() Position {
+	return n.position
 }
 
 // CountDiscs returns the number of discs on the board
