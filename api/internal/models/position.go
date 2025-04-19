@@ -78,26 +78,42 @@ func (p Position) Normalized() Position {
 	return normalized
 }
 
+func (p Position) rotate(rotation int) Position {
+	return Position{
+		player:   rotateBits(p.player, rotation),
+		opponent: rotateBits(p.opponent, rotation),
+	}
+}
+
+func (p Position) isLessThan(other Position) bool {
+	if p.player < other.player {
+		return true
+	}
+	if p.player == other.player && p.opponent < other.opponent {
+		return true
+	}
+	return false
+}
+
+func (p Position) Equals(other Position) bool {
+	return p.player == other.player && p.opponent == other.opponent
+}
+
 // Normalize normalizes the position
 func (p Position) Normalize() (Position, int) {
-	candidate := Position{
-		player:   p.player,
-		opponent: p.opponent,
-	}
+	minPosition := p
 	rotation := 0
 
 	for r := 1; r < 8; r++ {
-		me := rotateBits(p.player, r)
-		opp := rotateBits(p.opponent, r)
+		rotated := p.rotate(r)
 
-		if (me < candidate.player) || (me == candidate.player && opp < candidate.opponent) {
-			candidate.player = me
-			candidate.opponent = opp
+		if rotated.isLessThan(minPosition) {
+			minPosition = rotated
 			rotation = r
 		}
 	}
 
-	return candidate, rotation
+	return minPosition, rotation
 }
 
 // IsNormalized checks if the position is normalized
