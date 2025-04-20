@@ -40,11 +40,6 @@ func AuthOrToken() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		cfg := c.Locals("config").(*config.Config)
 
-		// Skip auth for /api/learn-clients/register
-		if c.Path() == "/api/learn-clients/register" {
-			return c.Next()
-		}
-
 		// Check for token header first
 		token := c.Get("x-token")
 		if token != "" && token == cfg.Token {

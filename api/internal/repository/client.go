@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	clientsKey = "clients"
-	ttl        = 300 * time.Second
+	ClientsKey = "clients"
+	ClientsTTL = 300 * time.Second
 )
 
 type ClientRepository struct {
@@ -58,13 +58,13 @@ func (repo *ClientRepository) RegisterClient(ctx context.Context, req models.Reg
 	redisConn := repo.services.Redis
 
 	// Store in Redis hash and set TTL
-	err = redisConn.HSet(ctx, clientsKey, clientID, jsonData).Err()
+	err = redisConn.HSet(ctx, ClientsKey, clientID, jsonData).Err()
 	if err != nil {
 		return models.RegisterResponse{}, fmt.Errorf("error storing client: %w", err)
 	}
 
 	// Set TTL on the hash
-	err = redisConn.Expire(ctx, clientsKey, ttl).Err()
+	err = redisConn.Expire(ctx, ClientsKey, ClientsTTL).Err()
 	if err != nil {
 		return models.RegisterResponse{}, fmt.Errorf("error setting TTL: %w", err)
 	}
@@ -78,7 +78,7 @@ func (repo *ClientRepository) UpdateHeartbeat(ctx context.Context, clientID stri
 	redisConn := repo.services.Redis
 
 	// Get current client stats
-	jsonData, err := redisConn.HGet(ctx, clientsKey, clientID).Bytes()
+	jsonData, err := redisConn.HGet(ctx, ClientsKey, clientID).Bytes()
 	if err != nil {
 		if err == redis.Nil {
 			return fmt.Errorf("client %s not found", clientID)
@@ -102,12 +102,12 @@ func (repo *ClientRepository) UpdateHeartbeat(ctx context.Context, clientID stri
 	}
 
 	// Update in Redis and reset TTL
-	err = redisConn.HSet(ctx, clientsKey, clientID, jsonData).Err()
+	err = redisConn.HSet(ctx, ClientsKey, clientID, jsonData).Err()
 	if err != nil {
 		return fmt.Errorf("error updating client: %w", err)
 	}
 
-	err = redisConn.Expire(ctx, clientsKey, ttl).Err()
+	err = redisConn.Expire(ctx, ClientsKey, ClientsTTL).Err()
 	if err != nil {
 		return fmt.Errorf("error setting TTL: %w", err)
 	}
@@ -121,7 +121,7 @@ func (repo *ClientRepository) GetClientStatsList(ctx context.Context) (models.St
 	redisConn := repo.services.Redis
 
 	// Get all clients from Redis hash
-	clients, err := redisConn.HGetAll(ctx, clientsKey).Result()
+	clients, err := redisConn.HGetAll(ctx, ClientsKey).Result()
 	if err != nil {
 		return models.StatsResponse{}, fmt.Errorf("error getting clients: %w", err)
 	}
@@ -153,7 +153,7 @@ var ErrClientNotFound = errors.New("client not found")
 func (repo *ClientRepository) GetClientStats(ctx context.Context, clientID string) (models.ClientStats, error) {
 	redisConn := repo.services.Redis
 
-	_, err := redisConn.HGet(ctx, clientsKey, clientID).Bytes()
+	_, err := redisConn.HGet(ctx, ClientsKey, clientID).Bytes()
 
 	if err == redis.Nil {
 		return models.ClientStats{}, ErrClientNotFound
@@ -171,7 +171,7 @@ func (repo *ClientRepository) AssignJob(ctx context.Context, clientID string, jo
 	redisConn := repo.services.Redis
 
 	// Get current client stats
-	jsonData, err := redisConn.HGet(ctx, clientsKey, clientID).Bytes()
+	jsonData, err := redisConn.HGet(ctx, ClientsKey, clientID).Bytes()
 	if err != nil {
 		if err == redis.Nil {
 			return fmt.Errorf("client %s not found", clientID)
@@ -195,12 +195,12 @@ func (repo *ClientRepository) AssignJob(ctx context.Context, clientID string, jo
 	}
 
 	// Update in Redis and reset TTL
-	err = redisConn.HSet(ctx, clientsKey, clientID, jsonData).Err()
+	err = redisConn.HSet(ctx, ClientsKey, clientID, jsonData).Err()
 	if err != nil {
 		return fmt.Errorf("error updating client: %w", err)
 	}
 
-	err = redisConn.Expire(ctx, clientsKey, ttl).Err()
+	err = redisConn.Expire(ctx, ClientsKey, ClientsTTL).Err()
 	if err != nil {
 		return fmt.Errorf("error setting TTL: %w", err)
 	}
@@ -212,7 +212,7 @@ func (repo *ClientRepository) AssignJob(ctx context.Context, clientID string, jo
 func (repo *ClientRepository) CompleteJob(ctx context.Context, clientID string) error {
 	redisConn := repo.services.Redis
 	// Get current client stats
-	jsonData, err := redisConn.HGet(ctx, clientsKey, clientID).Bytes()
+	jsonData, err := redisConn.HGet(ctx, ClientsKey, clientID).Bytes()
 	if err != nil {
 		if err == redis.Nil {
 			return fmt.Errorf("client %s not found", clientID)
@@ -236,12 +236,12 @@ func (repo *ClientRepository) CompleteJob(ctx context.Context, clientID string) 
 	}
 
 	// Update in Redis and reset TTL
-	err = redisConn.HSet(ctx, clientsKey, clientID, jsonData).Err()
+	err = redisConn.HSet(ctx, ClientsKey, clientID, jsonData).Err()
 	if err != nil {
 		return fmt.Errorf("error updating client: %w", err)
 	}
 
-	err = redisConn.Expire(ctx, clientsKey, ttl).Err()
+	err = redisConn.Expire(ctx, ClientsKey, ClientsTTL).Err()
 	if err != nil {
 		return fmt.Errorf("error setting TTL: %w", err)
 	}
@@ -254,7 +254,7 @@ func (r *ClientRepository) GetTakenPositionsBytes(ctx context.Context) [][]byte 
 	redisConn := r.services.Redis
 
 	// Get all clients from Redis hash
-	clients, err := redisConn.HGetAll(ctx, clientsKey).Result()
+	clients, err := redisConn.HGetAll(ctx, ClientsKey).Result()
 	if err != nil {
 		return nil
 	}
