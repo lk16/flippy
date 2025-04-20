@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
@@ -160,22 +161,20 @@ func (repo *EvaluationRepository) LookupPositions(ctx context.Context, positions
 	defer rows.Close()
 
 	evaluations := make([]models.Evaluation, 0)
-	for rows.Next() {
-		var eval models.Evaluation
-		if err := eval.ScanRow(rows); err != nil {
-			return nil, fmt.Errorf("error scanning evaluation: %w", err)
-		}
-		evaluations = append(evaluations, eval)
-	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rows: %w", err)
+	for rows.Next() {
+		var evaluation models.Evaluation
+		err = rows.StructScan(&evaluation)
+		if err != nil {
+			return nil, fmt.Errorf("error scanning evaluations: %w", err)
+		}
+		evaluations = append(evaluations, evaluation)
 	}
 
 	return evaluations, nil
 }
 
-func (repo *EvaluationRepository) RefreshBookStats(ctx context.Context) error {
+func (repo *EvaluationRepository) buildInitialBookStats(ctx context.Context) error {
 	pgConn := repo.services.Postgres
 	redisConn := repo.services.Redis
 
@@ -207,6 +206,8 @@ func (repo *EvaluationRepository) RefreshBookStats(ctx context.Context) error {
 	// Store in Redis hash
 	err = redisConn.HSet(ctx, bookStatsKey, statsMap).Err()
 	if err != nil {
+		log.Printf("statsMap = %+v", statsMap)
+
 		return fmt.Errorf("error storing book stats in Redis: %w", err)
 	}
 
@@ -221,6 +222,19 @@ func (repo *EvaluationRepository) GetBookStats(ctx context.Context) ([]models.Bo
 	stats, err := redisConn.HGetAll(ctx, bookStatsKey).Result()
 	if err != nil {
 		return nil, fmt.Errorf("error getting book stats from Redis: %w", err)
+	}
+
+	if len(stats) == 0 {
+		err = repo.buildInitialBookStats(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("error building initial book stats: %w", err)
+		}
+
+		// Try reading from Redis again after building stats
+		stats, err = redisConn.HGetAll(ctx, bookStatsKey).Result()
+		if err != nil {
+			return nil, fmt.Errorf("error getting book stats from Redis after build: %w", err)
+		}
 	}
 
 	bookStats := make([]models.BookStats, 0)
@@ -260,33 +274,16 @@ func (repo *EvaluationRepository) refreshCachedAvailableJobs(ctx context.Context
 	}
 	defer tx.Rollback()
 
-	// TODO use repo.GetBookStats() instead of calling DB directly
+	bookStats, err := repo.GetBookStats(ctx)
+	if err != nil {
+		return fmt.Errorf("error getting book stats: %w", err)
+	}
 
 	// Find disc counts that have positions needing work
-	query := `
-		SELECT disc_count, level, count(*)
-		FROM edax
-		GROUP BY disc_count, level
-		ORDER BY disc_count, level
-	`
-
-	type statRow struct {
-		DiscCount int `db:"disc_count"`
-		Level     int `db:"level"`
-		Count     int `db:"count"`
-	}
-
-	var rows []statRow
-	err = tx.SelectContext(ctx, &rows, query)
-	if err != nil {
-		return fmt.Errorf("error getting stats: %w", err)
-	}
-
-	// Find learnable disc counts
 	learnableDiscCounts := make([]int, 0)
-	for _, row := range rows {
-		if row.Level < getLearnLevel(row.DiscCount) {
-			learnableDiscCounts = append(learnableDiscCounts, row.DiscCount)
+	for _, bookStat := range bookStats {
+		if bookStat.Level < getLearnLevel(bookStat.DiscCount) {
+			learnableDiscCounts = append(learnableDiscCounts, bookStat.DiscCount)
 		}
 	}
 
@@ -297,7 +294,7 @@ func (repo *EvaluationRepository) refreshCachedAvailableJobs(ctx context.Context
 	var positionBytes [][]byte
 	for _, dc := range learnableDiscCounts {
 		learnLevel := getLearnLevel(dc)
-		query = `
+		query := `
 			SELECT position
 			FROM edax
 			WHERE disc_count = $1
@@ -320,19 +317,15 @@ func (repo *EvaluationRepository) refreshCachedAvailableJobs(ctx context.Context
 		break
 	}
 
-	positions := make([]models.NormalizedPosition, 0, len(positionBytes))
+	positionStrings := make([]string, 0, len(positionBytes))
 	for _, positionBytes := range positionBytes {
-		position, err := models.NewNormalizedPositionFromBytes(positionBytes)
+		nPos, err := models.NewNormalizedPositionFromBytes(positionBytes)
 		if err != nil {
 			return fmt.Errorf("error parsing position: %w", err)
 		}
-		positions = append(positions, position)
-	}
 
-	// Convert positions to strings and push to Redis
-	positionStrings := make([]string, 0, len(positions))
-	for _, pos := range positions {
-		positionStrings = append(positionStrings, pos.String())
+		// Convert positions to strings and push to Redis
+		positionStrings = append(positionStrings, nPos.String())
 	}
 
 	if len(positionStrings) > 0 {

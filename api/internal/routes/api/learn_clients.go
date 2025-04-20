@@ -28,8 +28,8 @@ func RegisterClient(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(resp)
 }
 
-// GetClient handles client registration
-func GetClient(c *fiber.Ctx) (string, error) {
+// lookupClientInRedis checks if the client ID is registered
+func lookupClientInRedis(c *fiber.Ctx) (string, error) {
 	clientID := c.Get("client-id")
 	if clientID == "" {
 		return "", errors.New("missing client ID")
@@ -45,7 +45,7 @@ func GetClient(c *fiber.Ctx) (string, error) {
 
 // Heartbeat handles client heartbeat updates
 func Heartbeat(c *fiber.Ctx) error {
-	clientID, err := GetClient(c)
+	clientID, err := lookupClientInRedis(c)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": err.Error(),
@@ -77,7 +77,7 @@ func GetClients(c *fiber.Ctx) error {
 
 // GetJob handles job assignment to clients
 func GetJob(c *fiber.Ctx) error {
-	clientID, err := GetClient(c)
+	clientID, err := lookupClientInRedis(c)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": err.Error(),

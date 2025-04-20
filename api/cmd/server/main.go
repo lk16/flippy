@@ -1,14 +1,12 @@
 package main
 
 import (
-	"context"
 	"log"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/lk16/flippy/api/internal/config"
 	"github.com/lk16/flippy/api/internal/middleware"
-	"github.com/lk16/flippy/api/internal/repository"
 	"github.com/lk16/flippy/api/internal/routes"
 	"github.com/lk16/flippy/api/internal/services"
 )
@@ -19,7 +17,7 @@ func main() {
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
-		Prefork:      true,
+		Prefork:      cfg.Prefork,
 		Concurrency:  256 * 1024, // Maximum number of concurrent connections per worker
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
@@ -31,13 +29,6 @@ func main() {
 	services, err := services.InitServices(cfg)
 	if err != nil {
 		log.Fatalf("Failed to initialize services: %v", err)
-	}
-
-	// (Re)build book stats, before starting the server
-	evaluationRepo := repository.NewEvaluationRepositoryFromServices(services)
-	err = evaluationRepo.RefreshBookStats(context.Background())
-	if err != nil {
-		log.Fatalf("Failed to refresh book stats: %v", err)
 	}
 
 	// Setup connections to external services and config in Fiber app
