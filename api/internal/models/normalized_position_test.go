@@ -241,7 +241,7 @@ func TestNormalizedPosition_Normalized(t *testing.T) {
 				assert.Equal(t, nPos.Position(), rotated)
 			} else {
 				assert.NotEqual(t, nPos.Position(), rotated)
-				assert.Equal(t, nPos.Position(), rotated.Normalized())
+				assert.Equal(t, nPos, rotated.Normalized())
 			}
 		}
 	}
@@ -272,8 +272,7 @@ func getNormalizedPositionWithMoves(discCount int) NormalizedPosition {
 		}
 	}
 
-	pos = pos.Normalized()
-	return NewNormalizedPositionMust(pos.Player(), pos.Opponent())
+	return pos.Normalized()
 }
 
 func TestNormalizedPosition_IsDbSavable(t *testing.T) {

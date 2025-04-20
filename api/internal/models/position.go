@@ -121,9 +121,7 @@ func NewPositionEmpty() Position {
 }
 
 // Normalized returns the normalized position
-func (p Position) Normalized() Position {
-	// TODO this is confusing, we should return a NormalizedPosition
-
+func (p Position) Normalized() NormalizedPosition {
 	normalized, _ := p.Normalize()
 	return normalized
 }
@@ -151,7 +149,7 @@ func (p Position) isLessThan(other Position) bool {
 }
 
 // Normalize normalizes the position
-func (p Position) Normalize() (Position, int) {
+func (p Position) Normalize() (NormalizedPosition, int) {
 	minPosition := p
 	rotation := 0
 
@@ -164,12 +162,17 @@ func (p Position) Normalize() (Position, int) {
 		}
 	}
 
-	return minPosition, rotation
+	// We don't use NewNormalizedPositionMust here, to prevent infinite recursion
+	nPos := NormalizedPosition{
+		position: minPosition,
+	}
+
+	return nPos, rotation
 }
 
 // IsNormalized checks if the position is normalized
 func (p Position) IsNormalized() bool {
-	return p.Normalized() == p
+	return p.Normalized().Position() == p
 }
 
 // Player returns the player bitboard

@@ -272,23 +272,23 @@ func TestPosition_Rotate(t *testing.T) {
 
 func TestPosition_Normalize(t *testing.T) {
 	for _, pos := range generateTestPositions(t) {
-		normalized, rotation := pos.Normalize()
-		assert.Equal(t, normalized, pos.rotate(rotation))
-		assert.Equal(t, pos, normalized.unrotate(rotation))
+		nPos, rotation := pos.Normalize()
+		assert.Equal(t, nPos.Position(), pos.rotate(rotation))
+		assert.Equal(t, pos, nPos.Position().unrotate(rotation))
 	}
 }
 
 func TestPosition_Normalized(t *testing.T) {
 	for _, pos := range generateTestPositions(t) {
-		normalized := pos.Normalized()
-		wantNormalized, _ := pos.Normalize()
-		assert.Equal(t, wantNormalized, normalized)
+		nPos := pos.Normalized()
+		wantNPos, _ := pos.Normalize()
+		assert.Equal(t, wantNPos, nPos)
 	}
 }
 
 func TestPosition_IsNormalized(t *testing.T) {
 	for _, pos := range generateTestPositions(t) {
-		assert.Equal(t, pos.IsNormalized(), pos.Normalized() == pos)
+		assert.Equal(t, pos.IsNormalized(), pos.Normalized().Position() == pos)
 	}
 }
 
