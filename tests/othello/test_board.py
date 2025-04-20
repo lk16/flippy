@@ -59,6 +59,8 @@ def test_indexes_to_fields(indexes: Iterable[int], expected: str) -> None:
         pytest.param("--", PASS_MOVE, id="field---"),
         pytest.param("ps", PASS_MOVE, id="field-ps"),
         pytest.param("PS", PASS_MOVE, id="field-PS"),
+        pytest.param("pa", PASS_MOVE, id="field-pa"),
+        pytest.param("PA", PASS_MOVE, id="field-PA"),
     ],
 )
 def test_field_to_index_ok(field: str, expected: int) -> None:
