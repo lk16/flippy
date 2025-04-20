@@ -35,7 +35,11 @@ func SubmitEvaluations(c *fiber.Ctx) error {
 		})
 	}
 
-	// TODO validate payload: prevent entries with too high disc count or too low level
+	if err := payload.Validate(); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
 
 	repo := repository.NewEvaluationRepository(c)
 	if err := repo.SubmitEvaluations(c.Context(), payload); err != nil {

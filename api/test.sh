@@ -40,4 +40,13 @@ echo "Server is ready"
 
 # Run tests
 echo "Running tests..."
+export FLIPPY_REDIS_URL='redis://localhost:6380'
+export FLIPPY_POSTGRES_URL='postgres://pg-test-user:pg-test-password@localhost:5433/pg-test-db?sslmode=disable'
+export FLIPPY_BOOK_SERVER_HOST='localhost'
+export FLIPPY_BOOK_SERVER_PORT='3000'
+export FLIPPY_BOOK_SERVER_BASIC_AUTH_USER='test-user'
+export FLIPPY_BOOK_SERVER_BASIC_AUTH_PASS='test-password'
+export FLIPPY_BOOK_SERVER_TOKEN='test-token'
+export FLIPPY_BOOK_SERVER_PREFORK='false'
+
 go test -v ./internal/...

@@ -2,8 +2,12 @@ package models
 
 import (
 	"encoding/binary"
+	"encoding/json"
+	"fmt"
+	"log"
 	"testing"
 
+	"github.com/lk16/flippy/api/internal/config"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -36,13 +40,13 @@ func TestNewNormalizedPositionFromString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pos, err := NewNormalizedPositionFromString(tt.input)
+			nPos, err := NewNormalizedPositionFromString(tt.input)
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
 			}
 			assert.NoError(t, err)
-			assert.Equal(t, tt.input, pos.String())
+			assert.Equal(t, tt.input, nPos.String())
 		})
 	}
 }
@@ -70,38 +74,48 @@ func TestNewNormalizedPositionFromBytes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pos, err := NewNormalizedPositionFromBytes(tt.input)
+			nPos, err := NewNormalizedPositionFromBytes(tt.input)
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
 			}
 			assert.NoError(t, err)
-			assert.Equal(t, tt.input, pos.Bytes())
+			assert.Equal(t, tt.input, nPos.Bytes())
 		})
 	}
 }
 
-func TestNormalizedPosition_String(t *testing.T) {
-	pos := NormalizedPosition{
-		position: Position{
-			player:   0x0000000000000001,
-			opponent: 0x8000000000000000,
-		},
+func TestNewNormalizedPositionEmpty(t *testing.T) {
+	nPos := NewNormalizedPositionEmpty()
+	assert.Equal(t, uint64(0x0), nPos.Player())
+	assert.Equal(t, uint64(0x0), nPos.Opponent())
+}
+
+func generateTestNormalizedPositions(t *testing.T) []NormalizedPosition {
+	positions := generateTestPositions(t)
+
+	normalized := make([]NormalizedPosition, len(positions))
+	for i, pos := range positions {
+		normalizedPosition := pos.Normalized()
+		normalized[i] = NewNormalizedPositionMust(normalizedPosition.Player(), normalizedPosition.Opponent())
 	}
-	assert.Equal(t, "00000000000000018000000000000000", pos.String())
+	return normalized
+}
+
+func TestNormalizedPosition_String(t *testing.T) {
+	for _, nPos := range generateTestNormalizedPositions(t) {
+		want := fmt.Sprintf("%016X%016X", nPos.Player(), nPos.Opponent())
+		assert.Equal(t, want, nPos.String())
+	}
 }
 
 func TestNormalizedPosition_Bytes(t *testing.T) {
-	pos := NormalizedPosition{
-		position: Position{
-			player:   0x0000000000000001,
-			opponent: 0x8000000000000000,
-		},
+	for _, nPos := range generateTestNormalizedPositions(t) {
+		bytes := nPos.Bytes()
+		assert.Len(t, bytes, 16)
+		assert.Equal(t, nPos.Player(), binary.LittleEndian.Uint64(bytes[:8]))
+		assert.Equal(t, nPos.Opponent(), binary.LittleEndian.Uint64(bytes[8:]))
 	}
-	bytes := pos.Bytes()
-	assert.Len(t, bytes, 16)
-	assert.Equal(t, uint64(0x0000000000000001), binary.LittleEndian.Uint64(bytes[:8]))
-	assert.Equal(t, uint64(0x8000000000000000), binary.LittleEndian.Uint64(bytes[8:]))
 }
 
 func TestNormalizedPosition_Scan(t *testing.T) {
@@ -117,12 +131,7 @@ func TestNormalizedPosition_Scan(t *testing.T) {
 			input:      make([]byte, 16),
 			wantErr:    false,
 			wantErrMsg: "",
-			want: NormalizedPosition{
-				position: Position{
-					player:   0x0000000000000000,
-					opponent: 0x0000000000000000,
-				},
-			},
+			want:       NewNormalizedPositionEmpty(),
 		},
 		{
 			name:       "not normalized",
@@ -149,14 +158,21 @@ func TestNormalizedPosition_Scan(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var pos NormalizedPosition
-			err := pos.Scan(tt.input)
+			var nPos NormalizedPosition
+			err := nPos.Scan(tt.input)
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
 			}
 			assert.NoError(t, err)
 		})
+	}
+
+	for _, nPos := range generateTestNormalizedPositions(t) {
+		var scannedNPos NormalizedPosition
+		err := scannedNPos.Scan(nPos.Bytes())
+		assert.NoError(t, err)
+		assert.Equal(t, nPos, scannedNPos)
 	}
 }
 
@@ -183,8 +199,8 @@ func TestNormalizedPosition_UnmarshalJSON(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var pos NormalizedPosition
-			err := pos.UnmarshalJSON([]byte(tt.input))
+			var nPos NormalizedPosition
+			err := nPos.UnmarshalJSON([]byte(tt.input))
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
@@ -192,95 +208,182 @@ func TestNormalizedPosition_UnmarshalJSON(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	}
+
+	for _, nPos := range generateTestNormalizedPositions(t) {
+		marshalled, err := json.Marshal(nPos.String())
+		assert.NoError(t, err)
+
+		var unmarshalled NormalizedPosition
+		err = unmarshalled.UnmarshalJSON(marshalled)
+		assert.NoError(t, err)
+		assert.Equal(t, nPos, unmarshalled)
+	}
 }
 
 func TestNormalizedPosition_MarshalJSON(t *testing.T) {
-	pos := NormalizedPosition{
-		position: Position{
-			player:   0x0000000000000001,
-			opponent: 0x8000000000000000,
-		},
+	for _, nPos := range generateTestNormalizedPositions(t) {
+		bytes, err := nPos.MarshalJSON()
+		assert.NoError(t, err)
+
+		var unmarshalledString string
+		err = json.Unmarshal(bytes, &unmarshalledString)
+		assert.NoError(t, err)
+		assert.Equal(t, nPos.String(), unmarshalledString)
 	}
-	bytes, err := pos.MarshalJSON()
-	assert.NoError(t, err)
-	assert.Equal(t, `"00000000000000018000000000000000"`, string(bytes))
 }
 
 func TestNormalizedPosition_Normalized(t *testing.T) {
-	normalized, err := NewNormalizedPositionFromUint64s(0x8000000, 0x3810000000)
-	assert.NoError(t, err)
+	for _, nPos := range generateTestNormalizedPositions(t) {
+		for rotation := 0; rotation < 8; rotation++ {
+			rotated := nPos.Position().rotate(rotation)
 
-	for rotation := 0; rotation < 8; rotation++ {
-		rotated := normalized.Position().rotate(rotation)
-
-		if rotated.IsNormalized() {
-			assert.Equal(t, normalized.Position(), rotated)
-			assert.Equal(t, 0, rotation)
-		} else {
-			assert.True(t, normalized.Position().equals(rotated.Normalized()))
-			assert.NotEqual(t, 0, rotation)
+			if rotated.IsNormalized() {
+				assert.Equal(t, nPos.Position(), rotated)
+			} else {
+				assert.NotEqual(t, nPos.Position(), rotated)
+				assert.Equal(t, nPos.Position(), rotated.Normalized())
+			}
 		}
-
 	}
 }
 
 func TestNormalizedPosition_Accessors(t *testing.T) {
+	for _, nPos := range generateTestNormalizedPositions(t) {
+
+		// Test shorthands
+		assert.Equal(t, nPos.position.Player(), nPos.Player())
+		assert.Equal(t, nPos.position.Opponent(), nPos.Opponent())
+		assert.Equal(t, nPos.position, nPos.Position())
+		assert.Equal(t, nPos.position.CountDiscs(), nPos.CountDiscs())
+	}
+}
+
+// getNormalizedPositionWithMoves returns a normalized position with the given number of discs
+// and ensures that the position has moves
+func getNormalizedPositionWithMoves(discCount int) NormalizedPosition {
+	var pos Position
+
+	// Make sure position has moves
+	for !pos.HasMoves() {
+		var err error
+		pos, err = NewPositionRandom(discCount)
+		if err != nil {
+			log.Fatalf("error creating position: %s", err)
+		}
+	}
+
+	pos = pos.Normalized()
+	return NewNormalizedPositionMust(pos.Player(), pos.Opponent())
+}
+
+func TestNormalizedPosition_IsDbSavable(t *testing.T) {
 	tests := []struct {
-		name           string
-		position       Position
-		wantPlayer     uint64
-		wantOpponent   uint64
-		wantCountDiscs int
+		name string
+		nPos NormalizedPosition
+		want bool
 	}{
 		{
-			name: "empty board",
-			position: Position{
-				player:   0x0000000000000000,
-				opponent: 0x0000000000000000,
-			},
-			wantPlayer:     0x0000000000000000,
-			wantOpponent:   0x0000000000000000,
-			wantCountDiscs: 0,
+			name: "empty",
+			nPos: NewNormalizedPositionEmpty(),
+			want: false,
 		},
 		{
-			name: "single disc each",
-			position: Position{
-				player:   0x0000000000000001,
-				opponent: 0x8000000000000000,
-			},
-			wantPlayer:     0x0000000000000001,
-			wantOpponent:   0x8000000000000000,
-			wantCountDiscs: 2,
+			name: "too many discs",
+			nPos: getNormalizedPositionWithMoves(config.MaxBookSavableDiscs + 1),
+			want: false,
 		},
 		{
-			name: "multiple discs",
-			position: Position{
-				player:   0x0000000000000003, // 2 discs
-				opponent: 0xC000000000000000, // 2 discs
-			},
-			wantPlayer:     0x0000000000000003,
-			wantOpponent:   0xC000000000000000,
-			wantCountDiscs: 4,
+			name: "no moves",
+			nPos: NewNormalizedPositionMust(0xFF, 0x0),
+			want: false,
+		},
+		{
+			name: "valid max discs",
+			nPos: getNormalizedPositionWithMoves(config.MaxBookSavableDiscs),
+			want: true,
+		},
+		{
+			name: "valid min discs",
+			nPos: getNormalizedPositionWithMoves(4),
+			want: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pos := NormalizedPosition{
-				position: tt.position,
+			assert.Equal(t, tt.want, tt.nPos.IsDbSavable())
+		})
+	}
+}
+
+func TestNormalizedPosition_HasMoves(t *testing.T) {
+	for _, nPos := range generateTestNormalizedPositions(t) {
+		assert.Equal(t, nPos.Position().HasMoves(), nPos.HasMoves())
+	}
+}
+
+func TestNormalizedPosition_ValidateBestMoves(t *testing.T) {
+	nPos := getNormalizedPositionWithMoves(4)
+
+	tests := []struct {
+		name       string
+		bestMoves  BestMoves
+		wantErr    bool
+		wantErrMsg string
+	}{
+		{
+			name:       "valid",
+			bestMoves:  BestMoves{19, 18},
+			wantErr:    false,
+			wantErrMsg: "",
+		},
+		{
+			name:       "invalid last move",
+			bestMoves:  BestMoves{19, 18, 63},
+			wantErr:    true,
+			wantErrMsg: "invalid move: 63",
+		},
+		{
+			name:       "invalid first move",
+			bestMoves:  BestMoves{63, 18, 17},
+			wantErr:    true,
+			wantErrMsg: "invalid move: 63",
+		},
+		{
+			name:       "invalid middle move",
+			bestMoves:  BestMoves{19, 63, 17},
+			wantErr:    true,
+			wantErrMsg: "invalid move: 63",
+		},
+		{
+			name:       "move out of bounds",
+			bestMoves:  BestMoves{19, -8, 17},
+			wantErr:    true,
+			wantErrMsg: "invalid move: -8",
+		},
+		{
+			name:       "no moves",
+			bestMoves:  BestMoves{},
+			wantErr:    false,
+			wantErrMsg: "",
+		},
+		{
+			name:       "nil",
+			bestMoves:  nil,
+			wantErr:    true,
+			wantErrMsg: "best moves is nil",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := nPos.ValidateBestMoves(tt.bestMoves)
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Equal(t, tt.wantErrMsg, err.Error())
+			} else {
+				assert.NoError(t, err)
 			}
-
-			// Test Player()
-			assert.Equal(t, tt.wantPlayer, pos.Player())
-
-			// Test Opponent()
-			assert.Equal(t, tt.wantOpponent, pos.Opponent())
-
-			// Test Position()
-			assert.Equal(t, tt.position, pos.Position())
-
-			// Test CountDiscs()
-			assert.Equal(t, tt.wantCountDiscs, pos.CountDiscs())
 		})
 	}
 }

@@ -52,3 +52,8 @@ func getEnvMustBool(key string) bool {
 
 // StaticDir is the path to the static directory
 var StaticDir = "./static"
+
+const (
+	MinBookLearnLevel   = 16
+	MaxBookSavableDiscs = 30
+)

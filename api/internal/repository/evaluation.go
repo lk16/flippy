@@ -317,19 +317,15 @@ func (repo *EvaluationRepository) refreshCachedAvailableJobs(ctx context.Context
 		break
 	}
 
-	positions := make([]models.NormalizedPosition, 0, len(positionBytes))
+	positionStrings := make([]string, 0, len(positionBytes))
 	for _, positionBytes := range positionBytes {
-		position, err := models.NewNormalizedPositionFromBytes(positionBytes)
+		nPos, err := models.NewNormalizedPositionFromBytes(positionBytes)
 		if err != nil {
 			return fmt.Errorf("error parsing position: %w", err)
 		}
-		positions = append(positions, position)
-	}
 
-	// Convert positions to strings and push to Redis
-	positionStrings := make([]string, 0, len(positions))
-	for _, pos := range positions {
-		positionStrings = append(positionStrings, pos.String())
+		// Convert positions to strings and push to Redis
+		positionStrings = append(positionStrings, nPos.String())
 	}
 
 	if len(positionStrings) > 0 {

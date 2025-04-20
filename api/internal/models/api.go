@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lk16/flippy/api/internal/config"
 )
 
 // RegisterRequest represents the payload for client registration
@@ -50,9 +52,41 @@ type Evaluation struct {
 	Position   NormalizedPosition `json:"position" db:"position"`
 	Level      int                `json:"level" db:"level"`
 	Depth      int                `json:"depth" db:"depth"`
-	Confidence float64            `json:"confidence" db:"confidence"`
+	Confidence int                `json:"confidence" db:"confidence"`
 	Score      int                `json:"score" db:"score"`
 	BestMoves  BestMoves          `json:"best_moves" db:"best_moves"`
+}
+
+func (e *Evaluation) Validate() error {
+	if !e.Position.IsDbSavable() {
+		return fmt.Errorf("position is not savable")
+	}
+
+	if e.Level < config.MinBookLearnLevel {
+		return fmt.Errorf("level is below the minimum learn level of %d", config.MinBookLearnLevel)
+	}
+
+	if e.Depth < 0 || e.Depth > 60 {
+		return fmt.Errorf("depth is out of range")
+	}
+
+	validConfidences := []int{73, 87, 95, 98, 99, 100}
+	isValidConfidence := false
+	for _, c := range validConfidences {
+		if e.Confidence == c {
+			isValidConfidence = true
+			break
+		}
+	}
+	if !isValidConfidence {
+		return fmt.Errorf("confidence must be one of: %v", validConfidences)
+	}
+
+	if e.Score < -64 || e.Score > 64 {
+		return fmt.Errorf("score must be between -64 and 64")
+	}
+
+	return e.Position.ValidateBestMoves(e.BestMoves)
 }
 
 // BestMoves is a slice of BestMove that implements sql.Scanner
@@ -97,6 +131,17 @@ type LookupPositionsPayload struct {
 // EvaluationsPayload represents a batch of evaluations to submit
 type EvaluationsPayload struct {
 	Evaluations []Evaluation `json:"evaluations"`
+}
+
+// Validate validates the evaluations payload
+func (p *EvaluationsPayload) Validate() error {
+	for _, evaluation := range p.Evaluations {
+		if err := evaluation.Validate(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 type BookStats struct {

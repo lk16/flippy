@@ -3,6 +3,11 @@ package models
 import (
 	"fmt"
 	"math/bits"
+	"math/rand"
+)
+
+const (
+	PassMove = -1
 )
 
 // flipHorizontally flips the bits of the position horizontally
@@ -72,8 +77,53 @@ func NewPosition(player, opponent uint64) (Position, error) {
 	}, nil
 }
 
+// NewPositionMust creates a new position from a player and opponent bitboard
+// and panics if the position is invalid
+func NewPositionMust(player, opponent uint64) Position {
+	p, err := NewPosition(player, opponent)
+	if err != nil {
+		panic(err)
+	}
+	return p
+}
+
+// NewPositionRandom creates a new position with a random number of discs
+func NewPositionRandom(discs int) (Position, error) {
+	if discs < 4 || discs > 64 {
+		return Position{}, fmt.Errorf("invalid number of discs: %d", discs)
+	}
+
+	pos := NewPositionStart()
+
+	for pos.CountDiscs() < discs {
+		validMoves := pos.Moves()
+		if validMoves == 0 {
+			pos = NewPositionStart()
+			continue
+		}
+		move := rand.Intn(64)
+		if (1<<move)&validMoves != 0 {
+			pos = pos.DoMove(move)
+		}
+	}
+
+	return pos, nil
+}
+
+// NewPositionStart creates a new position with the starting position
+func NewPositionStart() Position {
+	return NewPositionMust(0x0000000810000000, 0x0000001008000000)
+}
+
+// NewPositionEmpty creates a new position with an empty board
+func NewPositionEmpty() Position {
+	return NewPositionMust(0, 0)
+}
+
 // Normalized returns the normalized position
 func (p Position) Normalized() Position {
+	// TODO this is confusing, we should return a NormalizedPosition
+
 	normalized, _ := p.Normalize()
 	return normalized
 }
@@ -100,10 +150,6 @@ func (p Position) isLessThan(other Position) bool {
 	return false
 }
 
-func (p Position) equals(other Position) bool {
-	return p.player == other.player && p.opponent == other.opponent
-}
-
 // Normalize normalizes the position
 func (p Position) Normalize() (Position, int) {
 	minPosition := p
@@ -123,7 +169,7 @@ func (p Position) Normalize() (Position, int) {
 
 // IsNormalized checks if the position is normalized
 func (p Position) IsNormalized() bool {
-	return p.Normalized().equals(p)
+	return p.Normalized() == p
 }
 
 // Player returns the player bitboard
@@ -139,4 +185,160 @@ func (p Position) Opponent() uint64 {
 // CountDiscs returns the number of discs on the board
 func (p Position) CountDiscs() int {
 	return bits.OnesCount64(p.player | p.opponent)
+}
+
+// HasMoves returns whether the position has any valid moves
+func (p Position) HasMoves() bool {
+	return p.Moves() != 0
+}
+
+// Moves returns a bitset with all valid moves for the player
+// This code is adapted from Edax
+func (p Position) Moves() uint64 {
+	mask := p.opponent & 0x7E7E7E7E7E7E7E7E
+
+	flipL := mask & (p.player << 1)
+	flipL |= mask & (flipL << 1)
+	maskL := mask & (mask << 1)
+	flipL |= maskL & (flipL << (2 * 1))
+	flipL |= maskL & (flipL << (2 * 1))
+	flipR := mask & (p.player >> 1)
+	flipR |= mask & (flipR >> 1)
+	maskR := mask & (mask >> 1)
+	flipR |= maskR & (flipR >> (2 * 1))
+	flipR |= maskR & (flipR >> (2 * 1))
+	movesSet := (flipL << 1) | (flipR >> 1)
+
+	flipL = mask & (p.player << 7)
+	flipL |= mask & (flipL << 7)
+	maskL = mask & (mask << 7)
+	flipL |= maskL & (flipL << (2 * 7))
+	flipL |= maskL & (flipL << (2 * 7))
+	flipR = mask & (p.player >> 7)
+	flipR |= mask & (flipR >> 7)
+	maskR = mask & (mask >> 7)
+	flipR |= maskR & (flipR >> (2 * 7))
+	flipR |= maskR & (flipR >> (2 * 7))
+	movesSet |= (flipL << 7) | (flipR >> 7)
+
+	flipL = mask & (p.player << 9)
+	flipL |= mask & (flipL << 9)
+	maskL = mask & (mask << 9)
+	flipL |= maskL & (flipL << (2 * 9))
+	flipL |= maskL & (flipL << (2 * 9))
+	flipR = mask & (p.player >> 9)
+	flipR |= mask & (flipR >> 9)
+	maskR = mask & (mask >> 9)
+	flipR |= maskR & (flipR >> (2 * 9))
+	flipR |= maskR & (flipR >> (2 * 9))
+	movesSet |= (flipL << 9) | (flipR >> 9)
+
+	flipL = p.opponent & (p.player << 8)
+	flipL |= p.opponent & (flipL << 8)
+	maskL = p.opponent & (p.opponent << 8)
+	flipL |= maskL & (flipL << (2 * 8))
+	flipL |= maskL & (flipL << (2 * 8))
+	flipR = p.opponent & (p.player >> 8)
+	flipR |= p.opponent & (flipR >> 8)
+	maskR = p.opponent & (p.opponent >> 8)
+	flipR |= maskR & (flipR >> (2 * 8))
+	flipR |= maskR & (flipR >> (2 * 8))
+	movesSet |= (flipL << 8) | (flipR >> 8)
+
+	movesSet &^= p.player | p.opponent
+	return movesSet
+}
+
+// flipped returns a bitset with all the opponent discs that would be flipped if the player played on the given move
+func (p Position) flipped(move int) uint64 {
+	flipped := uint64(0)
+
+	moveBit := uint64(1 << move)
+
+	// If we try to play on an occupied square, this is an invalid move
+	if (p.player|p.opponent)&moveBit != 0 {
+		return 0
+	}
+
+	// Directions: horizontal, vertical, and both diagonals
+	directions := [8][2]int{
+		{-1, -1}, {-1, 0}, {-1, 1},
+		{0, -1}, {0, 1},
+		{1, -1}, {1, 0}, {1, 1},
+	}
+
+	for _, dir := range directions {
+		dx, dy := dir[0], dir[1]
+		s := 1
+		for {
+			curx := (move % 8) + (dx * s)
+			cury := (move / 8) + (dy * s)
+			if curx < 0 || curx >= 8 || cury < 0 || cury >= 8 {
+				break
+			}
+
+			cur := 8*cury + curx
+			curBit := uint64(1 << cur)
+
+			if p.opponent&curBit != 0 {
+				s++
+			} else {
+				if (p.player&curBit != 0) && s >= 2 {
+					for dist := 1; dist < s; dist++ {
+						f := move + (dist * (8*dy + dx))
+						flipped |= uint64(1 << f)
+					}
+				}
+				break
+			}
+		}
+	}
+
+	return flipped
+}
+
+// DoMove does a move on the position.
+func (p Position) DoMove(move int) Position {
+	if move == PassMove {
+		return Position{
+			player:   p.opponent,
+			opponent: p.player,
+		}
+	}
+
+	moveBit := uint64(1 << move)
+
+	// Check if the move is on an empty square
+	if (p.player|p.opponent)&moveBit != 0 {
+		return p
+	}
+
+	flipped := p.flipped(move)
+
+	if flipped == 0 {
+		return p
+	}
+
+	opp := p.player | flipped | moveBit
+	me := p.opponent &^ opp
+
+	return Position{
+		player:   me,
+		opponent: opp,
+	}
+}
+
+// IsValidMove checks if a move is valid
+func (p Position) IsValidMove(move int) bool {
+	if move < PassMove || move >= 64 {
+		return false
+	}
+
+	validMoves := p.Moves()
+
+	if validMoves == 0 {
+		return move == PassMove
+	}
+
+	return validMoves&(1<<move) != 0
 }
