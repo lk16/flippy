@@ -260,33 +260,16 @@ func (repo *EvaluationRepository) refreshCachedAvailableJobs(ctx context.Context
 	}
 	defer tx.Rollback()
 
-	// TODO use repo.GetBookStats() instead of calling DB directly
+	bookStats, err := repo.GetBookStats(ctx)
+	if err != nil {
+		return fmt.Errorf("error getting book stats: %w", err)
+	}
 
 	// Find disc counts that have positions needing work
-	query := `
-		SELECT disc_count, level, count(*)
-		FROM edax
-		GROUP BY disc_count, level
-		ORDER BY disc_count, level
-	`
-
-	type statRow struct {
-		DiscCount int `db:"disc_count"`
-		Level     int `db:"level"`
-		Count     int `db:"count"`
-	}
-
-	var rows []statRow
-	err = tx.SelectContext(ctx, &rows, query)
-	if err != nil {
-		return fmt.Errorf("error getting stats: %w", err)
-	}
-
-	// Find learnable disc counts
 	learnableDiscCounts := make([]int, 0)
-	for _, row := range rows {
-		if row.Level < getLearnLevel(row.DiscCount) {
-			learnableDiscCounts = append(learnableDiscCounts, row.DiscCount)
+	for _, bookStat := range bookStats {
+		if bookStat.Level < getLearnLevel(bookStat.DiscCount) {
+			learnableDiscCounts = append(learnableDiscCounts, bookStat.DiscCount)
 		}
 	}
 
@@ -297,7 +280,7 @@ func (repo *EvaluationRepository) refreshCachedAvailableJobs(ctx context.Context
 	var positionBytes [][]byte
 	for _, dc := range learnableDiscCounts {
 		learnLevel := getLearnLevel(dc)
-		query = `
+		query := `
 			SELECT position
 			FROM edax
 			WHERE disc_count = $1
