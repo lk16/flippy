@@ -279,7 +279,7 @@ class Position:
 
         field = field.lower()
 
-        if field in ["--", "ps"]:
+        if field in ["--", "ps", "pa"]:
             return PASS_MOVE
 
         if not ("a" <= field[0] <= "h" and "1" <= field[1] <= "8"):
