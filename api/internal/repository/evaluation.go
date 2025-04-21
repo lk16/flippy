@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"time"
 
@@ -286,6 +287,9 @@ func (repo *EvaluationRepository) refreshCachedAvailableJobs(ctx context.Context
 			learnableDiscCounts = append(learnableDiscCounts, bookStat.DiscCount)
 		}
 	}
+
+	// Make sure we try the lowest disc counts first
+	sort.Ints(learnableDiscCounts)
 
 	clientRepo := NewClientRepositoryFromServices(repo.services)
 	takenPositionsBytes := clientRepo.GetTakenPositionsBytes(ctx)
