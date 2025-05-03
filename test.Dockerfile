@@ -12,7 +12,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy the rest of the application code
-COPY . .
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+COPY static/ ./static/
 
 # Build the application
 RUN go build -o /flippy_server ./cmd/server/main.go
