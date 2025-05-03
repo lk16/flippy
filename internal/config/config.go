@@ -5,8 +5,8 @@ import (
 	"os"
 )
 
-// Config holds all configuration values loaded from environment variables
-type Config struct {
+// ServerConfig holds all configuration values loaded from environment variables
+type ServerConfig struct {
 	ServerHost        string
 	ServerPort        string
 	RedisURL          string
@@ -17,9 +17,9 @@ type Config struct {
 	Prefork           bool
 }
 
-// LoadConfig loads configuration from environment variables
-func LoadConfig() *Config {
-	return &Config{
+// LoadServerConfig loads configuration from environment variables
+func LoadServerConfig() *ServerConfig {
+	return &ServerConfig{
 		ServerHost:        getEnvMust("FLIPPY_BOOK_SERVER_HOST"),
 		ServerPort:        getEnvMust("FLIPPY_BOOK_SERVER_PORT"),
 		RedisURL:          getEnvMust("FLIPPY_REDIS_URL"),
@@ -28,6 +28,28 @@ func LoadConfig() *Config {
 		BasicAuthPassword: getEnvMust("FLIPPY_BOOK_SERVER_BASIC_AUTH_PASS"),
 		Token:             getEnvMust("FLIPPY_BOOK_SERVER_TOKEN"),
 		Prefork:           getEnvMustBool("FLIPPY_BOOK_SERVER_PREFORK"),
+	}
+}
+
+type LearnClientConfig struct {
+	ServerURL string
+	Token     string
+}
+
+func LoadLearnClientConfig() *LearnClientConfig {
+	return &LearnClientConfig{
+		ServerURL: getEnvMust("FLIPPY_BOOK_SERVER_URL"),
+		Token:     getEnvMust("FLIPPY_BOOK_SERVER_TOKEN"),
+	}
+}
+
+type EdaxConfig struct {
+	EdaxPath string
+}
+
+func LoadEdaxConfig() *EdaxConfig {
+	return &EdaxConfig{
+		EdaxPath: getEnvMust("FLIPPY_EDAX_PATH"),
 	}
 }
 

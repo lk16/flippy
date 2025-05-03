@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/bits"
 	"math/rand"
+	"strings"
 )
 
 const (
@@ -344,4 +345,58 @@ func (p Position) IsValidMove(move int) bool {
 	}
 
 	return validMoves&(1<<move) != 0
+}
+
+// AsciiArtLines returns the ascii art lines for the position
+func (p Position) AsciiArtLines() []string {
+	moves := p.Moves()
+	lines := make([]string, 10)
+
+	lines[0] = "+-a-b-c-d-e-f-g-h-+"
+	for y := 0; y < 8; y++ {
+		line := fmt.Sprintf("%d ", y+1)
+
+		for x := 0; x < 8; x++ {
+			index := (y * 8) + x
+			mask := uint64(1 << index)
+
+			if p.player&mask != 0 {
+				line += "○ "
+			} else if p.opponent&mask != 0 {
+				line += "● "
+			} else if moves&mask != 0 {
+				line += "· "
+			} else {
+				line += "  "
+			}
+		}
+
+		lines[y+1] = line + "|"
+	}
+
+	lines[9] = "+-----------------+"
+
+	return lines
+}
+
+// FieldToIndex converts a field notation (e.g. "a1", "h8") to an index (0-63)
+// PassMove is returned if the field is "--", "ps", or "pa"
+func FieldToIndex(field string) int {
+	if len(field) != 2 {
+		panic(fmt.Sprintf("invalid field length: %s", field))
+	}
+
+	field = strings.ToLower(field)
+
+	if field == "--" || field == "ps" || field == "pa" {
+		return PassMove
+	}
+
+	if !('a' <= field[0] && field[0] <= 'h' && '1' <= field[1] && field[1] <= '8') {
+		panic(fmt.Sprintf("invalid field: %s", field))
+	}
+
+	x := int(field[0] - 'a')
+	y := int(field[1] - '1')
+	return y*8 + x
 }

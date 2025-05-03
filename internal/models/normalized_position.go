@@ -189,3 +189,26 @@ func (nPos NormalizedPosition) ValidateBestMoves(bestMoves BestMoves) error {
 
 	return nil
 }
+
+// AsciiArtLines returns the ascii art lines for the position
+func (nPos NormalizedPosition) AsciiArtLines() []string {
+	return nPos.position.AsciiArtLines()
+}
+
+// ToProblem returns the problem string for the position
+func (nPos NormalizedPosition) ToProblem() string {
+	var squares string
+	for i := 0; i < 64; i++ {
+		mask := uint64(1) << i
+		if mask&nPos.Player() != 0 {
+			squares += "X"
+		} else if mask&nPos.Opponent() != 0 {
+			squares += "O"
+		} else {
+			squares += "-"
+		}
+	}
+
+	// Position does not store the turn, so we pretend to always be black
+	return squares + " X;\n"
+}

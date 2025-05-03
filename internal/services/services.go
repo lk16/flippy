@@ -12,7 +12,7 @@ type Services struct {
 	Redis    *redis.Client
 }
 
-func InitServices(cfg *config.Config) (*Services, error) {
+func InitServices(cfg *config.ServerConfig) (*Services, error) {
 	// Initialize database
 	postgres, err := InitPostgres(cfg.PostgresURL)
 	if err != nil {

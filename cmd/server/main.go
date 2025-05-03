@@ -13,7 +13,7 @@ import (
 
 func main() {
 	// Load configuration
-	cfg := config.LoadConfig()
+	cfg := config.LoadServerConfig()
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{

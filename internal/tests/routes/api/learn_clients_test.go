@@ -111,7 +111,7 @@ func TestGetClientsOkWithClients(t *testing.T) {
 	assert.Equal(t, 0, response.ClientStats[0].PositionsComputed)
 
 	// Delete the client from Redis
-	services, err := services.InitServices(config.LoadConfig())
+	services, err := services.InitServices(config.LoadServerConfig())
 	assert.NoError(t, err)
 	deleted, err := services.Redis.Del(context.Background(), repository.ClientsKey).Result()
 	assert.NoError(t, err)
@@ -221,7 +221,7 @@ func TestHeartbeatOk(t *testing.T) {
 	assert.NoError(t, err)
 
 	heartbeatReq.Header.Set("x-token", tests.TestToken)
-	heartbeatReq.Header.Set("client-id", clientID)
+	heartbeatReq.Header.Set("x-client-id", clientID)
 	client := &http.Client{}
 	resp, err := client.Do(heartbeatReq)
 	assert.NoError(t, err)
@@ -231,7 +231,7 @@ func TestHeartbeatOk(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// Delete the client from Redis
-	services, err := services.InitServices(config.LoadConfig())
+	services, err := services.InitServices(config.LoadServerConfig())
 	assert.NoError(t, err)
 	deleted, err := services.Redis.Del(context.Background(), repository.ClientsKey).Result()
 	assert.NoError(t, err)
@@ -271,7 +271,7 @@ func TestGetJobNoClientUnknownClientID(t *testing.T) {
 	assert.NoError(t, err)
 
 	req.Header.Set("x-token", tests.TestToken)
-	req.Header.Set("client-id", "unknown-client-id")
+	req.Header.Set("x-client-id", "unknown-client-id")
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -314,7 +314,7 @@ func TestGetJobOk(t *testing.T) {
 	assert.NoError(t, err)
 
 	req.Header.Set("x-token", tests.TestToken)
-	req.Header.Set("client-id", clientID)
+	req.Header.Set("x-client-id", clientID)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -329,7 +329,7 @@ func TestGetJobOk(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Delete the client from Redis
-	services, err := services.InitServices(config.LoadConfig())
+	services, err := services.InitServices(config.LoadServerConfig())
 	assert.NoError(t, err)
 	deleted, err := services.Redis.Del(context.Background(), repository.ClientsKey).Result()
 	assert.NoError(t, err)

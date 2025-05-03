@@ -9,7 +9,7 @@ import (
 // BasicAuth middleware that checks for basic auth credentials
 func BasicAuth() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		cfg := c.Locals("config").(*config.Config)
+		cfg := c.Locals("config").(*config.ServerConfig)
 
 		username := cfg.BasicAuthUsername
 		password := cfg.BasicAuthPassword
@@ -38,7 +38,7 @@ func BasicAuth() fiber.Handler {
 // AuthOrToken middleware that accepts either basic auth or a token header
 func AuthOrToken() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		cfg := c.Locals("config").(*config.Config)
+		cfg := c.Locals("config").(*config.ServerConfig)
 
 		// Check for token header first
 		token := c.Get("x-token")

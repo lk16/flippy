@@ -47,7 +47,7 @@ class APIClient:
     ) -> Response:
         headers = {"x-token": self.token}
         if client_id is not None:
-            headers["client-id"] = client_id
+            headers["x-client-id"] = client_id
 
         kwargs: dict[str, Any] = {"headers": headers}
 
@@ -70,7 +70,7 @@ class APIClient:
     ) -> Response:
         headers = {"x-token": self.token}
         if client_id is not None:
-            headers["client-id"] = client_id
+            headers["x-client-id"] = client_id
 
         kwargs: dict[str, Any] = {"headers": headers}
 

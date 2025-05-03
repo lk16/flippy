@@ -243,7 +243,7 @@ func TestSubmitEvaluationsOk(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	services, err := services.InitServices(config.LoadConfig())
+	services, err := services.InitServices(config.LoadServerConfig())
 	assert.NoError(t, err)
 
 	// Check if the evaluation was stored in the database

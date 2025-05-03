@@ -44,7 +44,8 @@ type Job struct {
 
 // JobResult represents the result of a completed job
 type JobResult struct {
-	Evaluation Evaluation `json:"evaluation"`
+	Evaluation      Evaluation `json:"evaluation"`
+	ComputationTime float64    `json:"computation_time"`
 }
 
 // Evaluation represents an evaluation result
@@ -135,6 +136,10 @@ type EvaluationsPayload struct {
 
 // Validate validates the evaluations payload
 func (p *EvaluationsPayload) Validate() error {
+	if len(p.Evaluations) == 0 {
+		return fmt.Errorf("evaluations is empty")
+	}
+
 	for _, evaluation := range p.Evaluations {
 		if err := evaluation.Validate(); err != nil {
 			return err

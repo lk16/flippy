@@ -30,7 +30,7 @@ func RegisterClient(c *fiber.Ctx) error {
 
 // lookupClientInRedis checks if the client ID is registered
 func lookupClientInRedis(c *fiber.Ctx) (string, error) {
-	clientID := c.Get("client-id")
+	clientID := c.Get("x-client-id")
 	if clientID == "" {
 		return "", errors.New("missing client ID")
 	}
