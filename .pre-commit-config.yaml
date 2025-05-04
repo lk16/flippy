@@ -17,8 +17,9 @@ repos:
       - id: mypy
         name: run mypy
         language: system
-        entry: mypy --strict --enable-error-code possibly-undefined --warn-unreachable
+        entry: bash -c 'cd python/flippy && pdm run mypy --strict --enable-error-code possibly-undefined --warn-unreachable ./'
         types: [python]
+        files: python/flippy/
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.1.8
@@ -26,3 +27,13 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+
+
+  - repo: local
+    hooks:
+      - id: golangci-lint
+        name: run golangci-lint
+        language: system
+        entry: golangci-lint run --fix ./cmd/... ./internal/...
+        types: [go]
+        pass_filenames: false
