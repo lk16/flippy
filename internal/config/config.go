@@ -1,11 +1,19 @@
 package config
 
 import (
-	"log"
+	"log/slog"
 	"os"
 )
 
-// ServerConfig holds all configuration values loaded from environment variables
+const (
+	MinBookLearnLevel   = 16
+	MaxBookSavableDiscs = 30
+
+	// StaticDir is the path to the static directory.
+	StaticDir = "./static"
+)
+
+// ServerConfig holds all configuration values loaded from environment variables.
 type ServerConfig struct {
 	ServerHost        string
 	ServerPort        string
@@ -17,7 +25,7 @@ type ServerConfig struct {
 	Prefork           bool
 }
 
-// LoadServerConfig loads configuration from environment variables
+// LoadServerConfig loads configuration from environment variables.
 func LoadServerConfig() *ServerConfig {
 	return &ServerConfig{
 		ServerHost:        getEnvMust("FLIPPY_BOOK_SERVER_HOST"),
@@ -53,11 +61,12 @@ func LoadEdaxConfig() *EdaxConfig {
 	}
 }
 
-// getEnvMust either returns the environment variable or logs a fatal error if it is not set
+// getEnvMust either returns the environment variable or logs a fatal error if it is not set.
 func getEnvMust(key string) string {
 	value := os.Getenv(key)
 	if value == "" {
-		log.Fatalf("Environment variable %s is not set", key)
+		slog.Error("Environment variable is not set", "key", key)
+		os.Exit(1)
 	}
 	return value
 }
@@ -66,16 +75,9 @@ func getEnvMustBool(key string) bool {
 	value := getEnvMust(key)
 
 	if value != "true" && value != "false" {
-		log.Fatalf("Environment variable %s must be \"true\" or \"false\"", key)
+		slog.Error("Cannot load environment variable, it must be \"true\" or \"false\"", "key", key, "value", value)
+		os.Exit(1)
 	}
 
 	return value == "true"
 }
-
-// StaticDir is the path to the static directory
-var StaticDir = "./static"
-
-const (
-	MinBookLearnLevel   = 16
-	MaxBookSavableDiscs = 30
-)

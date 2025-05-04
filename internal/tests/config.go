@@ -1,4 +1,6 @@
 package tests
 
-var BaseURL = "http://localhost:3000"
-var TestToken = "test-token"
+const (
+	BaseURL   = "http://localhost:3000"
+	TestToken = "test-token"
+)

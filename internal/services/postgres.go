@@ -4,10 +4,10 @@ import (
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
+	_ "github.com/lib/pq" // Load the postgres driver
 )
 
-// InitPostgres initializes the database connection
+// InitPostgres initializes the database connection.
 func InitPostgres(url string) (*sqlx.DB, error) {
 	db, err := sqlx.Connect("postgres", url)
 	if err != nil {

@@ -5,7 +5,7 @@ import (
 	"github.com/lk16/flippy/api/internal/middleware"
 )
 
-// SetupRoutes sets up the API routes
+// SetupRoutes sets up the API routes.
 func SetupRoutes(app *fiber.App) {
 	apiGroup := app.Group("/api", middleware.AuthOrToken())
 

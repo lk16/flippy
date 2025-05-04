@@ -5,7 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
+	"os"
 	"sort"
 	"strconv"
 	"time"
@@ -18,23 +19,31 @@ import (
 )
 
 const (
-	positionsKey        = "positions_to_learn"
-	positionsTTL        = 5 * time.Minute
-	cacheRefreshLockKey = "positions_to_learn_refresh_lock"
-	cacheRefreshLockTTL = 10 * time.Second
-	popRetryInterval    = 200 * time.Millisecond
-	bookStatsKey        = "book_stats"
+	positionsKey           = "positions_to_learn"
+	positionsTTL           = 5 * time.Minute
+	positionsMaxCount      = 500
+	cacheRefreshLockKey    = "positions_to_learn_refresh_lock"
+	cacheRefreshLockTTL    = 10 * time.Second
+	cacheRefreshCtxTimeout = 10 * time.Second
+	popRetryInterval       = 200 * time.Millisecond
+	bookStatsKey           = "book_stats"
 )
 
-// EvaluationRepository handles database operations for evaluations
+// EvaluationRepository handles database operations for evaluations.
 type EvaluationRepository struct {
 	services *services.Services
 }
 
-// NewEvaluationRepository creates a new EvaluationRepository
+// NewEvaluationRepository creates a new EvaluationRepository.
 func NewEvaluationRepository(c *fiber.Ctx) *EvaluationRepository {
+	services, ok := c.Locals("services").(*services.Services)
+	if !ok {
+		slog.Error("failed to load services")
+		os.Exit(1)
+	}
+
 	return &EvaluationRepository{
-		services: c.Locals("services").(*services.Services),
+		services: services,
 	}
 }
 
@@ -44,7 +53,7 @@ func NewEvaluationRepositoryFromServices(services *services.Services) *Evaluatio
 	}
 }
 
-// SubmitEvaluations submits a batch of evaluations
+// SubmitEvaluations submits a batch of evaluations.
 func (repo *EvaluationRepository) SubmitEvaluations(ctx context.Context, payload models.EvaluationsPayload) error {
 	pgConn := repo.services.Postgres
 
@@ -54,7 +63,7 @@ func (repo *EvaluationRepository) SubmitEvaluations(ctx context.Context, payload
 
 	// Create a single VALUES clause with all the data
 	valuesClause := ""
-	params := make([]interface{}, 0, len(payload.Evaluations)*7)
+	params := make([]interface{}, 0, len(payload.Evaluations)*7) //nolint:mnd
 
 	positionBytesList := make([][]byte, len(payload.Evaluations))
 	for i, eval := range payload.Evaluations {
@@ -66,7 +75,7 @@ func (repo *EvaluationRepository) SubmitEvaluations(ctx context.Context, payload
 			valuesClause += ", "
 		}
 		valuesClause += fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d)",
-			i*7+2, i*7+3, i*7+4, i*7+5, i*7+6, i*7+7, i*7+8)
+			i*7+2, i*7+3, i*7+4, i*7+5, i*7+6, i*7+7, i*7+8) //nolint:mnd
 
 		params = append(params,
 			positionBytesList[i],
@@ -115,7 +124,7 @@ func (repo *EvaluationRepository) SubmitEvaluations(ctx context.Context, payload
 	for rows.Next() {
 		var oldLevel sql.NullInt64
 		var newLevel, discCount int
-		if err := rows.Scan(&oldLevel, &newLevel, &discCount); err != nil {
+		if err = rows.Scan(&oldLevel, &newLevel, &discCount); err != nil {
 			return fmt.Errorf("error scanning evaluation: %w", err)
 		}
 
@@ -140,8 +149,11 @@ func (repo *EvaluationRepository) SubmitEvaluations(ctx context.Context, payload
 	return nil
 }
 
-// LookupPositions looks up evaluations for given positions
-func (repo *EvaluationRepository) LookupPositions(ctx context.Context, positions []models.NormalizedPosition) ([]models.Evaluation, error) {
+// LookupPositions looks up evaluations for given positions.
+func (repo *EvaluationRepository) LookupPositions(
+	ctx context.Context,
+	positions []models.NormalizedPosition,
+) ([]models.Evaluation, error) {
 	pgConn := repo.services.Postgres
 
 	positionsBytes := make([][]byte, len(positions))
@@ -213,7 +225,7 @@ func (repo *EvaluationRepository) buildInitialBookStats(ctx context.Context) err
 	return nil
 }
 
-// GetBookStats returns statistics about positions in the database
+// GetBookStats returns statistics about positions in the database.
 func (repo *EvaluationRepository) GetBookStats(ctx context.Context) ([]models.BookStats, error) {
 	redisConn := repo.services.Redis
 
@@ -242,8 +254,7 @@ func (repo *EvaluationRepository) GetBookStats(ctx context.Context) ([]models.Bo
 		var bookStat models.BookStats
 
 		// Parse disc_count:level key
-		_, err := fmt.Sscanf(key, "%d:%d", &bookStat.DiscCount, &bookStat.Level)
-		if err != nil {
+		if _, err = fmt.Sscanf(key, "%d:%d", &bookStat.DiscCount, &bookStat.Level); err != nil {
 			return nil, fmt.Errorf("error parsing book stats key: %w", err)
 		}
 
@@ -259,12 +270,11 @@ func (repo *EvaluationRepository) GetBookStats(ctx context.Context) ([]models.Bo
 	return bookStats, nil
 }
 
-// ErrNoJobsAvailable is returned when there are no more jobs to process
+// ErrNoJobsAvailable is returned when there are no more jobs to process.
 var ErrNoJobsAvailable = errors.New("no jobs available")
 
-// tryRefreshJobCache refreshes the cache of available jobs
+// tryRefreshJobCache refreshes the cache of available jobs.
 func (repo *EvaluationRepository) tryRefreshJobCache(ctx context.Context) error {
-
 	// Try to acquire the lock for cache refresh
 	redisConn := repo.services.Redis
 	lockAcquired, err := redisConn.SetNX(ctx, cacheRefreshLockKey, "1", cacheRefreshLockTTL).Result()
@@ -283,9 +293,18 @@ func (repo *EvaluationRepository) tryRefreshJobCache(ctx context.Context) error 
 	// Ensure lock is released
 	defer redisConn.Del(ctx, cacheRefreshLockKey)
 
+	learnableDiscCounts, err := repo.getLearnableDiscCounts(ctx)
+	if err != nil {
+		return fmt.Errorf("error getting learnable disc counts: %w", err)
+	}
+
+	return repo.refreshJobCache(ctx, learnableDiscCounts)
+}
+
+func (repo *EvaluationRepository) getLearnableDiscCounts(ctx context.Context) ([]int, error) {
 	bookStats, err := repo.GetBookStats(ctx)
 	if err != nil {
-		return fmt.Errorf("error getting book stats: %w", err)
+		return nil, fmt.Errorf("error getting book stats: %w", err)
 	}
 
 	// Find disc counts that have positions needing work, use map[int]bool as set.
@@ -302,6 +321,12 @@ func (repo *EvaluationRepository) tryRefreshJobCache(ctx context.Context) error 
 		learnableDiscCounts = append(learnableDiscCounts, discCount)
 	}
 	sort.Ints(learnableDiscCounts)
+
+	return learnableDiscCounts, nil
+}
+
+func (repo *EvaluationRepository) refreshJobCache(ctx context.Context, learnableDiscCounts []int) error {
+	redisConn := repo.services.Redis
 
 	clientRepo := NewClientRepositoryFromServices(repo.services)
 	takenPositionsBytes := clientRepo.GetTakenPositionsBytes(ctx)
@@ -322,15 +347,15 @@ func (repo *EvaluationRepository) tryRefreshJobCache(ctx context.Context) error 
 			LIMIT $4
 		`
 
-		remaining := 500 - len(positionBytes)
+		remaining := positionsMaxCount - len(positionBytes)
 		if remaining <= 0 {
 			break
 		}
 
 		var newPositions [][]byte
-		err = pgConn.SelectContext(ctx, &newPositions, query, dc, learnLevel, pq.Array(takenPositionsBytes), remaining)
+		err := pgConn.SelectContext(ctx, &newPositions, query, dc, learnLevel, pq.Array(takenPositionsBytes), remaining)
 		if err != nil {
-			if err == sql.ErrNoRows {
+			if errors.Is(err, sql.ErrNoRows) {
 				continue
 			}
 
@@ -353,7 +378,7 @@ func (repo *EvaluationRepository) tryRefreshJobCache(ctx context.Context) error 
 
 	if len(positionStrings) > 0 {
 		// Delete existing list and set new values atomically
-		err = redisConn.Del(ctx, positionsKey).Err()
+		err := redisConn.Del(ctx, positionsKey).Err()
 		if err != nil {
 			return fmt.Errorf("error deleting positions from Redis: %w", err)
 		}
@@ -374,13 +399,13 @@ func (repo *EvaluationRepository) tryRefreshJobCache(ctx context.Context) error 
 	return nil
 }
 
-// tryPopJob attempts to get a job from Redis
+// tryPopJob attempts to get a job from Redis.
 func (repo *EvaluationRepository) tryPopJob(ctx context.Context, clientID string) (models.Job, error) {
 	redisConn := repo.services.Redis
 
 	posStr, err := redisConn.LPop(ctx, positionsKey).Result()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return models.Job{}, ErrNoJobsAvailable
 		}
 
@@ -398,25 +423,30 @@ func (repo *EvaluationRepository) tryPopJob(ctx context.Context, clientID string
 	}
 
 	clientRepo := NewClientRepositoryFromServices(repo.services)
-	clientRepo.AssignJob(ctx, clientID, job)
+
+	err = clientRepo.AssignJob(ctx, clientID, job)
+	if err != nil {
+		return models.Job{}, fmt.Errorf("error assigning job: %w", err)
+	}
+
 	return job, nil
 }
 
-// GetJob retrieves the next available job from the database
+// GetJob retrieves the next available job from the database.
 func (repo *EvaluationRepository) GetJob(ctx context.Context, clientID string) (models.Job, error) {
 	// First try to get a position from Redis
 	job, err := repo.tryPopJob(ctx, clientID)
 
 	if err != nil {
-		if err == ErrNoJobsAvailable {
+		if errors.Is(err, ErrNoJobsAvailable) {
 			// Refresh the job cache in the background
 			go func() {
-				refreshCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				refreshCtx, cancel := context.WithTimeout(ctx, cacheRefreshCtxTimeout)
 				defer cancel()
 
 				err = repo.tryRefreshJobCache(refreshCtx)
 				if err != nil {
-					log.Printf("error refreshing job cache: %v", err)
+					slog.Error("error refreshing job cache", "error", err)
 				}
 			}()
 
@@ -430,22 +460,21 @@ func (repo *EvaluationRepository) GetJob(ctx context.Context, clientID string) (
 
 	// No error, return job
 	return job, nil
-
 }
 
-// getLearnLevel returns the target level for a given disc count
+// getLearnLevel returns the target level for a given disc count.
 func getLearnLevel(discCount int) int {
-	if discCount <= 12 {
-		return 40
+	if discCount <= 12 { //nolint:mnd
+		return 40 //nolint:mnd
 	}
 
-	if discCount <= 16 {
-		return 36
+	if discCount <= 16 { //nolint:mnd
+		return 36 //nolint:mnd
 	}
 
-	if discCount <= 20 {
-		return 34
+	if discCount <= 20 { //nolint:mnd
+		return 34 //nolint:mnd
 	}
 
-	return 32
+	return 32 //nolint:mnd
 }

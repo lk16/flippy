@@ -8,7 +8,7 @@ import (
 	"github.com/lk16/flippy/api/internal/config"
 )
 
-// staticHandler serves static files
+// staticHandler serves static files.
 func staticHandler() fiber.Handler {
 	return filesystem.New(filesystem.Config{
 		Root:   http.Dir(config.StaticDir),

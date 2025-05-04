@@ -8,7 +8,7 @@ import (
 	"github.com/lk16/flippy/api/internal/repository"
 )
 
-// RegisterClient handles client registration
+// RegisterClient handles client registration.
 func RegisterClient(c *fiber.Ctx) error {
 	var req models.RegisterRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -28,7 +28,7 @@ func RegisterClient(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(resp)
 }
 
-// lookupClientInRedis checks if the client ID is registered
+// lookupClientInRedis checks if the client ID is registered.
 func lookupClientInRedis(c *fiber.Ctx) (string, error) {
 	clientID := c.Get("x-client-id")
 	if clientID == "" {
@@ -43,7 +43,7 @@ func lookupClientInRedis(c *fiber.Ctx) (string, error) {
 	return clientID, nil
 }
 
-// Heartbeat handles client heartbeat updates
+// Heartbeat handles client heartbeat updates.
 func Heartbeat(c *fiber.Ctx) error {
 	clientID, err := lookupClientInRedis(c)
 	if err != nil {
@@ -53,7 +53,7 @@ func Heartbeat(c *fiber.Ctx) error {
 	}
 
 	repo := repository.NewClientRepository(c)
-	if err := repo.UpdateHeartbeat(c.Context(), clientID); err != nil {
+	if err = repo.UpdateHeartbeat(c.Context(), clientID); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
 		})
@@ -62,7 +62,7 @@ func Heartbeat(c *fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusOK)
 }
 
-// GetClients returns statistics for all clients
+// GetClients returns statistics for all clients.
 func GetClients(c *fiber.Ctx) error {
 	repo := repository.NewClientRepository(c)
 	stats, err := repo.GetClientStatsList(c.Context())
@@ -75,7 +75,7 @@ func GetClients(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(stats)
 }
 
-// GetJob handles job assignment to clients
+// GetJob handles job assignment to clients.
 func GetJob(c *fiber.Ctx) error {
 	clientID, err := lookupClientInRedis(c)
 	if err != nil {
@@ -87,7 +87,7 @@ func GetJob(c *fiber.Ctx) error {
 	repo := repository.NewEvaluationRepository(c)
 	job, err := repo.GetJob(c.Context(), clientID)
 
-	if err == repository.ErrNoJobsAvailable {
+	if errors.Is(err, repository.ErrNoJobsAvailable) {
 		return c.Status(fiber.StatusOK).JSON(nil)
 	}
 

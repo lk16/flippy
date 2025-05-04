@@ -11,6 +11,14 @@ import (
 	"github.com/lk16/flippy/api/internal/services"
 )
 
+const (
+	defaultConcurrency  = 256 * 1024 // Maximum number of concurrent connections per worker
+	defaultReadTimeout  = 10 * time.Second
+	defaultWriteTimeout = 10 * time.Second
+	defaultIdleTimeout  = 5 * time.Second
+	defaultBodyLimit    = 1024 * 1024 // 1MB
+)
+
 func main() {
 	// Load configuration
 	cfg := config.LoadServerConfig()
@@ -18,11 +26,11 @@ func main() {
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
 		Prefork:      cfg.Prefork,
-		Concurrency:  256 * 1024, // Maximum number of concurrent connections per worker
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  5 * time.Second,
-		BodyLimit:    1024 * 1024, // 1MB
+		Concurrency:  defaultConcurrency,
+		ReadTimeout:  defaultReadTimeout,
+		WriteTimeout: defaultWriteTimeout,
+		IdleTimeout:  defaultIdleTimeout,
+		BodyLimit:    defaultBodyLimit,
 	})
 
 	// Initialize services

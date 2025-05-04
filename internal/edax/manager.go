@@ -2,9 +2,10 @@ package edax
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -19,38 +20,25 @@ const (
 	tableBorder = "------+-----+--------------+-------------+----------+---------------------"
 )
 
-var edaxManager *EdaxManager
-
-type EdaxManager struct {
-	level   int
-	cmd     *exec.Cmd
-	cfg     *config.EdaxConfig
-	stdin   io.WriteCloser
-	stdout  io.ReadCloser
-	verbose bool
+type Manager struct {
+	level  int
+	cmd    *exec.Cmd
+	cfg    *config.EdaxConfig
+	stdin  io.WriteCloser
+	stdout io.ReadCloser
 }
 
-func GetEdaxManager(verbose bool) *EdaxManager {
-	if edaxManager == nil {
-		cfg := config.LoadEdaxConfig()
+func NewManager() *Manager {
+	cfg := config.LoadEdaxConfig()
 
-		edaxManager = &EdaxManager{
-			level:   0,
-			cfg:     cfg,
-			verbose: verbose,
-		}
-	}
-	return edaxManager
-}
-
-func (m *EdaxManager) logVerbose(format string, args ...any) {
-	if m.verbose {
-		log.Printf(format, args...)
+	return &Manager{
+		level: 0,
+		cfg:   cfg,
 	}
 }
 
-func (m *EdaxManager) Restart() error {
-	m.logVerbose("Restarting Edax")
+func (m *Manager) Restart() error {
+	slog.Debug("Restarting Edax")
 
 	if m.cmd != nil {
 		if err := m.cmd.Process.Kill(); err != nil {
@@ -59,13 +47,10 @@ func (m *EdaxManager) Restart() error {
 	}
 
 	edaxPath := m.cfg.EdaxPath
-	m.logVerbose("edaxPath: %s", edaxPath)
-
-	cmd := exec.Command(edaxPath, "-solve", "/dev/stdin", "-level", fmt.Sprintf("%d", m.level), "-verbose", "3")
-	m.logVerbose("cmd.Args: %v", cmd.Args)
-
+	cmd := exec.Command(edaxPath, "-solve", "/dev/stdin", "-level", strconv.Itoa(m.level), "-verbose", "3")
 	cmd.Dir = filepath.Join(filepath.Dir(edaxPath), "..")
-	m.logVerbose("cmd.Dir: %s", cmd.Dir)
+
+	slog.Debug("Starting Edax", "edaxPath", edaxPath, "cmd.Args", cmd.Args, "cmd.Dir", cmd.Dir)
 
 	if cmd.Err != nil {
 		return fmt.Errorf("failed to set cmd.Dir: %w", cmd.Err)
@@ -81,7 +66,7 @@ func (m *EdaxManager) Restart() error {
 		return fmt.Errorf("failed to get stdout pipe: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err = cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start Edax process: %w", err)
 	}
 
@@ -89,11 +74,11 @@ func (m *EdaxManager) Restart() error {
 	m.stdin = stdin
 	m.stdout = stdout
 
-	m.logVerbose("Edax process restarted")
+	slog.Debug("Edax process restarted successfully", "level", m.level)
 	return nil
 }
 
-func (m *EdaxManager) ParseOutput(reader *bufio.Reader) (string, error) {
+func (m *Manager) ParseOutput(reader *bufio.Reader) (string, error) {
 	lines := []string{}
 	tableBorderLineCount := 0
 	evalLine := ""
@@ -106,16 +91,16 @@ func (m *EdaxManager) ParseOutput(reader *bufio.Reader) (string, error) {
 			}
 			return "", fmt.Errorf("error reading from stdout: %w", err)
 		}
-		m.logVerbose("Edax stdout: %s", line)
+		slog.Debug("Edax stdout", "line", line)
 		lines = append(lines, line)
 
 		if strings.Contains(line, tableBorder) {
 			tableBorderLineCount++
 		}
 
-		if tableBorderLineCount == 2 {
+		if tableBorderLineCount == 2 { //nolint:mnd
 			evalLine = lines[len(lines)-3]
-			m.logVerbose("Evaluation line: %s", evalLine)
+			slog.Debug("Evaluation line", "line", evalLine)
 			break
 		}
 	}
@@ -123,7 +108,7 @@ func (m *EdaxManager) ParseOutput(reader *bufio.Reader) (string, error) {
 	return evalLine, nil
 }
 
-func (m *EdaxManager) DoJob(job models.Job) (*models.JobResult, error) {
+func (m *Manager) DoJob(job models.Job) (*models.JobResult, error) {
 	if err := m.SetLevel(job.Level); err != nil {
 		return nil, fmt.Errorf("failed to set Edax level: %w", err)
 	}
@@ -132,9 +117,8 @@ func (m *EdaxManager) DoJob(job models.Job) (*models.JobResult, error) {
 
 	startTime := time.Now()
 
-	m.logVerbose("Edax stdin: %s", problem)
+	slog.Debug("Edax stdin", "stdin", problem)
 	if _, err := m.stdin.Write([]byte(problem)); err != nil {
-		log.Printf("Failed to write position: %v", err)
 		return nil, fmt.Errorf("failed to write position: %w", err)
 	}
 
@@ -152,17 +136,17 @@ func (m *EdaxManager) DoJob(job models.Job) (*models.JobResult, error) {
 	return result, nil
 }
 
-func (m *EdaxManager) SetLevel(level int) error {
+func (m *Manager) SetLevel(level int) error {
 	if level == 0 {
 		panic("Attempt to set Edax level to 0")
 	}
 
 	if level == m.level {
-		m.logVerbose("Edax level already set to %d", level)
+		slog.Debug("Edax already at requested level", "level", level)
 		return nil
 	}
 
-	m.logVerbose("Setting Edax level to %d", level)
+	slog.Debug("Setting Edax level", "level", level)
 	m.level = level
 	if err := m.Restart(); err != nil {
 		return fmt.Errorf("failed to restart Edax: %w", err)
@@ -171,9 +155,9 @@ func (m *EdaxManager) SetLevel(level int) error {
 	return nil
 }
 
-func (m *EdaxManager) parseEvaluationLine(line string, job models.Job, startTime time.Time) (*models.JobResult, error) {
+func (m *Manager) parseEvaluationLine(line string, job models.Job, startTime time.Time) (*models.JobResult, error) {
 	if line == "" {
-		return nil, fmt.Errorf("empty evaluation line")
+		return nil, errors.New("empty evaluation line")
 	}
 
 	// Skip table borders and other non-evaluation lines
@@ -183,7 +167,7 @@ func (m *EdaxManager) parseEvaluationLine(line string, job models.Job, startTime
 
 	// Normalize whitespace and split into columns
 	columns := strings.Fields(line)
-	if len(columns) < 2 {
+	if len(columns) < 2 { //nolint:mnd  // TODO this constant is wrong
 		return nil, fmt.Errorf("not enough columns in evaluation line: %s", line)
 	}
 
@@ -215,7 +199,10 @@ func (m *EdaxManager) parseEvaluationLine(line string, job models.Job, startTime
 	bestFields := strings.Fields(line[53:])
 	bestMoves := make([]int, len(bestFields))
 	for i, field := range bestFields {
-		bestMoves[i] = models.FieldToIndex(field)
+		bestMoves[i], err = models.FieldToIndex(field)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse best move: %w", err)
+		}
 	}
 
 	evaluation := models.Evaluation{
@@ -227,7 +214,7 @@ func (m *EdaxManager) parseEvaluationLine(line string, job models.Job, startTime
 		BestMoves:  bestMoves,
 	}
 
-	if err := evaluation.Validate(); err != nil {
+	if err = evaluation.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid evaluation: %w", err)
 	}
 
@@ -236,7 +223,7 @@ func (m *EdaxManager) parseEvaluationLine(line string, job models.Job, startTime
 		ComputationTime: time.Since(startTime).Seconds(),
 	}
 
-	m.logVerbose("Edax result: %+v", result)
+	slog.Debug("Edax result", "result", result)
 
 	return result, nil
 }

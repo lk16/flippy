@@ -1,62 +1,35 @@
-package models
+package models //nolint:testpackage
 
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestBestMovesScan(t *testing.T) {
-	tests := []struct {
-		name       string
-		input      interface{}
-		wantErr    bool
-		wantErrMsg string
-		wantMoves  BestMoves
-	}{
-		{
-			name:      "OK",
-			input:     []byte("{1,2,3}"),
-			wantErr:   false,
-			wantMoves: BestMoves{1, 2, 3},
-		},
-		{
-			name:       "InvalidType",
-			input:      123, // passing an int instead of []byte
-			wantErr:    true,
-			wantErrMsg: "cannot scan int into BestMoves",
-		},
-		{
-			name:       "NilBytes",
-			input:      []byte(nil),
-			wantErr:    true,
-			wantErrMsg: "cannot scan nil into BestMoves",
-		},
-		{
-			name:       "BrokenInt",
-			input:      []byte("{1,abc,3}"),
-			wantErr:    true,
-			wantErrMsg: "cannot convert abc to int",
-		},
-	}
+func TestBestMovesScan_OK(t *testing.T) {
+	var moves BestMoves
+	err := moves.Scan([]byte("{1,2,3}"))
+	require.NoError(t, err)
+	require.Equal(t, BestMoves{1, 2, 3}, moves)
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var moves BestMoves
-			err := moves.Scan(tt.input)
-			if tt.wantErr {
-				assert.Error(t, err)
-				if tt.wantErrMsg != "" {
-					if tt.name == "BrokenInt" {
-						assert.Contains(t, err.Error(), tt.wantErrMsg)
-					} else {
-						assert.Equal(t, tt.wantErrMsg, err.Error())
-					}
-				}
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.wantMoves, moves)
-			}
-		})
-	}
+func TestBestMovesScan_InvalidType(t *testing.T) {
+	var moves BestMoves
+	err := moves.Scan(123) // passing an int instead of []byte
+	require.Error(t, err)
+	require.Equal(t, "cannot scan int into BestMoves", err.Error())
+}
+
+func TestBestMovesScan_NilBytes(t *testing.T) {
+	var moves BestMoves
+	err := moves.Scan([]byte(nil))
+	require.Error(t, err)
+	require.Equal(t, "cannot scan nil into BestMoves", err.Error())
+}
+
+func TestBestMovesScan_BrokenInt(t *testing.T) {
+	var moves BestMoves
+	err := moves.Scan([]byte("{1,abc,3}"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot convert abc to int")
 }

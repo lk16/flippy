@@ -1,14 +1,15 @@
-package models
+package models //nolint:testpackage
 
 import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
+	"os"
 	"testing"
 
 	"github.com/lk16/flippy/api/internal/config"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewNormalizedPositionFromString(t *testing.T) {
@@ -42,11 +43,11 @@ func TestNewNormalizedPositionFromString(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			nPos, err := NewNormalizedPositionFromString(tt.input)
 			if tt.wantErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 				return
 			}
-			assert.NoError(t, err)
-			assert.Equal(t, tt.input, nPos.String())
+			require.NoError(t, err)
+			require.Equal(t, tt.input, nPos.String())
 		})
 	}
 }
@@ -76,19 +77,19 @@ func TestNewNormalizedPositionFromBytes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			nPos, err := NewNormalizedPositionFromBytes(tt.input)
 			if tt.wantErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 				return
 			}
-			assert.NoError(t, err)
-			assert.Equal(t, tt.input, nPos.Bytes())
+			require.NoError(t, err)
+			require.Equal(t, tt.input, nPos.Bytes())
 		})
 	}
 }
 
 func TestNewNormalizedPositionEmpty(t *testing.T) {
 	nPos := NewNormalizedPositionEmpty()
-	assert.Equal(t, uint64(0x0), nPos.Player())
-	assert.Equal(t, uint64(0x0), nPos.Opponent())
+	require.Equal(t, uint64(0x0), nPos.Player())
+	require.Equal(t, uint64(0x0), nPos.Opponent())
 }
 
 func generateTestNormalizedPositions(t *testing.T) []NormalizedPosition {
@@ -105,16 +106,16 @@ func generateTestNormalizedPositions(t *testing.T) []NormalizedPosition {
 func TestNormalizedPosition_String(t *testing.T) {
 	for _, nPos := range generateTestNormalizedPositions(t) {
 		want := fmt.Sprintf("%016X%016X", nPos.Player(), nPos.Opponent())
-		assert.Equal(t, want, nPos.String())
+		require.Equal(t, want, nPos.String())
 	}
 }
 
 func TestNormalizedPosition_Bytes(t *testing.T) {
 	for _, nPos := range generateTestNormalizedPositions(t) {
 		bytes := nPos.Bytes()
-		assert.Len(t, bytes, 16)
-		assert.Equal(t, nPos.Player(), binary.LittleEndian.Uint64(bytes[:8]))
-		assert.Equal(t, nPos.Opponent(), binary.LittleEndian.Uint64(bytes[8:]))
+		require.Len(t, bytes, 16)
+		require.Equal(t, nPos.Player(), binary.LittleEndian.Uint64(bytes[:8]))
+		require.Equal(t, nPos.Opponent(), binary.LittleEndian.Uint64(bytes[8:]))
 	}
 }
 
@@ -134,8 +135,25 @@ func TestNormalizedPosition_Scan(t *testing.T) {
 			want:       NewNormalizedPositionEmpty(),
 		},
 		{
-			name:       "not normalized",
-			input:      []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01},
+			name: "not normalized",
+			input: []byte{
+				0x00,
+				0x00,
+				0x00,
+				0x00,
+				0x00,
+				0x00,
+				0x00,
+				0x00,
+				0x00,
+				0x00,
+				0x00,
+				0x00,
+				0x00,
+				0x00,
+				0x00,
+				0x01,
+			},
 			wantErr:    true,
 			wantErrMsg: "position is not normalized",
 			want:       NormalizedPosition{},
@@ -161,18 +179,18 @@ func TestNormalizedPosition_Scan(t *testing.T) {
 			var nPos NormalizedPosition
 			err := nPos.Scan(tt.input)
 			if tt.wantErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 				return
 			}
-			assert.NoError(t, err)
+			require.NoError(t, err)
 		})
 	}
 
 	for _, nPos := range generateTestNormalizedPositions(t) {
 		var scannedNPos NormalizedPosition
 		err := scannedNPos.Scan(nPos.Bytes())
-		assert.NoError(t, err)
-		assert.Equal(t, nPos, scannedNPos)
+		require.NoError(t, err)
+		require.Equal(t, nPos, scannedNPos)
 	}
 }
 
@@ -202,46 +220,46 @@ func TestNormalizedPosition_UnmarshalJSON(t *testing.T) {
 			var nPos NormalizedPosition
 			err := nPos.UnmarshalJSON([]byte(tt.input))
 			if tt.wantErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 				return
 			}
-			assert.NoError(t, err)
+			require.NoError(t, err)
 		})
 	}
 
 	for _, nPos := range generateTestNormalizedPositions(t) {
 		marshalled, err := json.Marshal(nPos.String())
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		var unmarshalled NormalizedPosition
 		err = unmarshalled.UnmarshalJSON(marshalled)
-		assert.NoError(t, err)
-		assert.Equal(t, nPos, unmarshalled)
+		require.NoError(t, err)
+		require.Equal(t, nPos, unmarshalled)
 	}
 }
 
 func TestNormalizedPosition_MarshalJSON(t *testing.T) {
 	for _, nPos := range generateTestNormalizedPositions(t) {
 		bytes, err := nPos.MarshalJSON()
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		var unmarshalledString string
 		err = json.Unmarshal(bytes, &unmarshalledString)
-		assert.NoError(t, err)
-		assert.Equal(t, nPos.String(), unmarshalledString)
+		require.NoError(t, err)
+		require.Equal(t, nPos.String(), unmarshalledString)
 	}
 }
 
 func TestNormalizedPosition_Normalized(t *testing.T) {
 	for _, nPos := range generateTestNormalizedPositions(t) {
-		for rotation := 0; rotation < 8; rotation++ {
+		for rotation := range 8 {
 			rotated := nPos.Position().rotate(rotation)
 
 			if rotated.IsNormalized() {
-				assert.Equal(t, nPos.Position(), rotated)
+				require.Equal(t, nPos.Position(), rotated)
 			} else {
-				assert.NotEqual(t, nPos.Position(), rotated)
-				assert.Equal(t, nPos, rotated.Normalized())
+				require.NotEqual(t, nPos.Position(), rotated)
+				require.Equal(t, nPos, rotated.Normalized())
 			}
 		}
 	}
@@ -249,17 +267,15 @@ func TestNormalizedPosition_Normalized(t *testing.T) {
 
 func TestNormalizedPosition_Accessors(t *testing.T) {
 	for _, nPos := range generateTestNormalizedPositions(t) {
-
 		// Test shorthands
-		assert.Equal(t, nPos.position.Player(), nPos.Player())
-		assert.Equal(t, nPos.position.Opponent(), nPos.Opponent())
-		assert.Equal(t, nPos.position, nPos.Position())
-		assert.Equal(t, nPos.position.CountDiscs(), nPos.CountDiscs())
+		require.Equal(t, nPos.position.Player(), nPos.Player())
+		require.Equal(t, nPos.position.Opponent(), nPos.Opponent())
+		require.Equal(t, nPos.position, nPos.Position())
+		require.Equal(t, nPos.position.CountDiscs(), nPos.CountDiscs())
 	}
 }
 
-// getNormalizedPositionWithMoves returns a normalized position with the given number of discs
-// and ensures that the position has moves
+// and ensures that the position has moves.
 func getNormalizedPositionWithMoves(discCount int) NormalizedPosition {
 	var pos Position
 
@@ -268,7 +284,8 @@ func getNormalizedPositionWithMoves(discCount int) NormalizedPosition {
 		var err error
 		pos, err = NewPositionRandom(discCount)
 		if err != nil {
-			log.Fatalf("error creating position: %s", err)
+			slog.Error("error creating position", "error", err)
+			os.Exit(1)
 		}
 	}
 
@@ -310,14 +327,14 @@ func TestNormalizedPosition_IsDbSavable(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, tt.nPos.IsDbSavable())
+			require.Equal(t, tt.want, tt.nPos.IsDBSavable())
 		})
 	}
 }
 
 func TestNormalizedPosition_HasMoves(t *testing.T) {
 	for _, nPos := range generateTestNormalizedPositions(t) {
-		assert.Equal(t, nPos.Position().HasMoves(), nPos.HasMoves())
+		require.Equal(t, nPos.Position().HasMoves(), nPos.HasMoves())
 	}
 }
 
@@ -378,10 +395,10 @@ func TestNormalizedPosition_ValidateBestMoves(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := nPos.ValidateBestMoves(tt.bestMoves)
 			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Equal(t, tt.wantErrMsg, err.Error())
+				require.Error(t, err)
+				require.Equal(t, tt.wantErrMsg, err.Error())
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 			}
 		})
 	}

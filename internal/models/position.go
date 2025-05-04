@@ -1,50 +1,70 @@
 package models
 
 import (
+	"errors"
 	"fmt"
 	"math/bits"
-	"math/rand"
+	"math/rand/v2"
 	"strings"
 )
 
 const (
-	PassMove = -1
+	PassMove    = -1
+	SquareCount = 64
+	MinDiscs    = 4
+	MaxDiscs    = SquareCount
+
+	MaxX = 8
+	MaxY = 8
+
+	FieldStringLength = 2
+
+	startPlayerDiscs   = 0x0000000810000000
+	startOpponentDiscs = 0x0000001008000000
 )
 
-// flipHorizontally flips the bits of the position horizontally
+// flipHorizontally flips the bits of the position horizontally.
 func flipHorizontally(x uint64) uint64 {
-	k1 := uint64(0x5555555555555555)
-	k2 := uint64(0x3333333333333333)
-	k4 := uint64(0x0F0F0F0F0F0F0F0F)
-	x = ((x >> 1) & k1) | ((x & k1) << 1)
-	x = ((x >> 2) & k2) | ((x & k2) << 2)
-	x = ((x >> 4) & k4) | ((x & k4) << 4)
-	return x & 0xFFFFFFFFFFFFFFFF
+	const (
+		k1 = uint64(0x5555555555555555)
+		k2 = uint64(0x3333333333333333)
+		k4 = uint64(0x0F0F0F0F0F0F0F0F)
+	)
+
+	x = ((x >> 1) & k1) | ((x & k1) << 1) //nolint:mnd  // Bitwise swap
+	x = ((x >> 2) & k2) | ((x & k2) << 2) //nolint:mnd  // Bitwise swap
+	x = ((x >> 4) & k4) | ((x & k4) << 4) //nolint:mnd  // Bitwise swap
+	return x
 }
 
-// flipVertically flips the bits of the position vertically
+// flipVertically flips the bits of the position vertically.
 func flipVertically(x uint64) uint64 {
-	k1 := uint64(0x00FF00FF00FF00FF)
-	k2 := uint64(0x0000FFFF0000FFFF)
+	const (
+		k1 = uint64(0x00FF00FF00FF00FF)
+		k2 = uint64(0x0000FFFF0000FFFF)
+	)
 
-	x = ((x >> 8) & k1) | ((x & k1) << 8)
-	x = ((x >> 16) & k2) | ((x & k2) << 16)
-	x = (x >> 32) | (x << 32)
-	return x & 0xFFFFFFFFFFFFFFFF
+	x = ((x >> 8) & k1) | ((x & k1) << 8)   //nolint:mnd // Bitwise swap
+	x = ((x >> 16) & k2) | ((x & k2) << 16) //nolint:mnd // Bitwise swap
+	x = (x >> 32) | (x << 32)               //nolint:mnd // Bitwise swap
+	return x
 }
 
-// flipDiagonally flips the bits of the position diagonally
+// flipDiagonally flips the bits of the position diagonally.
 func flipDiagonally(x uint64) uint64 {
-	k1 := uint64(0x5500550055005500)
-	k2 := uint64(0x3333000033330000)
-	k4 := uint64(0x0F0F0F0F00000000)
-	t := k4 & (x ^ (x << 28))
-	x ^= t ^ (t >> 28)
-	t = k2 & (x ^ (x << 14))
-	x ^= t ^ (t >> 14)
-	t = k1 & (x ^ (x << 7))
-	x ^= t ^ (t >> 7)
-	return x & 0xFFFFFFFFFFFFFFFF
+	const (
+		k1 = uint64(0x5500550055005500)
+		k2 = uint64(0x3333000033330000)
+		k4 = uint64(0x0F0F0F0F00000000)
+	)
+
+	t := k4 & (x ^ (x << 28)) //nolint:mnd  // Bitwise swap
+	x ^= t ^ (t >> 28)        //nolint:mnd  // Bitwise swap
+	t = k2 & (x ^ (x << 14))  //nolint:mnd  // Bitwise swap
+	x ^= t ^ (t >> 14)        //nolint:mnd  // Bitwise swap
+	t = k1 & (x ^ (x << 7))   //nolint:mnd  // Bitwise swap
+	x ^= t ^ (t >> 7)         //nolint:mnd  // Bitwise swap
+	return x
 }
 
 func rotateBits(x uint64, rotation int) uint64 {
@@ -60,16 +80,16 @@ func rotateBits(x uint64, rotation int) uint64 {
 	return x
 }
 
-// Position represents a position on the board
+// Position represents a position on the board.
 type Position struct {
 	player   uint64 // Bitboard for the current player's pieces
 	opponent uint64 // Bitboard for the opponent's pieces
 }
 
-// NewPosition creates a new position from a player and opponent bitboard
+// NewPosition creates a new position from a player and opponent bitboard.
 func NewPosition(player, opponent uint64) (Position, error) {
 	if player&opponent != 0 {
-		return Position{}, fmt.Errorf("invalid position: player and opponent discs cannot overlap")
+		return Position{}, errors.New("invalid position: player and opponent discs cannot overlap")
 	}
 
 	return Position{
@@ -78,8 +98,7 @@ func NewPosition(player, opponent uint64) (Position, error) {
 	}, nil
 }
 
-// NewPositionMust creates a new position from a player and opponent bitboard
-// and panics if the position is invalid
+// NewPositionMust creates a new position from a player and opponent bitboard and panics if the position is invalid.
 func NewPositionMust(player, opponent uint64) Position {
 	p, err := NewPosition(player, opponent)
 	if err != nil {
@@ -88,9 +107,9 @@ func NewPositionMust(player, opponent uint64) Position {
 	return p
 }
 
-// NewPositionRandom creates a new position with a random number of discs
+// NewPositionRandom creates a new position with a random number of discs.
 func NewPositionRandom(discs int) (Position, error) {
-	if discs < 4 || discs > 64 {
+	if discs < MinDiscs || discs > MaxDiscs {
 		return Position{}, fmt.Errorf("invalid number of discs: %d", discs)
 	}
 
@@ -102,7 +121,10 @@ func NewPositionRandom(discs int) (Position, error) {
 			pos = NewPositionStart()
 			continue
 		}
-		move := rand.Intn(64)
+
+		// This is not security critical AND we using rand/v2 anyway. The linter is not that bright.
+		move := rand.IntN(SquareCount) //nolint:gosec
+
 		if (1<<move)&validMoves != 0 {
 			pos = pos.DoMove(move)
 		}
@@ -111,17 +133,17 @@ func NewPositionRandom(discs int) (Position, error) {
 	return pos, nil
 }
 
-// NewPositionStart creates a new position with the starting position
+// NewPositionStart creates a new position with the starting position.
 func NewPositionStart() Position {
-	return NewPositionMust(0x0000000810000000, 0x0000001008000000)
+	return NewPositionMust(startPlayerDiscs, startOpponentDiscs)
 }
 
-// NewPositionEmpty creates a new position with an empty board
+// NewPositionEmpty creates a new position with an empty board.
 func NewPositionEmpty() Position {
 	return NewPositionMust(0, 0)
 }
 
-// Normalized returns the normalized position
+// Normalized returns the normalized position.
 func (p Position) Normalized() NormalizedPosition {
 	normalized, _ := p.Normalize()
 	return normalized
@@ -149,7 +171,7 @@ func (p Position) isLessThan(other Position) bool {
 	return false
 }
 
-// Normalize normalizes the position
+// Normalize normalizes the position.
 func (p Position) Normalize() (NormalizedPosition, int) {
 	minPosition := p
 	rotation := 0
@@ -171,89 +193,94 @@ func (p Position) Normalize() (NormalizedPosition, int) {
 	return nPos, rotation
 }
 
-// IsNormalized checks if the position is normalized
+// IsNormalized checks if the position is normalized.
 func (p Position) IsNormalized() bool {
-	return p.Normalized().Position() == p
+	nPos := p.Normalized()
+	return nPos.Position() == p
 }
 
-// Player returns the player bitboard
+// Player returns the player bitboard.
 func (p Position) Player() uint64 {
 	return p.player
 }
 
-// Opponent returns the opponent bitboard
+// Opponent returns the opponent bitboard.
 func (p Position) Opponent() uint64 {
 	return p.opponent
 }
 
-// CountDiscs returns the number of discs on the board
+// CountDiscs returns the number of discs on the board.
 func (p Position) CountDiscs() int {
 	return bits.OnesCount64(p.player | p.opponent)
 }
 
-// HasMoves returns whether the position has any valid moves
+// HasMoves returns whether the position has any valid moves.
 func (p Position) HasMoves() bool {
 	return p.Moves() != 0
 }
 
-// Moves returns a bitset with all valid moves for the player
-// This code is adapted from Edax
+// Moves returns a bitset with all the valid moves for the player.
+// This code is adapted from Edax.
 func (p Position) Moves() uint64 {
-	mask := p.opponent & 0x7E7E7E7E7E7E7E7E
+	const (
+		middleColumns = 0x7E7E7E7E7E7E7E7E
+	)
+
+	mask := p.opponent & middleColumns
 
 	flipL := mask & (p.player << 1)
 	flipL |= mask & (flipL << 1)
 	maskL := mask & (mask << 1)
-	flipL |= maskL & (flipL << (2 * 1))
-	flipL |= maskL & (flipL << (2 * 1))
+	flipL |= maskL & (flipL << 2) // nolint:mnd
+	flipL |= maskL & (flipL << 2) // nolint:mnd
 	flipR := mask & (p.player >> 1)
 	flipR |= mask & (flipR >> 1)
 	maskR := mask & (mask >> 1)
-	flipR |= maskR & (flipR >> (2 * 1))
-	flipR |= maskR & (flipR >> (2 * 1))
+	flipR |= maskR & (flipR >> 2) // nolint:mnd
+	flipR |= maskR & (flipR >> 2) // nolint:mnd
 	movesSet := (flipL << 1) | (flipR >> 1)
 
-	flipL = mask & (p.player << 7)
-	flipL |= mask & (flipL << 7)
-	maskL = mask & (mask << 7)
-	flipL |= maskL & (flipL << (2 * 7))
-	flipL |= maskL & (flipL << (2 * 7))
-	flipR = mask & (p.player >> 7)
-	flipR |= mask & (flipR >> 7)
-	maskR = mask & (mask >> 7)
-	flipR |= maskR & (flipR >> (2 * 7))
-	flipR |= maskR & (flipR >> (2 * 7))
-	movesSet |= (flipL << 7) | (flipR >> 7)
+	flipL = mask & (p.player << 7)          // nolint:mnd
+	flipL |= mask & (flipL << 7)            // nolint:mnd
+	maskL = mask & (mask << 7)              // nolint:mnd
+	flipL |= maskL & (flipL << 14)          // nolint:mnd
+	flipL |= maskL & (flipL << 14)          // nolint:mnd
+	flipR = mask & (p.player >> 7)          // nolint:mnd
+	flipR |= mask & (flipR >> 7)            // nolint:mnd
+	maskR = mask & (mask >> 7)              // nolint:mnd
+	flipR |= maskR & (flipR >> 14)          // nolint:mnd
+	flipR |= maskR & (flipR >> 14)          // nolint:mnd
+	movesSet |= (flipL << 7) | (flipR >> 7) // nolint:mnd
 
-	flipL = mask & (p.player << 9)
-	flipL |= mask & (flipL << 9)
-	maskL = mask & (mask << 9)
-	flipL |= maskL & (flipL << (2 * 9))
-	flipL |= maskL & (flipL << (2 * 9))
-	flipR = mask & (p.player >> 9)
-	flipR |= mask & (flipR >> 9)
-	maskR = mask & (mask >> 9)
-	flipR |= maskR & (flipR >> (2 * 9))
-	flipR |= maskR & (flipR >> (2 * 9))
-	movesSet |= (flipL << 9) | (flipR >> 9)
+	flipL = mask & (p.player << 9)          // nolint:mnd
+	flipL |= mask & (flipL << 9)            // nolint:mnd
+	maskL = mask & (mask << 9)              // nolint:mnd
+	flipL |= maskL & (flipL << 18)          // nolint:mnd
+	flipL |= maskL & (flipL << 18)          // nolint:mnd
+	flipR = mask & (p.player >> 9)          // nolint:mnd
+	flipR |= mask & (flipR >> 9)            // nolint:mnd
+	maskR = mask & (mask >> 9)              // nolint:mnd
+	flipR |= maskR & (flipR >> 18)          // nolint:mnd
+	flipR |= maskR & (flipR >> 18)          // nolint:mnd
+	movesSet |= (flipL << 9) | (flipR >> 9) // nolint:mnd
 
-	flipL = p.opponent & (p.player << 8)
-	flipL |= p.opponent & (flipL << 8)
-	maskL = p.opponent & (p.opponent << 8)
-	flipL |= maskL & (flipL << (2 * 8))
-	flipL |= maskL & (flipL << (2 * 8))
-	flipR = p.opponent & (p.player >> 8)
-	flipR |= p.opponent & (flipR >> 8)
-	maskR = p.opponent & (p.opponent >> 8)
-	flipR |= maskR & (flipR >> (2 * 8))
-	flipR |= maskR & (flipR >> (2 * 8))
-	movesSet |= (flipL << 8) | (flipR >> 8)
+	flipL = p.opponent & (p.player << 8)    // nolint:mnd
+	flipL |= p.opponent & (flipL << 8)      // nolint:mnd
+	maskL = p.opponent & (p.opponent << 8)  // nolint:mnd
+	flipL |= maskL & (flipL << 16)          // nolint:mnd
+	flipL |= maskL & (flipL << 16)          // nolint:mnd
+	flipR = p.opponent & (p.player >> 8)    // nolint:mnd
+	flipR |= p.opponent & (flipR >> 8)      // nolint:mnd
+	maskR = p.opponent & (p.opponent >> 8)  // nolint:mnd
+	flipR |= maskR & (flipR >> 16)          // nolint:mnd
+	flipR |= maskR & (flipR >> 16)          // nolint:mnd
+	movesSet |= (flipL << 8) | (flipR >> 8) // nolint:mnd
 
 	movesSet &^= p.player | p.opponent
 	return movesSet
 }
 
-// flipped returns a bitset with all the opponent discs that would be flipped if the player played on the given move
+// flipped returns a bitset with all the opponent discs that would be flipped if the player played on the given move.
 func (p Position) flipped(move int) uint64 {
 	flipped := uint64(0)
 
@@ -275,13 +302,13 @@ func (p Position) flipped(move int) uint64 {
 		dx, dy := dir[0], dir[1]
 		s := 1
 		for {
-			curx := (move % 8) + (dx * s)
-			cury := (move / 8) + (dy * s)
-			if curx < 0 || curx >= 8 || cury < 0 || cury >= 8 {
+			curx := (move % MaxX) + (dx * s)
+			cury := (move / MaxX) + (dy * s)
+			if curx < 0 || curx >= MaxX || cury < 0 || cury >= MaxY {
 				break
 			}
 
-			cur := 8*cury + curx
+			cur := MaxX*cury + curx
 			curBit := uint64(1 << cur)
 
 			if p.opponent&curBit != 0 {
@@ -289,7 +316,7 @@ func (p Position) flipped(move int) uint64 {
 			} else {
 				if (p.player&curBit != 0) && s >= 2 {
 					for dist := 1; dist < s; dist++ {
-						f := move + (dist * (8*dy + dx))
+						f := move + (dist * (MaxX*dy + dx))
 						flipped |= uint64(1 << f)
 					}
 				}
@@ -332,7 +359,7 @@ func (p Position) DoMove(move int) Position {
 	}
 }
 
-// IsValidMove checks if a move is valid
+// IsValidMove checks if a move is valid.
 func (p Position) IsValidMove(move int) bool {
 	if move < PassMove || move >= 64 {
 		return false
@@ -347,26 +374,27 @@ func (p Position) IsValidMove(move int) bool {
 	return validMoves&(1<<move) != 0
 }
 
-// AsciiArtLines returns the ascii art lines for the position
-func (p Position) AsciiArtLines() []string {
+// ASCIIArtLines returns the ascii art lines for the position.
+func (p Position) ASCIIArtLines() []string {
 	moves := p.Moves()
-	lines := make([]string, 10)
+	lines := make([]string, MaxY+2) //nolint:mnd
 
 	lines[0] = "+-a-b-c-d-e-f-g-h-+"
-	for y := 0; y < 8; y++ {
+	for y := range MaxY {
 		line := fmt.Sprintf("%d ", y+1)
 
-		for x := 0; x < 8; x++ {
-			index := (y * 8) + x
+		for x := range MaxX {
+			index := (y * MaxX) + x
 			mask := uint64(1 << index)
 
-			if p.player&mask != 0 {
+			switch {
+			case p.player&mask != 0:
 				line += "○ "
-			} else if p.opponent&mask != 0 {
+			case p.opponent&mask != 0:
 				line += "● "
-			} else if moves&mask != 0 {
+			case moves&mask != 0:
 				line += "· "
-			} else {
+			default:
 				line += "  "
 			}
 		}
@@ -379,24 +407,23 @@ func (p Position) AsciiArtLines() []string {
 	return lines
 }
 
-// FieldToIndex converts a field notation (e.g. "a1", "h8") to an index (0-63)
-// PassMove is returned if the field is "--", "ps", or "pa"
-func FieldToIndex(field string) int {
-	if len(field) != 2 {
-		panic(fmt.Sprintf("invalid field length: %s", field))
+// FieldToIndex converts a field to an index.
+func FieldToIndex(field string) (int, error) {
+	if len(field) != FieldStringLength {
+		return 0, fmt.Errorf("invalid field length: %s", field)
 	}
 
 	field = strings.ToLower(field)
 
 	if field == "--" || field == "ps" || field == "pa" {
-		return PassMove
+		return PassMove, nil
 	}
 
-	if !('a' <= field[0] && field[0] <= 'h' && '1' <= field[1] && field[1] <= '8') {
-		panic(fmt.Sprintf("invalid field: %s", field))
+	if 'a' > field[0] || field[0] > 'h' || '1' > field[1] || field[1] > '8' {
+		return 0, fmt.Errorf("invalid field: %s", field)
 	}
 
 	x := int(field[0] - 'a')
 	y := int(field[1] - '1')
-	return y*8 + x
+	return y*8 + x, nil
 }

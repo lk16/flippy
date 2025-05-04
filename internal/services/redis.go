@@ -7,7 +7,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// Connect initializes the Redis connection
+// InitRedis initializes the Redis connection.
 func InitRedis(url string) (*redis.Client, error) {
 	// Parse Redis URL
 	opts, err := redis.ParseURL(url)
@@ -19,7 +19,7 @@ func InitRedis(url string) (*redis.Client, error) {
 	client := redis.NewClient(opts)
 
 	// Test the connection
-	if err := client.Ping(context.Background()).Err(); err != nil {
+	if err = client.Ping(context.Background()).Err(); err != nil {
 		return nil, fmt.Errorf("error pinging Redis: %w", err)
 	}
 

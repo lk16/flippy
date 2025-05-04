@@ -8,12 +8,13 @@ import (
 	"github.com/lk16/flippy/api/internal/middleware"
 )
 
+// SetupRoutes sets up the routes for the book.
 func SetupRoutes(app *fiber.App) {
 	bookGroup := app.Group("/book", middleware.BasicAuth())
-	bookGroup.Get("/", BookPage)
+	bookGroup.Get("/", Page)
 }
 
-// BookPage serves the book.html page
-func BookPage(c *fiber.Ctx) error {
+// Page serves the book.html page.
+func Page(c *fiber.Ctx) error {
 	return c.SendFile(filepath.Join(config.StaticDir, "book.html"))
 }

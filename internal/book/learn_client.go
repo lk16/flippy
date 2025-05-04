@@ -1,7 +1,8 @@
 package book
 
 import (
-	"log"
+	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/lk16/flippy/api/internal/config"
@@ -11,18 +12,23 @@ import (
 
 const (
 	heartbeatInterval = time.Minute
+	noJobSleepTime    = 10 * time.Second
+	errorSleepTime    = 10 * time.Second
 )
 
 type LearnClient struct {
 	apiClient *APIClient
-	verbose   bool
 }
 
-func NewLearnClient(config *config.LearnClientConfig, verbose bool) *LearnClient {
-	return &LearnClient{
-		apiClient: NewAPIClient(config, verbose),
-		verbose:   verbose,
+func NewLearnClient(config *config.LearnClientConfig) (*LearnClient, error) {
+	apiClient, err := NewAPIClient(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create api client: %w", err)
 	}
+
+	return &LearnClient{
+		apiClient: apiClient,
+	}, nil
 }
 
 func (c *LearnClient) heartbeatLoop() {
@@ -31,7 +37,7 @@ func (c *LearnClient) heartbeatLoop() {
 
 		err := c.apiClient.Heartbeat()
 		if err != nil {
-			log.Printf("Failed to send heartbeat: %v", err)
+			slog.Error("Failed to send heartbeat", "error", err)
 		}
 	}
 }
@@ -39,32 +45,32 @@ func (c *LearnClient) heartbeatLoop() {
 func (c *LearnClient) doJobsLoop() {
 	jobCount := 0
 	totalJobTimeSec := 0.0
-	edaxManager := edax.GetEdaxManager(c.verbose)
+	edaxManager := edax.NewManager()
 	for {
 		job, err := c.apiClient.GetJob()
 		if err != nil {
-			log.Printf("Failed to get learn job: %v", err)
-			time.Sleep(10 * time.Second)
+			slog.Error("Failed to get learn job", "error", err)
+			time.Sleep(noJobSleepTime)
 			continue
 		}
 
 		discCount := job.Position.CountDiscs()
-		log.Printf("Got job %d | %d discs | learn level %d:", jobCount+1, discCount, job.Level)
-		for _, line := range job.Position.AsciiArtLines() {
-			log.Printf("%s", line)
+		slog.Info("Got job", "job_number", jobCount+1, "disc_count", discCount, "learn_level", job.Level)
+		for _, line := range job.Position.ASCIIArtLines() {
+			slog.Info("Position", "line", line)
 		}
 
 		jobResult, err := edaxManager.DoJob(job)
 		if err != nil {
-			log.Printf("Failed to do job: %v", err)
-			time.Sleep(10 * time.Second)
+			slog.Error("Failed to do job", "error", err)
+			time.Sleep(errorSleepTime)
 			continue
 		}
 
 		jobCount++
 		totalJobTimeSec += jobResult.ComputationTime
 		avgJobTimeSeconds := float64(totalJobTimeSec) / float64(jobCount)
-		log.Printf("Total jobs: %d | Average time: %.2f sec", jobCount, avgJobTimeSeconds)
+		slog.Info("Total jobs", "job_count", jobCount, "avg_job_time", avgJobTimeSeconds)
 
 		payload := models.EvaluationsPayload{
 			Evaluations: []models.Evaluation{jobResult.Evaluation},
@@ -72,7 +78,8 @@ func (c *LearnClient) doJobsLoop() {
 
 		err = c.apiClient.SubmitJobResult(payload)
 		if err != nil {
-			log.Printf("Failed to submit job result: %v", err)
+			slog.Error("Failed to submit job result", "error", err)
+			time.Sleep(errorSleepTime)
 			continue
 		}
 	}

@@ -6,7 +6,7 @@ import (
 	"github.com/lk16/flippy/api/internal/repository"
 )
 
-// LookupPositions handles position lookup requests
+// LookupPositions handles position lookup requests.
 func LookupPositions(c *fiber.Ctx) error {
 	var payload models.LookupPositionsPayload
 	if err := c.BodyParser(&payload); err != nil {
@@ -26,7 +26,7 @@ func LookupPositions(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(evaluations)
 }
 
-// SubmitEvaluations handles submission of evaluation results
+// SubmitEvaluations handles submission of evaluation results.
 func SubmitEvaluations(c *fiber.Ctx) error {
 	var payload models.EvaluationsPayload
 	if err := c.BodyParser(&payload); err != nil {
@@ -51,7 +51,7 @@ func SubmitEvaluations(c *fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusOK)
 }
 
-// GetBookStats returns statistics about the book
+// GetBookStats returns statistics about the book.
 func GetBookStats(c *fiber.Ctx) error {
 	repo := repository.NewEvaluationRepository(c)
 	stats, err := repo.GetBookStats(c.Context())

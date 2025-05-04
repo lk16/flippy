@@ -3,10 +3,16 @@ package models
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 
 	"github.com/lk16/flippy/api/internal/config"
+)
+
+const (
+	NormalizedPositionStringLength = 32
+	NormalizedPositionBytesLength  = 16
 )
 
 // NormalizedPosition represents a normalized position on the board
@@ -15,9 +21,9 @@ type NormalizedPosition struct {
 	position Position
 }
 
-// NewNormalizedPositionFromString creates a new normalized position from a string
+// NewNormalizedPositionFromString creates a new normalized position from a string.
 func NewNormalizedPositionFromString(s string) (NormalizedPosition, error) {
-	if len(s) != 32 {
+	if len(s) != NormalizedPositionStringLength {
 		return NormalizedPosition{}, fmt.Errorf("position string must be exactly 32 characters, got %d", len(s))
 	}
 
@@ -34,9 +40,9 @@ func NewNormalizedPositionFromString(s string) (NormalizedPosition, error) {
 	return NewNormalizedPositionFromUint64s(player, opponent)
 }
 
-// NewNormalizedPositionFromBytes creates a new normalized position from a byte slice
+// NewNormalizedPositionFromBytes creates a new normalized position from a byte slice.
 func NewNormalizedPositionFromBytes(b []byte) (NormalizedPosition, error) {
-	if len(b) != 16 {
+	if len(b) != NormalizedPositionBytesLength {
 		return NormalizedPosition{}, fmt.Errorf("position bytes must be exactly 16 bytes, got %d", len(b))
 	}
 
@@ -46,21 +52,20 @@ func NewNormalizedPositionFromBytes(b []byte) (NormalizedPosition, error) {
 	return NewNormalizedPositionFromUint64s(player, opponent)
 }
 
-// NewNormalizedPositionEmpty creates a new normalized position with no discs
+// NewNormalizedPositionEmpty creates a new normalized position with no discs.
 func NewNormalizedPositionEmpty() NormalizedPosition {
 	return NewNormalizedPositionMust(0, 0)
 }
 
-// NewNormalizedPositionFromUint64s creates a new normalized position from a player and opponent bitboard
+// NewNormalizedPositionFromUint64s creates a new normalized position from a player and opponent bitboard.
 func NewNormalizedPositionFromUint64s(player, opponent uint64) (NormalizedPosition, error) {
-
 	pos, err := NewPosition(player, opponent)
 	if err != nil {
 		return NormalizedPosition{}, fmt.Errorf("invalid normalized position: %w", err)
 	}
 
 	if !pos.IsNormalized() {
-		return NormalizedPosition{}, fmt.Errorf("invalid normalized position: position is not normalized")
+		return NormalizedPosition{}, errors.New("invalid normalized position: position is not normalized")
 	}
 
 	return NormalizedPosition{
@@ -68,8 +73,8 @@ func NewNormalizedPositionFromUint64s(player, opponent uint64) (NormalizedPositi
 	}, nil
 }
 
-// NewNormalizedPositionMust creates a new normalized position from a player and opponent bitboard
-// It panics if the position is invalid
+// NewNormalizedPositionMust creates a new normalized position from a player and opponent bitboard.
+// It panics if the position is invalid.
 func NewNormalizedPositionMust(player, opponent uint64) NormalizedPosition {
 	nPos, err := NewNormalizedPositionFromUint64s(player, opponent)
 	if err != nil {
@@ -81,19 +86,19 @@ func NewNormalizedPositionMust(player, opponent uint64) NormalizedPosition {
 // String implements the Stringer interface for Position.
 // It returns a 32-character hex string where the first 16 characters represent the player's pieces
 // and the last 16 characters represent the opponent's pieces.
-func (nPos NormalizedPosition) String() string {
+func (nPos *NormalizedPosition) String() string {
 	return fmt.Sprintf("%016X%016X", nPos.Player(), nPos.Opponent())
 }
 
-// Bytes returns the normalized position as a byte slice
-func (nPos NormalizedPosition) Bytes() []byte {
-	b := make([]byte, 16)
+// Bytes returns the normalized position as a byte slice.
+func (nPos *NormalizedPosition) Bytes() []byte {
+	b := make([]byte, NormalizedPositionBytesLength)
 	binary.LittleEndian.PutUint64(b[:8], nPos.Player())
 	binary.LittleEndian.PutUint64(b[8:], nPos.Opponent())
 	return b
 }
 
-// UnmarshalJSON implements json.Unmarshaler for Position.
+// UnmarshalJSON implements json.Unmarshaler for NormalizedPosition.
 // It expects a 32-character hex string where the first 16 characters represent the player's pieces
 // and the last 16 characters represent the opponent's pieces.
 func (nPos *NormalizedPosition) UnmarshalJSON(data []byte) error {
@@ -111,37 +116,37 @@ func (nPos *NormalizedPosition) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// MarshalJSON implements json.Marshaler for Position.
+// MarshalJSON implements json.Marshaler for NormalizedPosition.
 // It returns a 32-character hex string where the first 16 characters represent the player's pieces
 // and the last 16 characters represent the opponent's pieces.
 func (nPos NormalizedPosition) MarshalJSON() ([]byte, error) {
 	return json.Marshal(nPos.String())
 }
 
-// Player returns the player bitboard
-func (nPos NormalizedPosition) Player() uint64 {
+// Player returns the player bitboard.
+func (nPos *NormalizedPosition) Player() uint64 {
 	return nPos.position.Player()
 }
 
-// Opponent returns the opponent bitboard
-func (nPos NormalizedPosition) Opponent() uint64 {
+// Opponent returns the opponent bitboard.
+func (nPos *NormalizedPosition) Opponent() uint64 {
 	return nPos.position.Opponent()
 }
 
-// Position returns the underlying position
-func (nPos NormalizedPosition) Position() Position {
+// Position returns the underlying position.
+func (nPos *NormalizedPosition) Position() Position {
 	return nPos.position
 }
 
-// CountDiscs returns the number of discs on the board
-func (nPos NormalizedPosition) CountDiscs() int {
+// CountDiscs returns the number of discs on the board.
+func (nPos *NormalizedPosition) CountDiscs() int {
 	return nPos.position.CountDiscs()
 }
 
-// Scan implements the sql.Scanner interface for NormalizedPosition
+// Scan implements the sql.Scanner interface for NormalizedPosition.
 func (nPos *NormalizedPosition) Scan(value interface{}) error {
 	if value == nil {
-		return fmt.Errorf("cannot scan nil into NormalizedPosition")
+		return errors.New("cannot scan nil into NormalizedPosition")
 	}
 
 	bytes, ok := value.([]byte)
@@ -158,23 +163,22 @@ func (nPos *NormalizedPosition) Scan(value interface{}) error {
 	return nil
 }
 
-// IsDbSavable returns whether the position should be saved in the database
-func (nPos NormalizedPosition) IsDbSavable() bool {
+// IsDBSavable returns whether the position should be saved in the database.
+func (nPos *NormalizedPosition) IsDBSavable() bool {
 	discCount := nPos.CountDiscs()
 
 	return discCount >= 4 && discCount <= config.MaxBookSavableDiscs && nPos.HasMoves()
 }
 
-// HasMoves returns whether the position has any valid moves
-func (nPos NormalizedPosition) HasMoves() bool {
+// HasMoves returns whether the position has any valid moves.
+func (nPos *NormalizedPosition) HasMoves() bool {
 	return nPos.position.HasMoves()
 }
 
-// ValidateBestMoves validates the best moves for the position
-func (nPos NormalizedPosition) ValidateBestMoves(bestMoves BestMoves) error {
-
+// ValidateBestMoves validates the best moves for the position.
+func (nPos *NormalizedPosition) ValidateBestMoves(bestMoves BestMoves) error {
 	if bestMoves == nil {
-		return fmt.Errorf("best moves is nil")
+		return errors.New("best moves is nil")
 	}
 
 	pos := nPos.Position()
@@ -190,21 +194,22 @@ func (nPos NormalizedPosition) ValidateBestMoves(bestMoves BestMoves) error {
 	return nil
 }
 
-// AsciiArtLines returns the ascii art lines for the position
-func (nPos NormalizedPosition) AsciiArtLines() []string {
-	return nPos.position.AsciiArtLines()
+// ASCIIArtLines returns the ascii art lines for the position.
+func (nPos *NormalizedPosition) ASCIIArtLines() []string {
+	return nPos.position.ASCIIArtLines()
 }
 
-// ToProblem returns the problem string for the position
-func (nPos NormalizedPosition) ToProblem() string {
+// ToProblem returns the problem string for the position.
+func (nPos *NormalizedPosition) ToProblem() string {
 	var squares string
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		mask := uint64(1) << i
-		if mask&nPos.Player() != 0 {
+		switch {
+		case mask&nPos.Player() != 0:
 			squares += "X"
-		} else if mask&nPos.Opponent() != 0 {
+		case mask&nPos.Opponent() != 0:
 			squares += "O"
-		} else {
+		default:
 			squares += "-"
 		}
 	}

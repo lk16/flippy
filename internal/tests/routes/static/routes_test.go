@@ -1,11 +1,11 @@
-package tests
+package static_test
 
 import (
 	"net/http"
 	"testing"
 
 	"github.com/lk16/flippy/api/internal/tests"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestStaticFiles(t *testing.T) {
@@ -21,8 +21,8 @@ func TestStaticFiles(t *testing.T) {
 	for _, file := range files {
 		t.Run(file, func(t *testing.T) {
 			resp, err := http.Get(tests.BaseURL + "/static/" + file)
-			assert.NoError(t, err)
-			assert.Equal(t, http.StatusOK, resp.StatusCode)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, resp.StatusCode)
 		})
 	}
 }

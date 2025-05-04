@@ -1,11 +1,8 @@
-package api
+package api_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"io"
-	"log"
 	"net/http"
 	"testing"
 
@@ -14,44 +11,44 @@ import (
 	"github.com/lk16/flippy/api/internal/repository"
 	"github.com/lk16/flippy/api/internal/services"
 	"github.com/lk16/flippy/api/internal/tests"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetClientsNoAuth(t *testing.T) {
 	baseURL := tests.BaseURL
 
 	req, err := http.NewRequest(http.MethodGet, baseURL+"/api/learn-clients", nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
 func TestGetClientsOkNoClients(t *testing.T) {
 	req, err := http.NewRequest(http.MethodGet, tests.BaseURL+"/api/learn-clients", nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	req.Header.Set("x-token", tests.TestToken)
+	req.Header.Set("X-Token", tests.TestToken)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var response models.StatsResponse
-	err = json.NewDecoder(resp.Body).Decode(&response)
-	assert.NoError(t, err)
+	var stats models.StatsResponse
+	err = json.NewDecoder(resp.Body).Decode(&stats)
+	require.NoError(t, err)
 
-	assert.Equal(t, 0, len(response.ClientStats))
-	assert.Equal(t, 0, response.ActiveClients)
+	require.Empty(t, stats.ClientStats)
+	require.Equal(t, 0, stats.ActiveClients)
 }
 
 func TestGetClientsOkWithClients(t *testing.T) {
@@ -60,62 +57,66 @@ func TestGetClientsOkWithClients(t *testing.T) {
 		GitCommit: "test-git-commit",
 	}
 	registerPayloadBytes, err := json.Marshal(registerPayload)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	registerReq, err := http.NewRequest(http.MethodPost, tests.BaseURL+"/api/learn-clients/register", bytes.NewBuffer(registerPayloadBytes))
-	assert.NoError(t, err)
+	registerReq, err := http.NewRequest(
+		http.MethodPost,
+		tests.BaseURL+"/api/learn-clients/register",
+		bytes.NewBuffer(registerPayloadBytes),
+	)
+	require.NoError(t, err)
 
-	registerReq.Header.Set("x-token", tests.TestToken)
+	registerReq.Header.Set("X-Token", tests.TestToken)
 	registerReq.Header.Set("Content-Type", "application/json")
 
 	registerClient := &http.Client{}
 	registerResp, err := registerClient.Do(registerReq)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	defer registerResp.Body.Close()
 
-	assert.Equal(t, http.StatusOK, registerResp.StatusCode)
+	require.Equal(t, http.StatusOK, registerResp.StatusCode)
 
-	var registerResponse models.RegisterResponse
-	err = json.NewDecoder(registerResp.Body).Decode(&registerResponse)
-	assert.NoError(t, err)
+	var registered models.RegisterResponse
+	err = json.NewDecoder(registerResp.Body).Decode(&registered)
+	require.NoError(t, err)
 
-	assert.NotEmpty(t, registerResponse.ClientID)
+	require.NotEmpty(t, registered.ClientID)
 
-	clientID := registerResponse.ClientID
+	clientID := registered.ClientID
 
 	req, err := http.NewRequest(http.MethodGet, tests.BaseURL+"/api/learn-clients", nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	req.Header.Set("x-token", tests.TestToken)
+	req.Header.Set("X-Token", tests.TestToken)
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var response models.StatsResponse
-	err = json.NewDecoder(resp.Body).Decode(&response)
-	assert.NoError(t, err)
+	var stats models.StatsResponse
+	err = json.NewDecoder(resp.Body).Decode(&stats)
+	require.NoError(t, err)
 
-	assert.Equal(t, 1, response.ActiveClients)
-	assert.Equal(t, 1, len(response.ClientStats))
+	require.Equal(t, 1, stats.ActiveClients)
+	require.Len(t, stats.ClientStats, 1)
 
-	assert.Equal(t, clientID, response.ClientStats[0].ID)
-	assert.Equal(t, "test-hostname", response.ClientStats[0].Hostname)
-	assert.Equal(t, "test-git-commit", response.ClientStats[0].GitCommit)
-	assert.Equal(t, 0, response.ClientStats[0].PositionsComputed)
+	require.Equal(t, clientID, stats.ClientStats[0].ID)
+	require.Equal(t, "test-hostname", stats.ClientStats[0].Hostname)
+	require.Equal(t, "test-git-commit", stats.ClientStats[0].GitCommit)
+	require.Equal(t, 0, stats.ClientStats[0].PositionsComputed)
 
 	// Delete the client from Redis
 	services, err := services.InitServices(config.LoadServerConfig())
-	assert.NoError(t, err)
-	deleted, err := services.Redis.Del(context.Background(), repository.ClientsKey).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(1), deleted)
+	require.NoError(t, err)
+	deleted, err := services.Redis.Del(t.Context(), repository.ClientsKey).Result()
+	require.NoError(t, err)
+	require.Equal(t, int64(1), deleted)
 }
 
 func TestRegisterClientNoAuth(t *testing.T) {
@@ -124,67 +125,66 @@ func TestRegisterClientNoAuth(t *testing.T) {
 		GitCommit: "test-git-commit",
 	}
 	registerPayloadBytes, err := json.Marshal(registerPayload)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	req, err := http.NewRequest(http.MethodPost, tests.BaseURL+"/api/learn-clients/register", bytes.NewBuffer(registerPayloadBytes))
-	assert.NoError(t, err)
+	req, err := http.NewRequest(
+		http.MethodPost,
+		tests.BaseURL+"/api/learn-clients/register",
+		bytes.NewBuffer(registerPayloadBytes),
+	)
+	require.NoError(t, err)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
-	assert.NoError(t, err)
-
-	body, err := io.ReadAll(resp.Body)
-	assert.NoError(t, err)
-
-	log.Println(string(body))
+	require.NoError(t, err)
 
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
 func TestHeartbeatNoAuth(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPost, tests.BaseURL+"/api/learn-clients/heartbeat", nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
 func TestHeartbeatNoClientID(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPost, tests.BaseURL+"/api/learn-clients/heartbeat", nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	req.Header.Set("x-token", tests.TestToken)
+	req.Header.Set("X-Token", tests.TestToken)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
 func TestHeartbeatNoClientUnknownClientID(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPost, tests.BaseURL+"/api/learn-clients/heartbeat", nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	req.Header.Set("x-token", tests.TestToken)
-	req.Header.Set("x-client-id", "unknown-client-id")
+	req.Header.Set("X-Token", tests.TestToken)
+	req.Header.Set("X-Client-Id", "unknown-client-id")
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
 func TestHeartbeatOk(t *testing.T) {
@@ -193,93 +193,95 @@ func TestHeartbeatOk(t *testing.T) {
 		GitCommit: "test-git-commit",
 	}
 	registerPayloadBytes, err := json.Marshal(registerPayload)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	registerReq, err := http.NewRequest(http.MethodPost, tests.BaseURL+"/api/learn-clients/register", bytes.NewBuffer(registerPayloadBytes))
-	assert.NoError(t, err)
+	registerReq, err := http.NewRequest(
+		http.MethodPost,
+		tests.BaseURL+"/api/learn-clients/register",
+		bytes.NewBuffer(registerPayloadBytes),
+	)
+	require.NoError(t, err)
 
-	registerReq.Header.Set("x-token", tests.TestToken)
+	registerReq.Header.Set("X-Token", tests.TestToken)
 	registerReq.Header.Set("Content-Type", "application/json")
 
 	registerClient := &http.Client{}
 	registerResp, err := registerClient.Do(registerReq)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	defer registerResp.Body.Close()
 
-	assert.Equal(t, http.StatusOK, registerResp.StatusCode)
+	require.Equal(t, http.StatusOK, registerResp.StatusCode)
 
-	var registerResponse models.RegisterResponse
-	err = json.NewDecoder(registerResp.Body).Decode(&registerResponse)
-	assert.NoError(t, err)
+	var registered models.RegisterResponse
+	err = json.NewDecoder(registerResp.Body).Decode(&registered)
+	require.NoError(t, err)
 
-	clientID := registerResponse.ClientID
-
-	log.Println(clientID)
+	clientID := registered.ClientID
 
 	heartbeatReq, err := http.NewRequest(http.MethodPost, tests.BaseURL+"/api/learn-clients/heartbeat", nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	heartbeatReq.Header.Set("x-token", tests.TestToken)
-	heartbeatReq.Header.Set("x-client-id", clientID)
+	heartbeatReq.Header.Set("X-Token", tests.TestToken)
+	heartbeatReq.Header.Set("X-Client-Id", clientID)
 	client := &http.Client{}
 	resp, err := client.Do(heartbeatReq)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// Delete the client from Redis
 	services, err := services.InitServices(config.LoadServerConfig())
-	assert.NoError(t, err)
-	deleted, err := services.Redis.Del(context.Background(), repository.ClientsKey).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(1), deleted)
+	require.NoError(t, err)
+	deleted, err := services.Redis.Del(t.Context(), repository.ClientsKey).Result()
+	require.NoError(t, err)
+	require.Equal(t, int64(1), deleted)
 }
 
 func TestGetJobNoAuth(t *testing.T) {
 	req, err := http.NewRequest(http.MethodGet, tests.BaseURL+"/api/learn-clients/job", nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
 func TestGetJobNoClientID(t *testing.T) {
 	req, err := http.NewRequest(http.MethodGet, tests.BaseURL+"/api/learn-clients/job", nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	req.Header.Set("x-token", tests.TestToken)
+	req.Header.Set("X-Token", tests.TestToken)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
 func TestGetJobNoClientUnknownClientID(t *testing.T) {
 	req, err := http.NewRequest(http.MethodGet, tests.BaseURL+"/api/learn-clients/job", nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	req.Header.Set("x-token", tests.TestToken)
-	req.Header.Set("x-client-id", "unknown-client-id")
+	req.Header.Set("X-Token", tests.TestToken)
+	req.Header.Set("X-Client-Id", "unknown-client-id")
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
 func TestGetJobOk(t *testing.T) {
@@ -288,50 +290,54 @@ func TestGetJobOk(t *testing.T) {
 		GitCommit: "test-git-commit",
 	}
 	registerPayloadBytes, err := json.Marshal(registerPayload)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	registerReq, err := http.NewRequest(http.MethodPost, tests.BaseURL+"/api/learn-clients/register", bytes.NewBuffer(registerPayloadBytes))
-	assert.NoError(t, err)
+	registerReq, err := http.NewRequest(
+		http.MethodPost,
+		tests.BaseURL+"/api/learn-clients/register",
+		bytes.NewBuffer(registerPayloadBytes),
+	)
+	require.NoError(t, err)
 
-	registerReq.Header.Set("x-token", tests.TestToken)
+	registerReq.Header.Set("X-Token", tests.TestToken)
 	registerReq.Header.Set("Content-Type", "application/json")
 
 	registerClient := &http.Client{}
 	registerResp, err := registerClient.Do(registerReq)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	defer registerResp.Body.Close()
 
-	assert.Equal(t, http.StatusOK, registerResp.StatusCode)
+	require.Equal(t, http.StatusOK, registerResp.StatusCode)
 
-	var registerResponse models.RegisterResponse
-	err = json.NewDecoder(registerResp.Body).Decode(&registerResponse)
-	assert.NoError(t, err)
+	var registered models.RegisterResponse
+	err = json.NewDecoder(registerResp.Body).Decode(&registered)
+	require.NoError(t, err)
 
-	clientID := registerResponse.ClientID
+	clientID := registered.ClientID
 
 	req, err := http.NewRequest(http.MethodGet, tests.BaseURL+"/api/learn-clients/job", nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	req.Header.Set("x-token", tests.TestToken)
-	req.Header.Set("x-client-id", clientID)
+	req.Header.Set("X-Token", tests.TestToken)
+	req.Header.Set("X-Client-Id", clientID)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var job models.Job
 	err = json.NewDecoder(resp.Body).Decode(&job)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Delete the client from Redis
 	services, err := services.InitServices(config.LoadServerConfig())
-	assert.NoError(t, err)
-	deleted, err := services.Redis.Del(context.Background(), repository.ClientsKey).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(1), deleted)
+	require.NoError(t, err)
+	deleted, err := services.Redis.Del(t.Context(), repository.ClientsKey).Result()
+	require.NoError(t, err)
+	require.Equal(t, int64(1), deleted)
 }

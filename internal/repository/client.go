@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"sort"
 	"time"
 
@@ -25,8 +27,14 @@ type ClientRepository struct {
 }
 
 func NewClientRepository(c *fiber.Ctx) *ClientRepository {
+	services, ok := c.Locals("services").(*services.Services)
+	if !ok {
+		slog.Error("failed to load services")
+		os.Exit(1)
+	}
+
 	return &ClientRepository{
-		services: c.Locals("services").(*services.Services),
+		services: services,
 	}
 }
 
@@ -36,8 +44,11 @@ func NewClientRepositoryFromServices(services *services.Services) *ClientReposit
 	}
 }
 
-// RegisterClient registers a new client and returns its ID
-func (repo *ClientRepository) RegisterClient(ctx context.Context, req models.RegisterRequest) (models.RegisterResponse, error) {
+// RegisterClient registers a new client and returns its ID.
+func (repo *ClientRepository) RegisterClient(
+	ctx context.Context,
+	req models.RegisterRequest,
+) (*models.RegisterResponse, error) {
 	clientID := uuid.New().String()
 
 	clientStats := models.ClientStats{
@@ -52,7 +63,7 @@ func (repo *ClientRepository) RegisterClient(ctx context.Context, req models.Reg
 	// Convert to JSON
 	jsonData, err := json.Marshal(clientStats)
 	if err != nil {
-		return models.RegisterResponse{}, fmt.Errorf("error marshaling client stats: %w", err)
+		return nil, fmt.Errorf("error marshaling client stats: %w", err)
 	}
 
 	redisConn := repo.services.Redis
@@ -60,27 +71,26 @@ func (repo *ClientRepository) RegisterClient(ctx context.Context, req models.Reg
 	// Store in Redis hash and set TTL
 	err = redisConn.HSet(ctx, ClientsKey, clientID, jsonData).Err()
 	if err != nil {
-		return models.RegisterResponse{}, fmt.Errorf("error storing client: %w", err)
+		return nil, fmt.Errorf("error storing client: %w", err)
 	}
 
 	// Set TTL on the hash
 	err = redisConn.Expire(ctx, ClientsKey, ClientsTTL).Err()
 	if err != nil {
-		return models.RegisterResponse{}, fmt.Errorf("error setting TTL: %w", err)
+		return nil, fmt.Errorf("error setting TTL: %w", err)
 	}
 
-	return models.RegisterResponse{ClientID: clientID}, nil
+	return &models.RegisterResponse{ClientID: clientID}, nil
 }
 
-// UpdateHeartbeat updates the last_heartbeat timestamp for a client
+// UpdateHeartbeat updates the last_heartbeat timestamp for a client.
 func (repo *ClientRepository) UpdateHeartbeat(ctx context.Context, clientID string) error {
-
 	redisConn := repo.services.Redis
 
 	// Get current client stats
 	jsonData, err := redisConn.HGet(ctx, ClientsKey, clientID).Bytes()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return fmt.Errorf("client %s not found", clientID)
 		}
 		return fmt.Errorf("error getting client: %w", err)
@@ -115,9 +125,8 @@ func (repo *ClientRepository) UpdateHeartbeat(ctx context.Context, clientID stri
 	return nil
 }
 
-// GetClientStatsList retrieves statistics for all clients
+// GetClientStatsList retrieves statistics for all clients.
 func (repo *ClientRepository) GetClientStatsList(ctx context.Context) (models.StatsResponse, error) {
-
 	redisConn := repo.services.Redis
 
 	// Get all clients from Redis hash
@@ -129,8 +138,8 @@ func (repo *ClientRepository) GetClientStatsList(ctx context.Context) (models.St
 	stats := make([]models.ClientStats, 0, len(clients))
 	for _, jsonData := range clients {
 		var clientStats models.ClientStats
-		err := json.Unmarshal([]byte(jsonData), &clientStats)
-		if err != nil {
+
+		if err = json.Unmarshal([]byte(jsonData), &clientStats); err != nil {
 			return models.StatsResponse{}, fmt.Errorf("error unmarshaling client stats: %w", err)
 		}
 		stats = append(stats, clientStats)
@@ -149,31 +158,37 @@ func (repo *ClientRepository) GetClientStatsList(ctx context.Context) (models.St
 
 var ErrClientNotFound = errors.New("client not found")
 
-// GetClientStats retrieves statistics for a specific client
-func (repo *ClientRepository) GetClientStats(ctx context.Context, clientID string) (models.ClientStats, error) {
+// GetClientStats retrieves statistics for a specific client.
+func (repo *ClientRepository) GetClientStats(ctx context.Context, clientID string) (*models.ClientStats, error) {
 	redisConn := repo.services.Redis
 
-	_, err := redisConn.HGet(ctx, ClientsKey, clientID).Bytes()
-
-	if err == redis.Nil {
-		return models.ClientStats{}, ErrClientNotFound
-	}
+	jsonData, err := redisConn.HGet(ctx, ClientsKey, clientID).Bytes()
 
 	if err != nil {
-		return models.ClientStats{}, fmt.Errorf("error getting client: %w", err)
+		if errors.Is(err, redis.Nil) {
+			return nil, ErrClientNotFound
+		}
+
+		return nil, fmt.Errorf("error getting client: %w", err)
 	}
 
-	return models.ClientStats{}, nil
+	var clientStats models.ClientStats
+	err = json.Unmarshal(jsonData, &clientStats)
+	if err != nil {
+		return nil, fmt.Errorf("error unmarshaling client stats: %w", err)
+	}
+
+	return &clientStats, nil
 }
 
-// AssignJob assigns a job to a client
+// AssignJob assigns a job to a client.
 func (repo *ClientRepository) AssignJob(ctx context.Context, clientID string, job models.Job) error {
 	redisConn := repo.services.Redis
 
 	// Get current client stats
 	jsonData, err := redisConn.HGet(ctx, ClientsKey, clientID).Bytes()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return fmt.Errorf("client %s not found", clientID)
 		}
 		return fmt.Errorf("error getting client: %w", err)
@@ -208,13 +223,13 @@ func (repo *ClientRepository) AssignJob(ctx context.Context, clientID string, jo
 	return nil
 }
 
-// CompleteJob marks a job as completed and updates client stats
+// CompleteJob marks a job as completed and updates client stats.
 func (repo *ClientRepository) CompleteJob(ctx context.Context, clientID string) error {
 	redisConn := repo.services.Redis
 	// Get current client stats
 	jsonData, err := redisConn.HGet(ctx, ClientsKey, clientID).Bytes()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return fmt.Errorf("client %s not found", clientID)
 		}
 		return fmt.Errorf("error getting client: %w", err)
@@ -249,9 +264,9 @@ func (repo *ClientRepository) CompleteJob(ctx context.Context, clientID string) 
 	return nil
 }
 
-// GetTakenPositions returns all the positions that have been taken by clients
-func (r *ClientRepository) GetTakenPositionsBytes(ctx context.Context) [][]byte {
-	redisConn := r.services.Redis
+// GetTakenPositionsBytes returns all the positions that have been taken by clients.
+func (repo *ClientRepository) GetTakenPositionsBytes(ctx context.Context) [][]byte {
+	redisConn := repo.services.Redis
 
 	// Get all clients from Redis hash
 	clients, err := redisConn.HGetAll(ctx, ClientsKey).Result()
@@ -262,10 +277,10 @@ func (r *ClientRepository) GetTakenPositionsBytes(ctx context.Context) [][]byte 
 	takenPositionsBytes := make([][]byte, 0, len(clients))
 	for _, jsonData := range clients {
 		var clientStats models.ClientStats
-		err := json.Unmarshal([]byte(jsonData), &clientStats)
-		if err != nil {
+		if err = json.Unmarshal([]byte(jsonData), &clientStats); err != nil {
 			continue
 		}
+
 		takenPositionsBytes = append(takenPositionsBytes, clientStats.Position.Bytes())
 	}
 

@@ -13,7 +13,7 @@ func SetupRoutes(app *fiber.App) {
 	clientsGroup.Get("/", clientsPage)
 }
 
-// clientsPage serves the clients.html page
+// clientsPage serves the clients.html page.
 func clientsPage(c *fiber.Ctx) error {
 	return c.SendFile(filepath.Join(config.StaticDir, "clients.html"))
 }

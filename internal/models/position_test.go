@@ -1,14 +1,14 @@
-package models
+package models //nolint:testpackage
 
 import (
 	"math/bits"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFlipHorizontally(t *testing.T) {
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		x := uint64(1 << i)
 
 		row := i / 8
@@ -18,12 +18,12 @@ func TestFlipHorizontally(t *testing.T) {
 
 		flipped := flipHorizontally(x)
 		wantFlipped := uint64(1 << flippedIndex)
-		assert.Equal(t, flipped, wantFlipped)
+		require.Equal(t, wantFlipped, flipped)
 	}
 }
 
 func TestFlipVertically(t *testing.T) {
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		x := uint64(1 << i)
 
 		row := i / 8
@@ -33,12 +33,12 @@ func TestFlipVertically(t *testing.T) {
 
 		flipped := flipVertically(x)
 		wantFlipped := uint64(1 << flippedIndex)
-		assert.Equal(t, flipped, wantFlipped)
+		require.Equal(t, wantFlipped, flipped)
 	}
 }
 
 func TestFlipDiagonally(t *testing.T) {
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		x := uint64(1 << i)
 
 		row := i / 8
@@ -48,7 +48,7 @@ func TestFlipDiagonally(t *testing.T) {
 
 		flipped := flipDiagonally(x)
 		wantFlipped := uint64(1 << flippedIndex)
-		assert.Equal(t, flipped, wantFlipped)
+		require.Equal(t, wantFlipped, flipped)
 	}
 }
 
@@ -80,10 +80,10 @@ func TestNewPosition(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := NewPosition(test.player, test.opponent)
 			if test.wantErr {
-				assert.Error(t, err)
-				assert.Equal(t, test.wantErrMsg, err.Error())
+				require.Error(t, err)
+				require.Equal(t, test.wantErrMsg, err.Error())
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 			}
 		})
 	}
@@ -113,11 +113,11 @@ func TestNewPositionMust(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			if test.wantPanic {
-				assert.Panics(t, func() { NewPositionMust(test.player, test.opponent) })
+				require.Panics(t, func() { NewPositionMust(test.player, test.opponent) })
 			} else {
 				pos := NewPositionMust(test.player, test.opponent)
-				assert.Equal(t, test.player, pos.Player())
-				assert.Equal(t, test.opponent, pos.Opponent())
+				require.Equal(t, test.player, pos.Player())
+				require.Equal(t, test.opponent, pos.Opponent())
 			}
 		})
 	}
@@ -160,50 +160,50 @@ func TestNewPositionRandom(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			pos, err := NewPositionRandom(test.discs)
 			if test.wantErr {
-				assert.Error(t, err)
-				assert.Equal(t, test.wantErrMsg, err.Error())
+				require.Error(t, err)
+				require.Equal(t, test.wantErrMsg, err.Error())
 			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, test.discs, pos.CountDiscs())
+				require.NoError(t, err)
+				require.Equal(t, test.discs, pos.CountDiscs())
 			}
 		})
 	}
 
 	for i := 4; i <= 64; i++ {
 		pos, err := NewPositionRandom(i)
-		assert.NoError(t, err)
-		assert.Equal(t, i, pos.CountDiscs())
+		require.NoError(t, err)
+		require.Equal(t, i, pos.CountDiscs())
 	}
 }
 
 func TestNewPositionStart(t *testing.T) {
 	pos := NewPositionStart()
-	assert.Equal(t, 4, pos.CountDiscs())
-	assert.Equal(t, uint64(0x0000000810000000), pos.Player())
-	assert.Equal(t, uint64(0x0000001008000000), pos.Opponent())
+	require.Equal(t, 4, pos.CountDiscs())
+	require.Equal(t, uint64(0x0000000810000000), pos.Player())
+	require.Equal(t, uint64(0x0000001008000000), pos.Opponent())
 }
 
 func TestNewPositionEmpty(t *testing.T) {
 	pos := NewPositionEmpty()
-	assert.Equal(t, 0, pos.CountDiscs())
-	assert.Equal(t, uint64(0x0000000000000000), pos.Player())
-	assert.Equal(t, uint64(0x0000000000000000), pos.Opponent())
+	require.Equal(t, 0, pos.CountDiscs())
+	require.Equal(t, uint64(0x0000000000000000), pos.Player())
+	require.Equal(t, uint64(0x0000000000000000), pos.Opponent())
 }
 
 func TestPosition_equals(t *testing.T) {
 	pos1 := NewPositionMust(0x0000000000000000, 0x0000000000000000)
 	pos2 := NewPositionMust(0x0000000000000000, 0x0000000000000001)
-	assert.Equal(t, pos1, pos1)
-	assert.NotEqual(t, pos1, pos2)
+	require.Equal(t, pos1, pos1) //nolint:testifylint // want to test equality to self
+	require.NotEqual(t, pos1, pos2)
 }
 
-// generateTestPositions generates some positions used for testing
-func generateTestPositions(t *testing.T) []Position {
+// generateTestPositions generates some positions used for testing.
+func generateTestPositions(t *testing.T) []Position { //nolint:gocognit
 	positions := make([]Position, 0)
 
 	// Generate all boards with all flipping lines from each square
-	for y := uint(0); y < 8; y++ {
-		for x := uint(0); x < 8; x++ {
+	for y := range uint(8) {
+		for x := range uint(8) {
 			player := uint64(1 << (y*8 + x))
 
 			// for each direction
@@ -216,7 +216,6 @@ func generateTestPositions(t *testing.T) []Position {
 
 					// for each distance
 					for d := 1; d <= 6; d++ {
-
 						// check if me can still flip within othello boundaries
 						py := int(y) + (d+1)*dy
 						px := int(x) + (d+1)*dx
@@ -251,10 +250,10 @@ func generateTestPositions(t *testing.T) []Position {
 	positions = append(positions, NewPositionMust(0xAAAAAAAAAAAAAAAA, 0x5555555555555555))
 
 	// Add random reachable boards with 4-64 discs
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		for discs := 4; discs <= 64; discs++ {
 			position, err := NewPositionRandom(discs)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			positions = append(positions, position)
 		}
 	}
@@ -264,8 +263,8 @@ func generateTestPositions(t *testing.T) []Position {
 
 func TestPosition_Rotate(t *testing.T) {
 	for _, pos := range generateTestPositions(t) {
-		for i := 0; i < 8; i++ {
-			assert.Equal(t, pos, pos.rotate(i).unrotate(i))
+		for i := range 8 {
+			require.Equal(t, pos, pos.rotate(i).unrotate(i))
 		}
 	}
 }
@@ -273,8 +272,8 @@ func TestPosition_Rotate(t *testing.T) {
 func TestPosition_Normalize(t *testing.T) {
 	for _, pos := range generateTestPositions(t) {
 		nPos, rotation := pos.Normalize()
-		assert.Equal(t, nPos.Position(), pos.rotate(rotation))
-		assert.Equal(t, pos, nPos.Position().unrotate(rotation))
+		require.Equal(t, nPos.Position(), pos.rotate(rotation))
+		require.Equal(t, pos, nPos.Position().unrotate(rotation))
 	}
 }
 
@@ -282,84 +281,84 @@ func TestPosition_Normalized(t *testing.T) {
 	for _, pos := range generateTestPositions(t) {
 		nPos := pos.Normalized()
 		wantNPos, _ := pos.Normalize()
-		assert.Equal(t, wantNPos, nPos)
+		require.Equal(t, wantNPos, nPos)
 	}
 }
 
 func TestPosition_IsNormalized(t *testing.T) {
 	for _, pos := range generateTestPositions(t) {
-		assert.Equal(t, pos.IsNormalized(), pos.Normalized().Position() == pos)
+		nPos := pos.Normalized()
+		require.Equal(t, pos.IsNormalized(), nPos.Position() == pos)
 	}
 }
 
 func TestPosition_Player(t *testing.T) {
 	for _, pos := range generateTestPositions(t) {
-		assert.Equal(t, pos.Player(), pos.player)
+		require.Equal(t, pos.Player(), pos.player)
 	}
 }
 
 func TestPosition_Opponent(t *testing.T) {
 	for _, pos := range generateTestPositions(t) {
-		assert.Equal(t, pos.Opponent(), pos.opponent)
+		require.Equal(t, pos.Opponent(), pos.opponent)
 	}
 }
 
 func TestPosition_CountDiscs(t *testing.T) {
 	for _, pos := range generateTestPositions(t) {
 		want := bits.OnesCount64(pos.player | pos.opponent)
-		assert.Equal(t, want, pos.CountDiscs())
+		require.Equal(t, want, pos.CountDiscs())
 	}
 }
 
 func TestPosition_HasMoves(t *testing.T) {
 	for _, pos := range generateTestPositions(t) {
-		assert.Equal(t, pos.HasMoves(), pos.Moves() != 0)
+		require.Equal(t, pos.HasMoves(), pos.Moves() != 0)
 	}
 }
 
 func TestPosition_IsValidMove(t *testing.T) {
 	for _, pos := range generateTestPositions(t) {
-		for i := 0; i < 64; i++ {
+		for i := range 64 {
 			want := pos.Moves()&(1<<i) != 0
-			assert.Equal(t, want, pos.IsValidMove(i))
+			require.Equal(t, want, pos.IsValidMove(i))
 		}
 	}
 }
 
 func TestPosition_Moves(t *testing.T) {
 	for _, pos := range generateTestPositions(t) {
-
 		wantMoves := uint64(0)
-		for i := 0; i < 64; i++ {
+		for i := range 64 {
 			if pos.flipped(i) != 0 {
 				wantMoves |= (1 << i)
 			}
 		}
 
-		assert.Equal(t, pos.Moves(), wantMoves)
+		require.Equal(t, wantMoves, pos.Moves())
 	}
 }
 
 func TestPosition_DoMove(t *testing.T) {
 	for _, pos := range generateTestPositions(t) {
 		validMoves := pos.Moves()
-		for i := 0; i < 64; i++ {
+		for i := range 64 {
 			if validMoves&(1<<i) == 0 {
-				assert.Equal(t, pos, pos.DoMove(i))
+				require.Equal(t, pos, pos.DoMove(i))
 			} else {
 				after := pos.DoMove(i)
 				flipped := pos.flipped(i)
 				wantPlayer := pos.opponent &^ flipped
 				wantOpponent := pos.player | flipped | (1 << i)
-				assert.Equal(t, wantPlayer, after.player)
-				assert.Equal(t, wantOpponent, after.opponent)
+				require.Equal(t, wantPlayer, after.player)
+				require.Equal(t, wantOpponent, after.opponent)
 			}
 		}
 	}
 }
 
-// flippedSlow is a slow implementation of the flipped function to verify the correctness of the fast implementation
-func flippedSlow(pos Position, move int) uint64 {
+// flippedSlow is a slow implementation of the flipped function to verify the correctness of the fast implementation.
+func flippedSlow(pos Position, move int) uint64 { //nolint:gocognit
 	if (pos.player|pos.opponent)&(1<<move) != 0 {
 		return 0
 	}
@@ -372,8 +371,8 @@ func flippedSlow(pos Position, move int) uint64 {
 			}
 			s := 1
 			for {
-				curx := int(move%8) + (dx * s)
-				cury := int(move/8) + (dy * s)
+				curx := (move % 8) + (dx * s)
+				cury := (move / 8) + (dy * s)
 				if curx < 0 || curx >= 8 || cury < 0 || cury >= 8 {
 					break
 				}
@@ -400,8 +399,8 @@ func flippedSlow(pos Position, move int) uint64 {
 
 func TestPosition_flipped(t *testing.T) {
 	for _, pos := range generateTestPositions(t) {
-		for i := 0; i < 64; i++ {
-			assert.Equal(t, pos.flipped(i), flippedSlow(pos, i))
+		for i := range 64 {
+			require.Equal(t, pos.flipped(i), flippedSlow(pos, i))
 		}
 	}
 }
