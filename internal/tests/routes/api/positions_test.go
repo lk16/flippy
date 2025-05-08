@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/lk16/flippy/api/internal"
 	"github.com/lk16/flippy/api/internal/config"
 	"github.com/lk16/flippy/api/internal/models"
 	"github.com/lk16/flippy/api/internal/repository"
@@ -15,8 +16,6 @@ import (
 )
 
 func TestLookupPositions(t *testing.T) {
-	baseURL := tests.BaseURL
-
 	tests := []struct {
 		name           string
 		nPositions     []models.NormalizedPosition
@@ -68,7 +67,7 @@ func TestLookupPositions(t *testing.T) {
 				})
 			}
 
-			req, err := http.NewRequest(http.MethodPost, baseURL+"/api/positions/lookup", &payload)
+			req, err := http.NewRequest(http.MethodPost, "/api/positions/lookup", &payload)
 			require.NoError(t, err)
 
 			req.Header.Set("Content-Type", "application/json")
@@ -76,8 +75,9 @@ func TestLookupPositions(t *testing.T) {
 				req.Header.Set("X-Token", tt.token)
 			}
 
-			client := &http.Client{}
-			resp, err := client.Do(req)
+			app, _ := internal.SetupApp()
+
+			resp, err := app.Test(req)
 			require.NoError(t, err)
 
 			defer resp.Body.Close()
@@ -102,13 +102,12 @@ func TestLookupPositions(t *testing.T) {
 }
 
 func TestPositionStatsNoAuth(t *testing.T) {
-	baseURL := tests.BaseURL
+	app, _ := internal.SetupApp()
 
-	req, err := http.NewRequest(http.MethodGet, baseURL+"/api/positions/stats", nil)
+	req, err := http.NewRequest(http.MethodGet, "/api/positions/stats", nil)
 	require.NoError(t, err)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := app.Test(req)
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -117,7 +116,9 @@ func TestPositionStatsNoAuth(t *testing.T) {
 }
 
 func TestPositionStatsOk(t *testing.T) {
-	req, err := http.NewRequest(http.MethodGet, tests.BaseURL+"/api/positions/stats", nil)
+	app, _ := internal.SetupApp()
+
+	req, err := http.NewRequest(http.MethodGet, "/api/positions/stats", nil)
 	require.NoError(t, err)
 
 	req.Header.Set("X-Token", tests.TestToken)
@@ -127,9 +128,8 @@ func TestPositionStatsOk(t *testing.T) {
 	// The second time it will read from Redis
 	// Both responses should be the same
 	for range 2 {
-		client := &http.Client{}
 		var resp *http.Response
-		resp, err = client.Do(req)
+		resp, err = app.Test(req)
 		require.NoError(t, err)
 
 		defer resp.Body.Close()
@@ -145,11 +145,12 @@ func TestPositionStatsOk(t *testing.T) {
 }
 
 func TestSubmitEvaluationsNoAuth(t *testing.T) {
-	req, err := http.NewRequest(http.MethodPost, tests.BaseURL+"/api/positions/evaluations", nil)
+	app, _ := internal.SetupApp()
+
+	req, err := http.NewRequest(http.MethodPost, "/api/positions/evaluations", nil)
 	require.NoError(t, err)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := app.Test(req)
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -158,15 +159,15 @@ func TestSubmitEvaluationsNoAuth(t *testing.T) {
 }
 
 func TestSubmitEvaluationsInvalidPayload(t *testing.T) {
-	req, err := http.NewRequest(http.MethodPost, tests.BaseURL+"/api/positions/evaluations", nil)
+	app, _ := internal.SetupApp()
+
+	req, err := http.NewRequest(http.MethodPost, "/api/positions/evaluations", nil)
 	require.NoError(t, err)
 
 	req.Header.Set("X-Token", tests.TestToken)
 
-	client := &http.Client{}
-
 	// No payload is an invalid payload, it's not even a valid JSON object
-	resp, err := client.Do(req)
+	resp, err := app.Test(req)
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -192,14 +193,15 @@ func TestSubmitEvaluationsValidationError(t *testing.T) {
 	err := json.NewEncoder(&buffer).Encode(payload)
 	require.NoError(t, err)
 
-	req, err := http.NewRequest(http.MethodPost, tests.BaseURL+"/api/positions/evaluations", &buffer)
+	req, err := http.NewRequest(http.MethodPost, "/api/positions/evaluations", &buffer)
 	require.NoError(t, err)
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Token", tests.TestToken)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	app, _ := internal.SetupApp()
+
+	resp, err := app.Test(req)
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -229,14 +231,15 @@ func TestSubmitEvaluationsOk(t *testing.T) {
 	err := json.NewEncoder(&buffer).Encode(payload)
 	require.NoError(t, err)
 
-	req, err := http.NewRequest(http.MethodPost, tests.BaseURL+"/api/positions/evaluations", &buffer)
+	req, err := http.NewRequest(http.MethodPost, "/api/positions/evaluations", &buffer)
 	require.NoError(t, err)
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Token", tests.TestToken)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	app, _ := internal.SetupApp()
+
+	resp, err := app.Test(req)
 	require.NoError(t, err)
 
 	defer resp.Body.Close()

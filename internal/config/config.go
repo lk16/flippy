@@ -8,9 +8,6 @@ import (
 const (
 	MinBookLearnLevel   = 16
 	MaxBookSavableDiscs = 30
-
-	// StaticDir is the path to the static directory.
-	StaticDir = "./static"
 )
 
 // ServerConfig holds all configuration values loaded from environment variables.
@@ -23,6 +20,7 @@ type ServerConfig struct {
 	BasicAuthPassword string
 	Token             string
 	Prefork           bool
+	StaticDir         string
 }
 
 // LoadServerConfig loads configuration from environment variables.
@@ -36,6 +34,7 @@ func LoadServerConfig() *ServerConfig {
 		BasicAuthPassword: getEnvMust("FLIPPY_BOOK_SERVER_BASIC_AUTH_PASS"),
 		Token:             getEnvMust("FLIPPY_BOOK_SERVER_TOKEN"),
 		Prefork:           getEnvMustBool("FLIPPY_BOOK_SERVER_PREFORK"),
+		StaticDir:         getEnvMust("FLIPPY_BOOK_SERVER_STATIC_DIR"),
 	}
 }
 

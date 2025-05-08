@@ -15,5 +15,10 @@ func SetupRoutes(app *fiber.App) {
 
 // clientsPage serves the clients.html page.
 func clientsPage(c *fiber.Ctx) error {
-	return c.SendFile(filepath.Join(config.StaticDir, "clients.html"))
+	cfg, ok := c.Locals("config").(*config.ServerConfig)
+	if !ok {
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to get config")
+	}
+
+	return c.SendFile(filepath.Join(cfg.StaticDir, "clients.html"))
 }

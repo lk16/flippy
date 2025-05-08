@@ -10,8 +10,10 @@ import (
 
 // staticHandler serves static files.
 func staticHandler() fiber.Handler {
+	cfg := config.LoadServerConfig()
+
 	return filesystem.New(filesystem.Config{
-		Root:   http.Dir(config.StaticDir),
+		Root:   http.Dir(cfg.StaticDir),
 		Browse: false,
 	})
 }
