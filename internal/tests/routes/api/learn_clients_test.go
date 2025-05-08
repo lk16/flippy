@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/lk16/flippy/api/internal"
 	"github.com/lk16/flippy/api/internal/config"
 	"github.com/lk16/flippy/api/internal/models"
 	"github.com/lk16/flippy/api/internal/repository"
@@ -15,13 +16,12 @@ import (
 )
 
 func TestGetClientsNoAuth(t *testing.T) {
-	baseURL := tests.BaseURL
-
-	req, err := http.NewRequest(http.MethodGet, baseURL+"/api/learn-clients", nil)
+	req, err := http.NewRequest(http.MethodGet, "/api/learn-clients", nil)
 	require.NoError(t, err)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	app, _ := internal.SetupApp()
+
+	resp, err := app.Test(req)
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -30,13 +30,14 @@ func TestGetClientsNoAuth(t *testing.T) {
 }
 
 func TestGetClientsOkNoClients(t *testing.T) {
-	req, err := http.NewRequest(http.MethodGet, tests.BaseURL+"/api/learn-clients", nil)
+	req, err := http.NewRequest(http.MethodGet, "/api/learn-clients", nil)
 	require.NoError(t, err)
 
 	req.Header.Set("X-Token", tests.TestToken)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	app, _ := internal.SetupApp()
+
+	resp, err := app.Test(req)
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -61,7 +62,7 @@ func TestGetClientsOkWithClients(t *testing.T) {
 
 	registerReq, err := http.NewRequest(
 		http.MethodPost,
-		tests.BaseURL+"/api/learn-clients/register",
+		"/api/learn-clients/register",
 		bytes.NewBuffer(registerPayloadBytes),
 	)
 	require.NoError(t, err)
@@ -69,8 +70,8 @@ func TestGetClientsOkWithClients(t *testing.T) {
 	registerReq.Header.Set("X-Token", tests.TestToken)
 	registerReq.Header.Set("Content-Type", "application/json")
 
-	registerClient := &http.Client{}
-	registerResp, err := registerClient.Do(registerReq)
+	app, _ := internal.SetupApp()
+	registerResp, err := app.Test(registerReq)
 	require.NoError(t, err)
 
 	defer registerResp.Body.Close()
@@ -85,14 +86,13 @@ func TestGetClientsOkWithClients(t *testing.T) {
 
 	clientID := registered.ClientID
 
-	req, err := http.NewRequest(http.MethodGet, tests.BaseURL+"/api/learn-clients", nil)
+	req, err := http.NewRequest(http.MethodGet, "/api/learn-clients", nil)
 	require.NoError(t, err)
 
 	req.Header.Set("X-Token", tests.TestToken)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := app.Test(req)
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -129,13 +129,14 @@ func TestRegisterClientNoAuth(t *testing.T) {
 
 	req, err := http.NewRequest(
 		http.MethodPost,
-		tests.BaseURL+"/api/learn-clients/register",
+		"/api/learn-clients/register",
 		bytes.NewBuffer(registerPayloadBytes),
 	)
 	require.NoError(t, err)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	app, _ := internal.SetupApp()
+
+	resp, err := app.Test(req)
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -144,11 +145,12 @@ func TestRegisterClientNoAuth(t *testing.T) {
 }
 
 func TestHeartbeatNoAuth(t *testing.T) {
-	req, err := http.NewRequest(http.MethodPost, tests.BaseURL+"/api/learn-clients/heartbeat", nil)
+	req, err := http.NewRequest(http.MethodPost, "/api/learn-clients/heartbeat", nil)
 	require.NoError(t, err)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	app, _ := internal.SetupApp()
+
+	resp, err := app.Test(req)
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -157,13 +159,14 @@ func TestHeartbeatNoAuth(t *testing.T) {
 }
 
 func TestHeartbeatNoClientID(t *testing.T) {
-	req, err := http.NewRequest(http.MethodPost, tests.BaseURL+"/api/learn-clients/heartbeat", nil)
+	req, err := http.NewRequest(http.MethodPost, "/api/learn-clients/heartbeat", nil)
 	require.NoError(t, err)
 
 	req.Header.Set("X-Token", tests.TestToken)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	app, _ := internal.SetupApp()
+
+	resp, err := app.Test(req)
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -172,14 +175,15 @@ func TestHeartbeatNoClientID(t *testing.T) {
 }
 
 func TestHeartbeatNoClientUnknownClientID(t *testing.T) {
-	req, err := http.NewRequest(http.MethodPost, tests.BaseURL+"/api/learn-clients/heartbeat", nil)
+	req, err := http.NewRequest(http.MethodPost, "/api/learn-clients/heartbeat", nil)
 	require.NoError(t, err)
 
 	req.Header.Set("X-Token", tests.TestToken)
 	req.Header.Set("X-Client-Id", "unknown-client-id")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	app, _ := internal.SetupApp()
+
+	resp, err := app.Test(req)
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -197,7 +201,7 @@ func TestHeartbeatOk(t *testing.T) {
 
 	registerReq, err := http.NewRequest(
 		http.MethodPost,
-		tests.BaseURL+"/api/learn-clients/register",
+		"/api/learn-clients/register",
 		bytes.NewBuffer(registerPayloadBytes),
 	)
 	require.NoError(t, err)
@@ -205,8 +209,9 @@ func TestHeartbeatOk(t *testing.T) {
 	registerReq.Header.Set("X-Token", tests.TestToken)
 	registerReq.Header.Set("Content-Type", "application/json")
 
-	registerClient := &http.Client{}
-	registerResp, err := registerClient.Do(registerReq)
+	app, _ := internal.SetupApp()
+
+	registerResp, err := app.Test(registerReq)
 	require.NoError(t, err)
 
 	defer registerResp.Body.Close()
@@ -219,13 +224,13 @@ func TestHeartbeatOk(t *testing.T) {
 
 	clientID := registered.ClientID
 
-	heartbeatReq, err := http.NewRequest(http.MethodPost, tests.BaseURL+"/api/learn-clients/heartbeat", nil)
+	heartbeatReq, err := http.NewRequest(http.MethodPost, "/api/learn-clients/heartbeat", nil)
 	require.NoError(t, err)
 
 	heartbeatReq.Header.Set("X-Token", tests.TestToken)
 	heartbeatReq.Header.Set("X-Client-Id", clientID)
-	client := &http.Client{}
-	resp, err := client.Do(heartbeatReq)
+
+	resp, err := app.Test(heartbeatReq)
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -241,11 +246,12 @@ func TestHeartbeatOk(t *testing.T) {
 }
 
 func TestGetJobNoAuth(t *testing.T) {
-	req, err := http.NewRequest(http.MethodGet, tests.BaseURL+"/api/learn-clients/job", nil)
+	req, err := http.NewRequest(http.MethodGet, "/api/learn-clients/job", nil)
 	require.NoError(t, err)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	app, _ := internal.SetupApp()
+
+	resp, err := app.Test(req)
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -254,13 +260,14 @@ func TestGetJobNoAuth(t *testing.T) {
 }
 
 func TestGetJobNoClientID(t *testing.T) {
-	req, err := http.NewRequest(http.MethodGet, tests.BaseURL+"/api/learn-clients/job", nil)
+	req, err := http.NewRequest(http.MethodGet, "/api/learn-clients/job", nil)
 	require.NoError(t, err)
 
 	req.Header.Set("X-Token", tests.TestToken)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	app, _ := internal.SetupApp()
+
+	resp, err := app.Test(req)
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -269,14 +276,15 @@ func TestGetJobNoClientID(t *testing.T) {
 }
 
 func TestGetJobNoClientUnknownClientID(t *testing.T) {
-	req, err := http.NewRequest(http.MethodGet, tests.BaseURL+"/api/learn-clients/job", nil)
+	req, err := http.NewRequest(http.MethodGet, "/api/learn-clients/job", nil)
 	require.NoError(t, err)
 
 	req.Header.Set("X-Token", tests.TestToken)
 	req.Header.Set("X-Client-Id", "unknown-client-id")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	app, _ := internal.SetupApp()
+
+	resp, err := app.Test(req)
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -294,7 +302,7 @@ func TestGetJobOk(t *testing.T) {
 
 	registerReq, err := http.NewRequest(
 		http.MethodPost,
-		tests.BaseURL+"/api/learn-clients/register",
+		"/api/learn-clients/register",
 		bytes.NewBuffer(registerPayloadBytes),
 	)
 	require.NoError(t, err)
@@ -302,8 +310,9 @@ func TestGetJobOk(t *testing.T) {
 	registerReq.Header.Set("X-Token", tests.TestToken)
 	registerReq.Header.Set("Content-Type", "application/json")
 
-	registerClient := &http.Client{}
-	registerResp, err := registerClient.Do(registerReq)
+	app, _ := internal.SetupApp()
+
+	registerResp, err := app.Test(registerReq)
 	require.NoError(t, err)
 
 	defer registerResp.Body.Close()
@@ -316,14 +325,13 @@ func TestGetJobOk(t *testing.T) {
 
 	clientID := registered.ClientID
 
-	req, err := http.NewRequest(http.MethodGet, tests.BaseURL+"/api/learn-clients/job", nil)
+	req, err := http.NewRequest(http.MethodGet, "/api/learn-clients/job", nil)
 	require.NoError(t, err)
 
 	req.Header.Set("X-Token", tests.TestToken)
 	req.Header.Set("X-Client-Id", clientID)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := app.Test(req)
 	require.NoError(t, err)
 
 	defer resp.Body.Close()

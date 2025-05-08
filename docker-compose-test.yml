@@ -1,25 +1,4 @@
 services:
-  test-app:
-    build:
-      context: .
-      dockerfile: test.Dockerfile
-    environment:
-      - FLIPPY_BOOK_SERVER_HOST=0.0.0.0
-      - FLIPPY_BOOK_SERVER_PORT=3000
-      - FLIPPY_REDIS_URL=redis://test-redis:6379
-      - FLIPPY_POSTGRES_URL=postgres://pg-test-user:pg-test-password@test-postgres:5432/pg-test-db?sslmode=disable
-      - FLIPPY_BOOK_SERVER_TOKEN=test-token
-      - FLIPPY_BOOK_SERVER_BASIC_AUTH_USER=test-user
-      - FLIPPY_BOOK_SERVER_BASIC_AUTH_PASS=test-password
-      - FLIPPY_BOOK_SERVER_PREFORK=false
-    ports:
-      - "3000:3000"
-    volumes:
-      - .:/app
-      - go-cache:/go/cache
-    networks:
-      - flippy-test-network
-
   test-postgres:
     image: postgres:latest
     environment:
@@ -53,6 +32,3 @@ services:
 networks:
   flippy-test-network:
     driver: bridge
-
-volumes:
-  go-cache:

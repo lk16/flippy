@@ -37,20 +37,58 @@ jobs:
 
   go:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: pg-test-user
+          POSTGRES_PASSWORD: pg-test-password
+          POSTGRES_DB: pg-test-db
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
     - uses: actions/checkout@v4
 
     - uses: actions/setup-go@v5
       with:
         go-version: 1.24.2
+
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v7
       with:
         version: v2.1.5
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: Run Go tests
+    # Initialize database schema and test data
+    - name: Initialize database
       run: |
-        ./test.sh
+        PGPASSWORD=pg-test-password psql -h localhost -p 5433 -U pg-test-user -d pg-test-db < ./schema.sql
+        PGPASSWORD=pg-test-password psql -h localhost -p 5433 -U pg-test-user -d pg-test-db < ./test_data.sql
+
+    # Run tests
+    - name: Run tests
+      env:
+        FLIPPY_REDIS_URL: 'redis://localhost:6380'
+        FLIPPY_POSTGRES_URL: 'postgres://pg-test-user:pg-test-password@localhost:5433/pg-test-db?sslmode=disable'
+        FLIPPY_BOOK_SERVER_HOST: 'localhost'
+        FLIPPY_BOOK_SERVER_PORT: '3000'
+        FLIPPY_BOOK_SERVER_BASIC_AUTH_USER: 'test-user'
+        FLIPPY_BOOK_SERVER_BASIC_AUTH_PASS: 'test-password'
+        FLIPPY_BOOK_SERVER_TOKEN: 'test-token'
+        FLIPPY_BOOK_SERVER_PREFORK: 'false'
+        FLIPPY_BOOK_SERVER_STATIC_DIR: '${{ github.workspace }}/static'
+      run: go test -v ./internal/...
