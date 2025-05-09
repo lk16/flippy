@@ -5,8 +5,10 @@ import (
 	"github.com/lk16/flippy/api/internal/routes/api"
 	"github.com/lk16/flippy/api/internal/routes/book"
 	"github.com/lk16/flippy/api/internal/routes/clients"
+	"github.com/lk16/flippy/api/internal/routes/game"
 	"github.com/lk16/flippy/api/internal/routes/static"
 	"github.com/lk16/flippy/api/internal/routes/version"
+	"github.com/lk16/flippy/api/internal/routes/ws"
 )
 
 func rootHandler(c *fiber.Ctx) error {
@@ -26,6 +28,12 @@ func SetupRoutes(app *fiber.App) {
 
 	// Serve version info
 	version.SetupRoutes(app)
+
+	// Serve websocket routes
+	ws.SetupRoutes(app)
+
+	// Serve game routes
+	game.SetupRoutes(app)
 
 	// Serve root page
 	app.Get("/", rootHandler)

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"sort"
 	"strconv"
 	"time"
@@ -36,11 +35,7 @@ type EvaluationRepository struct {
 
 // NewEvaluationRepository creates a new EvaluationRepository.
 func NewEvaluationRepository(c *fiber.Ctx) *EvaluationRepository {
-	services, ok := c.Locals("services").(*services.Services)
-	if !ok {
-		slog.Error("failed to load services")
-		os.Exit(1)
-	}
+	services := c.Locals("services").(*services.Services) //nolint: errcheck
 
 	return &EvaluationRepository{
 		services: services,

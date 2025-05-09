@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
-	"os"
 	"sort"
 	"time"
 
@@ -27,11 +25,7 @@ type ClientRepository struct {
 }
 
 func NewClientRepository(c *fiber.Ctx) *ClientRepository {
-	services, ok := c.Locals("services").(*services.Services)
-	if !ok {
-		slog.Error("failed to load services")
-		os.Exit(1)
-	}
+	services := c.Locals("services").(*services.Services) //nolint: errcheck
 
 	return &ClientRepository{
 		services: services,

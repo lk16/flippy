@@ -4,8 +4,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"log/slog"
-	"os"
 	"testing"
 
 	"github.com/lk16/flippy/api/internal/config"
@@ -276,7 +274,7 @@ func TestNormalizedPosition_Accessors(t *testing.T) {
 }
 
 // and ensures that the position has moves.
-func getNormalizedPositionWithMoves(discCount int) NormalizedPosition {
+func getNormalizedPositionWithMoves(discCount int) (*NormalizedPosition, error) {
 	var pos Position
 
 	// Make sure position has moves
@@ -284,15 +282,25 @@ func getNormalizedPositionWithMoves(discCount int) NormalizedPosition {
 		var err error
 		pos, err = NewPositionRandom(discCount)
 		if err != nil {
-			slog.Error("error creating position", "error", err)
-			os.Exit(1)
+			return nil, err
 		}
 	}
 
-	return pos.Normalized()
+	normalized := pos.Normalized()
+
+	return &normalized, nil
 }
 
 func TestNormalizedPosition_IsDbSavable(t *testing.T) {
+	tooManyDiscs, err := getNormalizedPositionWithMoves(config.MaxBookSavableDiscs + 1)
+	require.NoError(t, err)
+
+	noMoves, err := getNormalizedPositionWithMoves(4)
+	require.NoError(t, err)
+
+	valid, err := getNormalizedPositionWithMoves(config.MaxBookSavableDiscs)
+	require.NoError(t, err)
+
 	tests := []struct {
 		name string
 		nPos NormalizedPosition
@@ -305,7 +313,7 @@ func TestNormalizedPosition_IsDbSavable(t *testing.T) {
 		},
 		{
 			name: "too many discs",
-			nPos: getNormalizedPositionWithMoves(config.MaxBookSavableDiscs + 1),
+			nPos: *tooManyDiscs,
 			want: false,
 		},
 		{
@@ -315,12 +323,12 @@ func TestNormalizedPosition_IsDbSavable(t *testing.T) {
 		},
 		{
 			name: "valid max discs",
-			nPos: getNormalizedPositionWithMoves(config.MaxBookSavableDiscs),
+			nPos: *valid,
 			want: true,
 		},
 		{
 			name: "valid min discs",
-			nPos: getNormalizedPositionWithMoves(4),
+			nPos: *noMoves,
 			want: true,
 		},
 	}
@@ -339,7 +347,8 @@ func TestNormalizedPosition_HasMoves(t *testing.T) {
 }
 
 func TestNormalizedPosition_ValidateBestMoves(t *testing.T) {
-	nPos := getNormalizedPositionWithMoves(4)
+	nPos, err := getNormalizedPositionWithMoves(4)
+	require.NoError(t, err)
 
 	tests := []struct {
 		name       string
@@ -393,7 +402,7 @@ func TestNormalizedPosition_ValidateBestMoves(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := nPos.ValidateBestMoves(tt.bestMoves)
+			err = nPos.ValidateBestMoves(tt.bestMoves)
 			if tt.wantErr {
 				require.Error(t, err)
 				require.Equal(t, tt.wantErrMsg, err.Error())

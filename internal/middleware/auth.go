@@ -1,8 +1,6 @@
 package middleware
 
 import (
-	"log/slog"
-
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/basicauth"
 	"github.com/lk16/flippy/api/internal/config"
@@ -11,13 +9,7 @@ import (
 // BasicAuth middleware that checks for basic auth credentials.
 func BasicAuth() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		cfg, ok := c.Locals("config").(*config.ServerConfig)
-		if !ok {
-			slog.Error("Failed to load config")
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Internal server error",
-			})
-		}
+		cfg := c.Locals("config").(*config.ServerConfig) //nolint: errcheck
 
 		username := cfg.BasicAuthUsername
 		password := cfg.BasicAuthPassword
@@ -46,13 +38,7 @@ func BasicAuth() fiber.Handler {
 // AuthOrToken middleware that accepts either basic auth or a token header.
 func AuthOrToken() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		cfg, ok := c.Locals("config").(*config.ServerConfig)
-		if !ok {
-			slog.Error("Failed to load config")
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Internal server error",
-			})
-		}
+		cfg := c.Locals("config").(*config.ServerConfig) //nolint: errcheck
 
 		// Check for token header first
 		token := c.Get("x-token")
