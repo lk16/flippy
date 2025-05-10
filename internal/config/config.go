@@ -3,6 +3,8 @@ package config
 import (
 	"log/slog"
 	"os"
+
+	"github.com/joho/godotenv"
 )
 
 const (
@@ -25,6 +27,10 @@ type ServerConfig struct {
 
 // LoadServerConfig loads configuration from environment variables.
 func LoadServerConfig() *ServerConfig {
+	if err := godotenv.Load(); err != nil {
+		slog.Warn("Failed to load environment variables", "error", err)
+	}
+
 	return &ServerConfig{
 		ServerHost:        getEnvMust("FLIPPY_BOOK_SERVER_HOST"),
 		ServerPort:        getEnvMust("FLIPPY_BOOK_SERVER_PORT"),
@@ -44,6 +50,10 @@ type LearnClientConfig struct {
 }
 
 func LoadLearnClientConfig() *LearnClientConfig {
+	if err := godotenv.Load(); err != nil {
+		slog.Warn("Failed to load environment variables", "error", err)
+	}
+
 	return &LearnClientConfig{
 		ServerURL: getEnvMust("FLIPPY_BOOK_SERVER_URL"),
 		Token:     getEnvMust("FLIPPY_BOOK_SERVER_TOKEN"),
