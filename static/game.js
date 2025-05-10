@@ -411,9 +411,8 @@ class OthelloGame {
         this.wsClient = new WebSocketClient(this);
         this.board = new OthelloBoard();
         this.boardHistory = []; // Store previous board states
-        this.blackMoves = 0;
-        this.whiteMoves = 0;
         this.initializeBoard();
+        this.initializeButtons();
         this.renderBoard(null, false); // No animation on initial load
     }
 
@@ -437,6 +436,17 @@ class OthelloGame {
 
             boardElement.appendChild(cell);
         }
+    }
+
+    initializeButtons() {
+        document.getElementById('undo-button').addEventListener('click', () => this.undoMove());
+        document.getElementById('new-game-button').addEventListener('click', () => this.newGame());
+    }
+
+    newGame() {
+        this.board = new OthelloBoard();
+        this.boardHistory = [];
+        this.renderBoard(null, false);
     }
 
     renderBoard(previousBoard, animate) {
@@ -466,12 +476,11 @@ class OthelloGame {
                     } else {
                         cell.removeChild(existingPiece);
                     }
-                } else if (previousDisc && previousDisc !== disc) {
-                    // Fade color change
+                } else {
+                    // Always update the piece color if there's a disc
                     existingPiece.classList.remove('black', 'white');
                     existingPiece.classList.add(disc);
                 }
-                // If disc hasn't changed, keep the existing piece
             } else if (disc !== 'empty') {
                 // Add new piece
                 const piece = document.createElement('div');
@@ -508,13 +517,6 @@ class OthelloGame {
 
         // Update current board
         this.board = child;
-
-        // Update move counter
-        if (this.board.blackTurn) {
-            this.whiteMoves++;
-        } else {
-            this.blackMoves++;
-        }
 
         if (!this.board.hasValidMoves()) {
             // Store board state before passing
@@ -684,9 +686,3 @@ class OthelloGame {
 window.addEventListener('load', () => {
     const game = new OthelloGame();
 });
-
-
-// TODO make sure disc count scales on mobile
-// TODO add undo button
-// TODO add new game button
-// TODO add new xot game button
