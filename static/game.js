@@ -457,9 +457,6 @@ class OthelloGame {
             return;
         }
 
-        // Clear all evaluation scores
-        document.querySelectorAll('.score-display').forEach(display => display.remove());
-
         // Store current board state in history before making the move
         this.boardHistory.push(this.board.clone());
         const previousBoard = this.board.clone();
@@ -483,6 +480,10 @@ class OthelloGame {
                 this.board.passMove();
             }
         }
+
+        // Clear all evaluation scores
+        document.querySelectorAll('.score-display').forEach(display => display.remove());
+        document.querySelectorAll('.best-move-circle').forEach(circle => circle.remove());
 
         // Render the board with the previous state for animations
         this.renderBoard(previousBoard, true);
