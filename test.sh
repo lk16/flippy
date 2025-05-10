@@ -38,5 +38,6 @@ export FLIPPY_BOOK_SERVER_BASIC_AUTH_USER='test-user'
 export FLIPPY_BOOK_SERVER_BASIC_AUTH_PASS='test-password'
 export FLIPPY_BOOK_SERVER_TOKEN='test-token'
 export FLIPPY_BOOK_SERVER_PREFORK='false'
+export FLIPPY_BOOK_SERVER_STATIC_DIR="$(pwd)/static"
 
 go test -v ./internal/...

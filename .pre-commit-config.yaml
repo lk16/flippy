@@ -28,7 +28,6 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-
   - repo: local
     hooks:
       - id: golangci-lint
