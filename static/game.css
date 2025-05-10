@@ -317,6 +317,15 @@ body {
     .disc-separator {
         font-size: clamp(14px, 2.5vw, 20px);
     }
+
+    .button-container {
+        gap: 5px;
+        margin-top: 10px;
+    }
+
+    .game-button {
+        padding: 8px 12px;
+    }
 }
 
 @media (min-width: 1200px) {
@@ -327,4 +336,34 @@ body {
     .board-container {
         max-width: 700px;
     }
+}
+
+/* Button styles */
+.button-container {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+    max-width: min(95vw, 700px);
+    margin-top: 20px;
+    justify-content: center;
+}
+
+.game-button {
+    flex: 1;
+    padding: 12px 20px;
+    border: none;
+    border-radius: 5px;
+    background-color: var(--board-color);
+    color: var(--white-piece);
+    font-size: clamp(14px, 2.5vw, 20px);
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+.game-button:hover {
+    background-color: #3a506b;
+}
+
+.game-button:active {
+    transform: scale(0.98);
 }
