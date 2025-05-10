@@ -60,3 +60,7 @@ class BookServerConfig:
 
 def get_book_server_token() -> str:
     return os.environ["FLIPPY_BOOK_SERVER_TOKEN"]
+
+
+def get_otello_quest_code() -> str:
+    return os.environ["FLIPPY_OTHELLO_QUEST_CODE"]
