@@ -27,11 +27,17 @@ func NewHandler(ws *websocket.Conn, services *services.Services) *Handler {
 	return &Handler{services: services, ws: ws}
 }
 
+var errClientDisconnected = errors.New("client disconnected")
+
 func (h *Handler) readMessage() (*Incoming, error) {
 	var req Incoming
 
 	msgType, msg, err := h.ws.ReadMessage()
 	if err != nil {
+		if websocket.IsCloseError(err, websocket.CloseGoingAway) {
+			return nil, errClientDisconnected
+		}
+
 		return nil, fmt.Errorf("ws read error: %w", err)
 	}
 
@@ -81,6 +87,10 @@ func (h *Handler) Handle() error {
 	for {
 		req, err := h.readMessage()
 		if err != nil {
+			if errors.Is(err, errClientDisconnected) {
+				return nil
+			}
+
 			return fmt.Errorf("ws read error: %w", err)
 		}
 
