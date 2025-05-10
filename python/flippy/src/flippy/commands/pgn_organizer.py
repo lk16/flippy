@@ -10,7 +10,7 @@ from itertools import count
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from flippy.config import PgnConfig
+from flippy.config import PgnConfig, get_otello_quest_code
 from flippy.othello.board import BLACK, WHITE, Board
 from flippy.othello.game import Game
 from flippy.othello.position import PASS_MOVE
@@ -233,7 +233,7 @@ class OthelloQuestDownloader:
 
         message = {
             "name": MSG_ANNOUNCE_ACCOUNT,
-            "args": [{"gtype": "reversi", "pass": "3p2enzmwh6"}],
+            "args": [{"gtype": "reversi", "pass": get_otello_quest_code()}],
         }
 
         self.send_message(5, message)
