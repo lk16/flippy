@@ -16,6 +16,7 @@ body {
     min-height: 100vh;
     margin: 0;
     padding: 20px;
+    box-sizing: border-box;
 }
 
 .game-container {
@@ -23,39 +24,101 @@ body {
     flex-direction: column;
     align-items: center;
     gap: 20px;
+    width: 100%;
+    max-width: 100%;
+    padding: 0 10px;
+    box-sizing: border-box;
 }
 
 .game-info {
     display: flex;
-    gap: 20px;
-    font-size: 1.2em;
+    justify-content: center;
+    width: 100%;
+    padding: 20px 0;
+}
+
+.player-score {
+    padding: 15px 20px;
+    border-radius: 5px;
+    min-width: 120px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.player-score.black {
+    background-color: var(--black-piece);
+    color: var(--white-piece);
+}
+
+.player-score.white {
+    background-color: var(--white-piece);
+    color: var(--black-piece);
+}
+
+.disc-count,
+.move-count {
+    font-size: 0.9em;
+}
+
+.game-status {
+    font-size: clamp(16px, 3vw, 30px);
+    font-weight: bold;
+    color: var(--board-color);
+    text-align: center;
+    padding: 0 10px;
+    line-height: 1.2;
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: normal;
 }
 
 .score {
     padding: 10px 20px;
     background-color: var(--board-color);
     border-radius: 5px;
+    min-width: 100px;
+    text-align: center;
+}
+
+.board-container {
+    width: 100%;
+    max-width: min(95vw, 700px);
+    aspect-ratio: 1;
+    padding: 5px;
+    box-sizing: border-box;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 1vw;
 }
 
 .board {
     display: grid;
     grid-template-columns: repeat(8, 1fr);
-    gap: 2px;
+    gap: 0.5%;
     background-color: var(--grid-color);
-    padding: 10px;
+    padding: 1%;
     border-radius: 5px;
     box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
 }
 
 .cell {
-    width: 50px;
-    height: 50px;
+    width: 100%;
+    aspect-ratio: 1;
     background-color: var(--board-color);
     display: flex;
     justify-content: center;
     align-items: center;
     cursor: pointer;
     position: relative;
+    box-sizing: border-box;
 }
 
 .cell:hover {
@@ -69,11 +132,18 @@ body {
 .valid-move::after {
     content: '';
     position: absolute;
-    width: 10px;
-    height: 10px;
+    width: 20%;
+    height: 20%;
     border-radius: 50%;
-    background-color: var(--current-player-color);
     opacity: 0.5;
+}
+
+.black-turn .valid-move::after {
+    background-color: var(--black-piece);
+}
+
+.white-turn .valid-move::after {
+    background-color: var(--white-piece);
 }
 
 @keyframes pulse {
@@ -91,8 +161,8 @@ body {
 }
 
 .piece {
-    width: 40px;
-    height: 40px;
+    width: 80%;
+    height: 80%;
     border-radius: 50%;
     position: absolute;
     transition: opacity 300ms ease-in-out, background-color 300ms ease-in-out;
@@ -108,32 +178,153 @@ body {
 
 .evaluation {
     color: var(--current-player-color);
-    font-size: 14px;
+    font-size: clamp(12px, 2vw, 14px);
     text-align: center;
     line-height: 1;
 }
 
 .dot {
     color: var(--current-player-color);
-    font-size: 14px;
+    font-size: clamp(12px, 2vw, 14px);
     text-align: center;
     line-height: 1;
 }
 
 .score-display {
     position: absolute;
-    font-size: 18px;
+    font-size: clamp(14px, 3vw, 30px);
     font-weight: bold;
     z-index: 1;
     pointer-events: none;
 }
 
+.black-turn .score-display {
+    color: var(--black-piece);
+}
+
+.white-turn .score-display {
+    color: var(--white-piece);
+}
+
+/* Add new class for the main score display */
+.main-score-display {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+}
+
+.disc-circles {
+    display: flex;
+    align-items: center;
+    gap: clamp(0.5em, 2vw, 2em);
+}
+
+.disc-circle {
+    width: clamp(40px, 8vw, 60px);
+    height: clamp(40px, 8vw, 60px);
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: clamp(16px, 3vw, 30px);
+    font-weight: bold;
+}
+
+.disc-circle span {
+    font-size: inherit;
+    line-height: 1;
+}
+
+.disc-circle.black {
+    background-color: var(--black-piece);
+    color: var(--white-piece);
+}
+
+.disc-circle.white {
+    background-color: var(--white-piece);
+    color: var(--black-piece);
+}
+
+.disc-separator {
+    font-size: clamp(16px, 3vw, 30px);
+    font-weight: bold;
+    color: var(--board-color);
+}
+
 .best-move-circle {
     position: absolute;
-    width: 35px;
-    height: 35px;
-    border: 2px solid var(--current-player-color);
+    width: 70%;
+    height: 70%;
+    border: 2px solid;
     border-radius: 50%;
     pointer-events: none;
     z-index: 1;
+}
+
+.black-turn .best-move-circle {
+    border-color: var(--black-piece);
+}
+
+.white-turn .best-move-circle {
+    border-color: var(--white-piece);
+}
+
+/* Media queries for different screen sizes */
+@media (max-width: 600px) {
+    .game-container {
+        padding: 0 5px;
+    }
+
+    .board-container {
+        padding: 2px;
+        max-width: 98vw;
+    }
+
+    .board {
+        padding: 1%;
+    }
+
+    .game-info {
+        gap: 10px;
+        padding: 10px 0;
+    }
+
+    .player-score {
+        padding: 8px 12px;
+        min-width: 80px;
+    }
+
+    .disc-circles {
+        gap: 0.5em;
+    }
+
+    .game-status {
+        font-size: clamp(14px, 2.5vw, 20px);
+    }
+
+    .score {
+        padding: 8px 15px;
+        min-width: 80px;
+    }
+
+    .disc-circle {
+        width: clamp(30px, 6vw, 50px);
+        height: clamp(30px, 6vw, 50px);
+        font-size: clamp(14px, 2.5vw, 20px);
+    }
+
+    .disc-separator {
+        font-size: clamp(14px, 2.5vw, 20px);
+    }
+}
+
+@media (min-width: 1200px) {
+    .game-container {
+        max-width: 900px;
+    }
+
+    .board-container {
+        max-width: 700px;
+    }
 }

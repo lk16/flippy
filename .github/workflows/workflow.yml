@@ -91,4 +91,5 @@ jobs:
         FLIPPY_BOOK_SERVER_TOKEN: 'test-token'
         FLIPPY_BOOK_SERVER_PREFORK: 'false'
         FLIPPY_BOOK_SERVER_STATIC_DIR: '${{ github.workspace }}/static'
-      run: go test -v ./internal/...
+      run: |
+        go test -v ./internal/...

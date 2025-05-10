@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Othello Game</title>
     <link rel="stylesheet" href="/static/game.css">
 </head>
@@ -12,10 +12,22 @@
     <div class="game-container">
         <h1>Othello</h1>
         <div class="game-info">
-            <div class="score">Black: <span id="black-score">2</span></div>
-            <div class="score">White: <span id="white-score">2</span></div>
+            <div class="main-score-display">
+                <div class="disc-circles">
+                    <div class="disc-circle black">
+                        <span id="black-score">2</span>
+                    </div>
+                    <div class="disc-separator">-</div>
+                    <div class="disc-circle white">
+                        <span id="white-score">2</span>
+                    </div>
+                </div>
+                <div class="game-status" id="game-status">Black has 0 moves</div>
+            </div>
         </div>
-        <div class="board" id="board"></div>
+        <div class="board-container">
+            <div class="board" id="board"></div>
+        </div>
     </div>
 
     <script src="/static/game.js"></script>

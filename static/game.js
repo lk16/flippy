@@ -249,6 +249,44 @@ class OthelloBoard {
         return directions.some(([dx, dy]) => this.getFlippedPerDirection(index, dx, dy) > 0n);
     }
 
+    getValidMoves() {
+        let moves = 0n;
+
+        for (let i = 0; i < 64; i++) {
+            if (this.isValidMove(i)) {
+                moves |= (1n << BigInt(i));
+            }
+        }
+
+        return moves;
+    }
+
+    countMoves() {
+        const moves = this.getValidMoves();
+
+        let count = 0n;
+
+        // Emulate popcount
+        let n = moves;
+        while (n > 0n) {
+            count += n & 1n;
+            n >>= 1n;
+        }
+
+        return count;
+    }
+
+    isGameOver() {
+        if (this.hasValidMoves()) {
+            return false;
+        }
+
+        const clone = this.clone();
+        clone.passMove();
+
+        return !clone.hasValidMoves();
+    }
+
     getFlippedPerDirection(index, dx, dy) {
         if (this.getDisc(index) !== 'empty') {
             return 0n;
@@ -373,6 +411,8 @@ class OthelloGame {
         this.wsClient = new WebSocketClient(this);
         this.board = new OthelloBoard();
         this.boardHistory = []; // Store previous board states
+        this.blackMoves = 0;
+        this.whiteMoves = 0;
         this.initializeBoard();
         this.renderBoard(null, false); // No animation on initial load
     }
@@ -400,6 +440,10 @@ class OthelloGame {
     }
 
     renderBoard(previousBoard, animate) {
+        // Clear all evaluation scores
+        document.querySelectorAll('.cell .score-display').forEach(display => display.remove());
+        document.querySelectorAll('.best-move-circle').forEach(circle => circle.remove());
+
         const cells = document.querySelectorAll('.cell');
 
         cells.forEach(cell => {
@@ -445,9 +489,10 @@ class OthelloGame {
             }
         });
 
-        // Update valid moves and score after rendering the board
+        // Update rest of the UI
         this.updateValidMoves();
         this.updateScore();
+        this.updateGameStatus();
     }
 
     onDoMoveClick(index) {
@@ -463,6 +508,13 @@ class OthelloGame {
 
         // Update current board
         this.board = child;
+
+        // Update move counter
+        if (this.board.blackTurn) {
+            this.whiteMoves++;
+        } else {
+            this.blackMoves++;
+        }
 
         if (!this.board.hasValidMoves()) {
             // Store board state before passing
@@ -481,10 +533,6 @@ class OthelloGame {
             }
         }
 
-        // Clear all evaluation scores
-        document.querySelectorAll('.score-display').forEach(display => display.remove());
-        document.querySelectorAll('.best-move-circle').forEach(circle => circle.remove());
-
         // Render the board with the previous state for animations
         this.renderBoard(previousBoard, true);
     }
@@ -495,7 +543,8 @@ class OthelloGame {
         }
 
         // Clear all evaluation scores
-        document.querySelectorAll('.score-display').forEach(display => display.remove());
+        document.querySelectorAll('.cell .score-display').forEach(display => display.remove());
+        document.querySelectorAll('.best-move-circle').forEach(circle => circle.remove());
 
         // Store current state for animation
         const previousState = this.board.clone();
@@ -516,21 +565,21 @@ class OthelloGame {
 
     updateValidMoves() {
         const cells = document.querySelectorAll('.cell');
-        document.documentElement.style.setProperty('--current-player-color',
-            this.board.blackTurn ? '#000000' : '#ecf0f1');
+        const board = document.getElementById('board');
 
-        let validPositions = [];
+        // Update the board's class based on current turn
+        board.classList.remove('black-turn', 'white-turn');
+        board.classList.add(this.board.blackTurn ? 'black-turn' : 'white-turn');
+
+        const validMoves = this.board.getValidMoves();
+
         cells.forEach(cell => {
             const index = parseInt(cell.dataset.index);
-            const isValid = this.board.isValidMove(index);
-            cell.classList.toggle('valid-move', isValid);
-
-            if (isValid) {
-                validPositions.push(this.board.toString());
-            }
+            const isValidMove = ((1n << BigInt(index)) & validMoves) !== 0n;
+            cell.classList.toggle('valid-move', isValidMove);
         });
 
-        if (validPositions.length > 0) {
+        if (validMoves !== 0n) {
             this.wsClient.requestEvaluations(this.board);
         }
     }
@@ -609,9 +658,35 @@ class OthelloGame {
         document.getElementById('black-score').textContent = blackCount;
         document.getElementById('white-score').textContent = whiteCount;
     }
+
+    updateGameStatus() {
+        const blackCount = this.board.countDiscs('black');
+        const whiteCount = this.board.countDiscs('white');
+        const validMoves = this.board.countMoves();
+
+        const statusElement = document.getElementById('game-status');
+        if (this.board.isGameOver()) {
+            if (blackCount > whiteCount) {
+                statusElement.textContent = 'Game Over - Black Wins!';
+            } else if (whiteCount > blackCount) {
+                statusElement.textContent = 'Game Over - White Wins!';
+            } else {
+                statusElement.textContent = 'Game Over - Draw!';
+            }
+        } else {
+            const currentPlayer = this.board.blackTurn ? 'Black' : 'White';
+            statusElement.textContent = `${currentPlayer} has ${validMoves} move${validMoves === 1n ? '' : 's'}`;
+        }
+    }
 }
 
 // Initialize the game when the page loads
 window.addEventListener('load', () => {
-    new OthelloGame();
+    const game = new OthelloGame();
 });
+
+
+// TODO make sure disc count scales on mobile
+// TODO add undo button
+// TODO add new game button
+// TODO add new xot game button

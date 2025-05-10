@@ -12,7 +12,7 @@ import (
 )
 
 func rootHandler(c *fiber.Ctx) error {
-	return c.Redirect("/book")
+	return c.Redirect("/game")
 }
 
 func SetupRoutes(app *fiber.App) {

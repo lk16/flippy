@@ -20,5 +20,5 @@ func TestRootEndpoint(t *testing.T) {
 	defer resp.Body.Close()
 
 	require.Equal(t, http.StatusFound, resp.StatusCode)
-	require.Equal(t, "/book", resp.Header.Get("Location"))
+	require.Equal(t, "/game", resp.Header.Get("Location"))
 }
