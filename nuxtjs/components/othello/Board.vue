@@ -1,0 +1,75 @@
+<template>
+  <div class="board-container">
+    <div
+      class="board"
+      :class="{ 'black-turn': gameStore.board.blackTurn, 'white-turn': !gameStore.board.blackTurn }"
+    >
+      <div v-for="index in 64" :key="index - 1" class="cell" @click="gameStore.doMove(index - 1)">
+        <div
+          v-if="gameStore.board.getDisc(index - 1) !== 'empty'"
+          class="piece"
+          :class="gameStore.board.getDisc(index - 1)"
+        />
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { useGameStore } from '~/stores/game'
+
+const gameStore = useGameStore()
+</script>
+
+<style scoped>
+.board-container {
+  width: 100%;
+  max-width: min(95vw, 700px);
+  aspect-ratio: 1;
+  padding: 5px;
+  box-sizing: border-box;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 0.5%;
+  background-color: #1b5e20;
+  padding: 1%;
+  border-radius: 5px;
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.cell {
+  width: 100%;
+  aspect-ratio: 1;
+  background-color: #2e7d32;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.piece {
+  width: 80%;
+  height: 80%;
+  border-radius: 50%;
+  position: absolute;
+}
+
+.black {
+  background-color: #000000;
+}
+
+.white {
+  background-color: #ecf0f1;
+}
+</style>

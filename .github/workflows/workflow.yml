@@ -28,7 +28,7 @@ jobs:
       run: |
         cd python/flippy
         pdm add pre-commit &&
-        SKIP=golangci-lint pdm run pre-commit run --all-files
+        SKIP=golangci-lint,typescript-type-check,typescript-lint,typescript-format pdm run pre-commit run --all-files
     - name: Run Python tests
       run: |
         cd python/flippy
@@ -73,6 +73,14 @@ jobs:
       with:
         version: v2.1.5
 
+    - name: Install pre-commit
+      run: |
+        pip install pre-commit
+
+    - name: Run linters
+      run: |
+        pre-commit run --all-files golangci-lint
+
     # Initialize database schema and test data
     - name: Initialize database
       run: |
@@ -93,3 +101,21 @@ jobs:
         FLIPPY_BOOK_SERVER_STATIC_DIR: '${{ github.workspace }}/static'
       run: |
         go test -v ./internal/...
+
+  nuxtjs:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install dependencies
+      run: |
+        cd nuxtjs
+        npm install
+    - name: Install pre-commit
+      run: |
+        pip install pre-commit
+    - name: Run linters
+      run: |
+        cd nuxtjs
+        pre-commit run --all-files typescript-type-check
+        pre-commit run --all-files typescript-lint
+        pre-commit run --all-files typescript-format
