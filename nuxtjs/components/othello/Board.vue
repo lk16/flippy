@@ -1,5 +1,5 @@
 <template>
-  <div class="board-container">
+  <div class="board-container" @contextmenu.prevent="gameStore.undoMove">
     <div
       class="board"
       :class="{ 'black-turn': gameStore.board.blackTurn, 'white-turn': !gameStore.board.blackTurn }"
