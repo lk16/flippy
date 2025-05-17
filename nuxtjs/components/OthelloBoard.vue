@@ -12,12 +12,16 @@
         :class="styles.cell"
         @click="gameStore.doMove(index - 1)"
       >
+        <transition name="disc">
+          <div
+            v-if="gameStore.board.getDisc(index - 1) !== 'empty'"
+            :class="[styles.piece, styles[gameStore.board.getDisc(index - 1)]]"
+          />
+        </transition>
         <div
-          v-if="gameStore.board.getDisc(index - 1) !== 'empty'"
-          :class="[styles.piece, styles[gameStore.board.getDisc(index - 1)]]"
-        />
-        <div
-          v-else-if="gameStore.board.isValidMove(index - 1)"
+          v-if="
+            gameStore.board.getDisc(index - 1) === 'empty' && gameStore.board.isValidMove(index - 1)
+          "
           :class="[
             styles['valid-move-indicator'],
             styles[gameStore.board.blackTurn ? 'black-turn' : 'white-turn'],
