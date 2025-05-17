@@ -7,5 +7,4 @@ export default defineNuxtConfig({
     strict: true,
     typeCheck: true,
   },
-  css: ['~/assets/css/global.css'], // TODO this is probably not the best way to do this
 })

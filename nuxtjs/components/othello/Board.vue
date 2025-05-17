@@ -1,22 +1,27 @@
 <template>
-  <div class="board-container" @contextmenu.prevent="gameStore.undoMove">
+  <div :class="styles['board-container']" @contextmenu.prevent="gameStore.undoMove">
     <div
-      class="board"
-      :class="{ 'black-turn': gameStore.board.blackTurn, 'white-turn': !gameStore.board.blackTurn }"
+      :class="[
+        styles.board,
+        { 'black-turn': gameStore.board.blackTurn, 'white-turn': !gameStore.board.blackTurn },
+      ]"
     >
-      <div v-for="index in 64" :key="index - 1" class="cell" @click="gameStore.doMove(index - 1)">
+      <div
+        v-for="index in 64"
+        :key="index - 1"
+        :class="styles.cell"
+        @click="gameStore.doMove(index - 1)"
+      >
         <div
           v-if="gameStore.board.getDisc(index - 1) !== 'empty'"
-          class="piece"
-          :class="gameStore.board.getDisc(index - 1)"
+          :class="[styles.piece, styles[gameStore.board.getDisc(index - 1)]]"
         />
         <div
           v-else-if="gameStore.board.isValidMove(index - 1)"
-          class="valid-move-indicator"
-          :class="{
-            'black-turn': gameStore.board.blackTurn,
-            'white-turn': !gameStore.board.blackTurn,
-          }"
+          :class="[
+            styles['valid-move-indicator'],
+            styles[gameStore.board.blackTurn ? 'black-turn' : 'white-turn'],
+          ]"
         />
       </div>
     </div>
@@ -25,87 +30,7 @@
 
 <script setup lang="ts">
 import { useGameStore } from '~/stores/game'
+import styles from './Board.module.css'
 
 const gameStore = useGameStore()
 </script>
-
-<style scoped>
-.board-container {
-  width: 100%;
-  max-width: min(95vw, 1000px);
-  aspect-ratio: 1;
-  padding: 5px;
-  box-sizing: border-box;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  margin: 0 auto;
-}
-
-.board {
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 0.5%;
-  background-color: #1b5e20;
-  padding: 1%;
-  border-radius: 5px;
-  box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
-  width: 100%;
-  height: 100%;
-  box-sizing: border-box;
-  min-width: 500px;
-}
-
-.cell {
-  width: 100%;
-  aspect-ratio: 1;
-  background-color: #2e7d32;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  cursor: pointer;
-  position: relative;
-  box-sizing: border-box;
-}
-
-.piece {
-  width: 80%;
-  height: 80%;
-  border-radius: 50%;
-  position: absolute;
-}
-
-.black {
-  background-color: #000000;
-}
-
-.white {
-  background-color: #ecf0f1;
-}
-
-.valid-move-indicator {
-  width: 20%;
-  height: 20%;
-  border-radius: 50%;
-  position: absolute;
-  opacity: 0.5;
-}
-
-.valid-move-indicator.black-turn {
-  background-color: #000000;
-}
-
-.valid-move-indicator.white-turn {
-  background-color: #ecf0f1;
-}
-
-@media (max-width: 600px) {
-  .board-container {
-    max-width: 95vw;
-  }
-
-  .board {
-    min-width: unset;
-  }
-}
-</style>
