@@ -18,7 +18,7 @@
     <OthelloBoard />
     <div class="button-container">
       <button class="game-button" @click="gameStore.newGame">New Game</button>
-      <button class="game-button" @click="undoMove">Undo</button>
+      <button class="game-button" @click="gameStore.undoMove">Undo</button>
     </div>
   </div>
 </template>
@@ -30,11 +30,6 @@ const gameStore = useGameStore()
 
 // Initialize the game
 gameStore.newGame()
-
-const undoMove = () => {
-  // We'll implement this later
-  console.log('Undo clicked')
-}
 </script>
 
 <style scoped>

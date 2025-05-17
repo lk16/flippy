@@ -1,23 +1,22 @@
 import { defineStore } from 'pinia'
 import { reactive, computed } from 'vue'
-import { Board, type DiscColor } from '~/types/Board'
+import { Board } from '~/types/Board'
 
 export const useGameStore = defineStore('game', () => {
   const state = reactive({
-    board: Board.start(),
-    boardHistory: [] as Board[], // TODO use
+    boardHistory: [Board.start()] as Board[],
     evaluations: new Map<string, number>(), // TODO
   })
 
-  const blackScore = computed(() => state.board.countDiscs('black'))
-  const whiteScore = computed(() => state.board.countDiscs('white'))
+  const blackScore = computed(() => getBoard().countDiscs('black'))
+  const whiteScore = computed(() => getBoard().countDiscs('white'))
 
   const gameStatus = computed(() => {
-    const winner = state.board.getWinner()
+    const winner = getBoard().getWinner()
 
     if (winner === null) {
-      const currentPlayer = state.board.blackTurn ? 'Black' : 'White'
-      const moves = state.board.countMoves()
+      const currentPlayer = getBoard().blackTurn ? 'Black' : 'White'
+      const moves = getBoard().countMoves()
       return `${currentPlayer} has ${moves} move${moves === 1 ? '' : 's'}`
     }
 
@@ -32,38 +31,41 @@ export const useGameStore = defineStore('game', () => {
     return 'Game Over - Draw!'
   })
 
-  function newGame() {
-    state.board = Board.start()
-    state.boardHistory = []
+  function startNewGame() {
+    state.boardHistory = [Board.start()]
   }
 
-  function setDisc(index: number, color: DiscColor) {
-    const bit = BigInt(1) << BigInt(index)
-    if (color === 'black') {
-      state.board.playerBits |= bit
-    } else {
-      state.board.opponentBits |= bit
-    }
+  function getBoard() {
+    return state.boardHistory[state.boardHistory.length - 1]
   }
 
   function doMove(index: number) {
-    // TODO use history
-
-    const child = state.board.doMove(index)
+    const child = getBoard().doMove(index)
     if (child) {
-      state.board = child
+      state.boardHistory.push(child)
+    }
+  }
+
+  function undoMove() {
+    if (state.boardHistory.length === 1) {
+      return
+    }
+
+    let lastMove = state.boardHistory.pop()
+    while (state.boardHistory.length > 1 && lastMove !== undefined && !lastMove.hasMoves()) {
+      lastMove = state.boardHistory.pop()
     }
   }
 
   return {
-    board: computed(() => state.board),
+    board: computed(() => getBoard()),
     boardHistory: computed(() => state.boardHistory),
     evaluations: computed(() => state.evaluations),
     blackScore,
     whiteScore,
     gameStatus,
-    newGame,
-    setDisc,
+    newGame: startNewGame,
     doMove,
+    undoMove,
   }
 })

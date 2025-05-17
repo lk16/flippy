@@ -10,6 +10,14 @@
           class="piece"
           :class="gameStore.board.getDisc(index - 1)"
         />
+        <div
+          v-else-if="gameStore.board.isValidMove(index - 1)"
+          class="valid-move-indicator"
+          :class="{
+            'black-turn': gameStore.board.blackTurn,
+            'white-turn': !gameStore.board.blackTurn,
+          }"
+        />
       </div>
     </div>
   </div>
@@ -24,13 +32,14 @@ const gameStore = useGameStore()
 <style scoped>
 .board-container {
   width: 100%;
-  max-width: min(95vw, 700px);
+  max-width: min(95vw, 1000px);
   aspect-ratio: 1;
   padding: 5px;
   box-sizing: border-box;
   display: flex;
   justify-content: center;
   align-items: center;
+  margin: 0 auto;
 }
 
 .board {
@@ -44,6 +53,7 @@ const gameStore = useGameStore()
   width: 100%;
   height: 100%;
   box-sizing: border-box;
+  min-width: 500px;
 }
 
 .cell {
@@ -71,5 +81,31 @@ const gameStore = useGameStore()
 
 .white {
   background-color: #ecf0f1;
+}
+
+.valid-move-indicator {
+  width: 20%;
+  height: 20%;
+  border-radius: 50%;
+  position: absolute;
+  opacity: 0.5;
+}
+
+.valid-move-indicator.black-turn {
+  background-color: #000000;
+}
+
+.valid-move-indicator.white-turn {
+  background-color: #ecf0f1;
+}
+
+@media (max-width: 600px) {
+  .board-container {
+    max-width: 95vw;
+  }
+
+  .board {
+    min-width: unset;
+  }
 }
 </style>
