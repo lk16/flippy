@@ -36,3 +36,23 @@ repos:
         entry: golangci-lint run --fix ./cmd/... ./internal/...
         types: [go]
         pass_filenames: false
+
+  - repo: local
+    hooks:
+      - id: typescript-type-check
+        name: run typescript type check
+        language: system
+        entry: bash -c 'cd nuxtjs && npx tsc --noEmit'
+        types_or: [ts, vue]
+
+      - id: typescript-lint
+        name: run typescript lint
+        language: system
+        entry: bash -c 'cd nuxtjs && npx eslint --fix --ignore-pattern ".nuxt/**/*"'
+        types_or: [ts, vue]
+
+      - id: typescript-format
+        name: run typescript format
+        language: system
+        entry: bash -c 'cd nuxtjs && npx prettier --write .'
+        pass_filenames: false
