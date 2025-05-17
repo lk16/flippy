@@ -30,7 +30,7 @@
 
 <script setup lang="ts">
 import { useGameStore } from '~/stores/game'
-import styles from './Board.module.css'
+import styles from './OthelloBoard.module.css'
 
 const gameStore = useGameStore()
 </script>
