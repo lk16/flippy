@@ -96,11 +96,11 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  font-size: 12px;
+  font-size: 24px;
   font-weight: bold;
   color: #000;
-  text-shadow: 0 0 2px #fff;
   pointer-events: none;
+  z-index: 1;
 }
 
 .black-turn .valid-move-indicator {
