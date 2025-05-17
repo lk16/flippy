@@ -54,6 +54,7 @@ gameStore.newGame()
 .disc-circles {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 1em;
 }
 
