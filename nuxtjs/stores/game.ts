@@ -1,12 +1,15 @@
 import { defineStore } from 'pinia'
-import { reactive, computed } from 'vue'
+import { reactive, computed, watch } from 'vue'
 import { Board } from '~/types/Board'
+import { useWebSocket } from '~/composables/useWebSocket'
 
 export const useGameStore = defineStore('game', () => {
   const state = reactive({
     boardHistory: [Board.start()] as Board[],
-    evaluations: new Map<string, number>(), // TODO
+    evaluations: new Map<string, number>(),
   })
+
+  const { requestEvaluations } = useWebSocket()
 
   const blackScore = computed(() => getBoard().countDiscs('black'))
   const whiteScore = computed(() => getBoard().countDiscs('white'))
@@ -33,16 +36,40 @@ export const useGameStore = defineStore('game', () => {
 
   function startNewGame() {
     state.boardHistory = [Board.start()]
+    state.evaluations.clear()
   }
 
   function getBoard() {
     return state.boardHistory[state.boardHistory.length - 1]
   }
 
+  async function updateEvaluations() {
+    const board = getBoard()
+    if (!board.hasMoves()) return
+
+    // Get all valid moves and their resulting positions
+    const positions: string[] = []
+    for (let i = 0; i < 64; i++) {
+      if (board.isValidMove(i)) {
+        const child = board.doMove(i)
+        if (child) {
+          positions.push(child.normalize().toString())
+        }
+      }
+    }
+
+    // Request evaluations for all positions
+    const newEvaluations = await requestEvaluations(positions)
+    newEvaluations.forEach((score, position) => {
+      state.evaluations.set(position, score)
+    })
+  }
+
   function doMove(index: number) {
     const child = getBoard().doMove(index)
     if (child) {
       state.boardHistory.push(child)
+      updateEvaluations()
     }
   }
 
@@ -55,7 +82,16 @@ export const useGameStore = defineStore('game', () => {
     while (state.boardHistory.length > 1 && lastMove !== undefined && !lastMove.hasMoves()) {
       lastMove = state.boardHistory.pop()
     }
+    updateEvaluations()
   }
+
+  // Watch for board changes to update evaluations
+  watch(
+    () => state.boardHistory.length,
+    () => {
+      updateEvaluations()
+    }
+  )
 
   return {
     board: computed(() => getBoard()),

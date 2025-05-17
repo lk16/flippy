@@ -26,7 +26,11 @@
             styles['valid-move-indicator'],
             styles[gameStore.board.blackTurn ? 'black-turn' : 'white-turn'],
           ]"
-        />
+        >
+          <span v-if="getEvaluation(index - 1)" :class="styles.evaluation">
+            {{ getEvaluation(index - 1) }}
+          </span>
+        </div>
       </div>
     </div>
   </div>
@@ -37,4 +41,11 @@ import { useGameStore } from '~/stores/game'
 import styles from './OthelloBoard.module.css'
 
 const gameStore = useGameStore()
+
+// TODO move into store
+function getEvaluation(index: number): number | null {
+  const child = gameStore.board.doMove(index)
+  if (!child) return null
+  return gameStore.evaluations.get(child.normalize().toString()) ?? null
+}
 </script>

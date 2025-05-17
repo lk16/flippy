@@ -241,4 +241,83 @@ export class Board {
 
     return child
   }
+
+  normalize(): Board {
+    // Find the minimum position
+    let minBoard = this.clone()
+    for (let i = 1; i < 8; i++) {
+      const rotatedBoard = Board.rotate(this, i)
+
+      if (rotatedBoard.isLessThan(minBoard)) {
+        minBoard = rotatedBoard
+      }
+    }
+
+    return minBoard
+  }
+
+  private static rotate(board: Board, rotation: number): Board {
+    let rotated = new Board()
+    rotated.playerBits = Board.rotateBits(board.playerBits, rotation)
+    rotated.opponentBits = Board.rotateBits(board.opponentBits, rotation)
+    return rotated
+  }
+
+  private static rotateBits(x: bigint, rotation: number): bigint {
+    if (rotation & 1) {
+      x = Board.flipHorizontally(x)
+    }
+    if (rotation & 2) {
+      x = Board.flipVertically(x)
+    }
+    if (rotation & 4) {
+      x = Board.flipDiagonally(x)
+    }
+    return x
+  }
+
+  private static flipHorizontally(x: bigint): bigint {
+    const k1 = 0x5555555555555555n
+    const k2 = 0x3333333333333333n
+    const k4 = 0x0f0f0f0f0f0f0f0fn
+
+    x = ((x >> 1n) & k1) | ((x & k1) << 1n)
+    x = ((x >> 2n) & k2) | ((x & k2) << 2n)
+    x = ((x >> 4n) & k4) | ((x & k4) << 4n)
+    return x
+  }
+
+  private static flipVertically(x: bigint): bigint {
+    const k1 = 0x00ff00ff00ff00ffn
+    const k2 = 0x0000ffff0000ffffn
+
+    x = ((x >> 8n) & k1) | ((x & k1) << 8n)
+    x = ((x >> 16n) & k2) | ((x & k2) << 16n)
+    x = (x >> 32n) | (x << 32n)
+    return x
+  }
+
+  private static flipDiagonally(x: bigint): bigint {
+    const k1 = 0x5500550055005500n
+    const k2 = 0x3333000033330000n
+    const k4 = 0x0f0f0f0f00000000n
+
+    let t = k4 & (x ^ (x << 28n))
+    x ^= t ^ (t >> 28n)
+    t = k2 & (x ^ (x << 14n))
+    x ^= t ^ (t >> 14n)
+    t = k1 & (x ^ (x << 7n))
+    x ^= t ^ (t >> 7n)
+    return x
+  }
+
+  private isLessThan(other: Board): boolean {
+    if (this.playerBits < other.playerBits) {
+      return true
+    }
+    if (this.playerBits === other.playerBits && this.opponentBits < other.opponentBits) {
+      return true
+    }
+    return false
+  }
 }

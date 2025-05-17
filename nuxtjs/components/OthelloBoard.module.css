@@ -83,19 +83,32 @@
 }
 
 .valid-move-indicator {
-  width: 20%;
-  height: 20%;
-  border-radius: 50%;
   position: absolute;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
   opacity: 0.5;
+  pointer-events: none;
 }
 
-.black-turn {
-  background-color: #000000;
+.evaluation {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 12px;
+  font-weight: bold;
+  color: #000;
+  text-shadow: 0 0 2px #fff;
+  pointer-events: none;
 }
 
-.white-turn {
-  background-color: #ecf0f1;
+.black-turn .valid-move-indicator {
+  background-color: #000;
+}
+
+.white-turn .valid-move-indicator {
+  background-color: #fff;
 }
 
 @media (max-width: 600px) {
