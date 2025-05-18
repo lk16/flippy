@@ -427,3 +427,23 @@ func FieldToIndex(field string) (int, error) {
 	y := int(field[1] - '1')
 	return y*8 + x, nil
 }
+
+// GetChildren returns all children for a position.
+func (p Position) GetChildren() []Position {
+	moves := p.Moves()
+
+	// Pre-allocate slice with capacity equal to number of valid moves
+	children := make([]Position, 0, bits.OnesCount64(moves))
+
+	for index := range 64 {
+		// Skip invalid moves
+		if (1<<index)&moves == 0 {
+			continue
+		}
+
+		child := p.DoMove(index)
+		children = append(children, child)
+	}
+
+	return children
+}
