@@ -618,18 +618,18 @@ class OthelloGame {
         }
 
         // Get all normalized children positions that are not in evaluations_map
-        const positions = this.board.getChildren()
-            .map(child => child.normalize().toString())
-            .filter(pos => !this.evaluations_map.has(pos));
+        const normalizedChildren = this.board.getChildren()
+            .map(child => child.normalize())
+            .filter(n_child => !this.evaluations_map.has(n_child.toString()));
 
         // Remove duplicates
-        const uniquePositions = [...new Set(positions)];
+        const uniquePositions = [...new Set(normalizedChildren)];
 
         // Evaluate each position
-        for (const position of uniquePositions) {
-            const evaluation = js_evaluate_position(position);
+        for (const board of uniquePositions) {
+            const evaluation = js_evaluate_position(board);
             if (evaluation) {
-                this.evaluations_map.set(position, {
+                this.evaluations_map.set(board.toString(), {
                     source: 'js',
                     data: evaluation
                 });
@@ -721,6 +721,11 @@ class OthelloGame {
             if (showBestMoves && score === highestScore) {
                 const circle = document.createElement('div');
                 circle.className = 'best-move-circle';
+                if (source === 'edax_ws') {
+                    circle.style.borderColor = this.board.blackTurn ? '#000000' : '#ecf0f1';
+                } else if (source === 'js') {
+                    circle.style.borderColor = this.board.blackTurn ? '#333333' : '#999999';
+                }
                 cell.appendChild(circle);
             }
         });
