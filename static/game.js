@@ -402,7 +402,7 @@ class OthelloBoard {
     toString() {
         const playerStr = this.playerBits.toString(16).padStart(16, '0');
         const opponentStr = this.opponentBits.toString(16).padStart(16, '0');
-        return `${playerStr}${opponentStr}`;
+        return (playerStr + opponentStr).toUpperCase();
     }
 }
 
@@ -602,20 +602,18 @@ class OthelloGame {
         // Find the highest evaluation score first
         let highestScore = -Infinity;
         const moveScores = new Map();
+        let showBestMoves = true;
 
         validMoves.forEach(move => {
-            const evaluation = evaluations.find(e => e.position.toLowerCase() === move.normalized.toLowerCase());
+            const evaluation = evaluations.find(e => e.position === move.normalized);
             if (evaluation) {
                 const score = -evaluation.score; // Invert score for current player's perspective
                 moveScores.set(move.index, score);
                 highestScore = Math.max(highestScore, score);
+            } else {
+                showBestMoves = false;
             }
         });
-
-        // Only show best moves if we have evaluations for all valid moves
-        const showBestMoves = validMoves.every(move =>
-            evaluations.some(e => e.position.toLowerCase() === move.normalized.toLowerCase())
-        );
 
         // Update UI for all cells
         const cells = document.querySelectorAll('.cell');
