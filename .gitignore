@@ -177,3 +177,5 @@ wthor/
 
 # flippy app data
 .flippy/
+
+static/flippy_wasm_bg.wasm
