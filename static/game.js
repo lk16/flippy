@@ -124,6 +124,15 @@ function rotateBits(x, rotation) {
     return x
 }
 
+function js_evaluate_position(position) {
+    // Pretend we're evaluating the position
+    let score = 69;
+
+    return {
+        score: score
+    }
+}
+
 class OthelloBoard {
     constructor() {
         this.playerBits = BigInt(0);
@@ -599,8 +608,6 @@ class OthelloGame {
     }
 
     handleEdaxWsEvaluations(evaluations) {
-
-        // Build map of normalized positions to evaluations for easy lookup
         for (const evaluation of evaluations) {
             const value = {
                 source: 'edax_ws',
@@ -608,6 +615,25 @@ class OthelloGame {
             }
 
             this.evaluations_map.set(evaluation.position, value);
+        }
+
+        // Get all normalized children positions that are not in evaluations_map
+        const positions = this.board.getChildren()
+            .map(child => child.normalize().toString())
+            .filter(pos => !this.evaluations_map.has(pos));
+
+        // Remove duplicates
+        const uniquePositions = [...new Set(positions)];
+
+        // Evaluate each position
+        for (const position of uniquePositions) {
+            const evaluation = js_evaluate_position(position);
+            if (evaluation) {
+                this.evaluations_map.set(position, {
+                    source: 'js',
+                    data: evaluation
+                });
+            }
         }
 
         this.renderEvaluations();
@@ -638,24 +664,22 @@ class OthelloGame {
                 continue;
             }
 
-            let score = 0;
-
-            if (entry.source === 'edax_ws') {
-                score = -entry.data.score; // Invert score for current player's perspective
-            } else {
+            if (entry.source !== 'edax_ws' && entry.source !== 'js') {
                 console.error("Unhandled evaluation source", entry);
-                return;
+                continue;
             }
 
-            moveScores.set(moveIndex, score);
+            let score = -entry.data.score; // Invert score for current player's perspective
             highestScore = Math.max(highestScore, score);
+
+            moveScores.set(moveIndex, entry);
         }
 
         // Update UI for all cells
         const cells = document.querySelectorAll('.cell');
         cells.forEach(cell => {
             const index = parseInt(cell.dataset.index);
-            const score = moveScores.get(index);
+            const entry = moveScores.get(index);
 
             // Remove existing circle if present
             const existingCircle = cell.querySelector('.best-move-circle');
@@ -663,9 +687,14 @@ class OthelloGame {
                 cell.removeChild(existingCircle);
             }
 
-            if (score === undefined) {
+            if (entry === undefined) {
                 return;
             }
+
+            // Invert score for current player's perspective
+            let score = -entry.data.score;
+
+            let source = entry.source;
 
             cell.classList.remove('valid-move');
 
@@ -677,7 +706,16 @@ class OthelloGame {
                 cell.appendChild(scoreDisplay);
             }
             scoreDisplay.textContent = score > 0 ? `+${score}` : score;
-            scoreDisplay.style.color = this.board.blackTurn ? '#000000' : '#ecf0f1';
+
+            if (source === 'edax_ws') {
+                scoreDisplay.style.color = this.board.blackTurn ? '#000000' : '#ecf0f1';
+            } else if (source === 'js') {
+                // Show more grayish score, because it's not as reliable
+                scoreDisplay.style.color = this.board.blackTurn ? '#333333' : '#999999';
+            } else {
+                console.error("Unhandled evaluation source", data);
+                return;
+            }
 
             // Add circle for best moves only if we have all evaluations
             if (showBestMoves && score === highestScore) {
