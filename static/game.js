@@ -587,33 +587,41 @@ class OthelloGame {
     }
 
     handleEvaluations(evaluations) {
-        // Get all valid moves and their normalized children
-        const validMoves = [];
-        for (let i = 0; i < 64; i++) {
-            const child = this.board.doMove(i);
-            if (child) {
-                validMoves.push({
-                    index: i,
-                    normalized: child.normalize().toString()
-                });
-            }
+        let EvaluationsMap = new Map();
+
+        // Build map of normalized positions to evaluations for easy lookup
+        for (const evaluation of evaluations) {
+            EvaluationsMap.set(evaluation.position, evaluation);
         }
 
-        // Find the highest evaluation score first
-        let highestScore = -Infinity;
-        const moveScores = new Map();
+        // Only highlight best moves if we have evaluations for all children
         let showBestMoves = true;
 
-        validMoves.forEach(move => {
-            const evaluation = evaluations.find(e => e.position === move.normalized);
-            if (evaluation) {
-                const score = -evaluation.score; // Invert score for current player's perspective
-                moveScores.set(move.index, score);
-                highestScore = Math.max(highestScore, score);
-            } else {
-                showBestMoves = false;
+        let highestScore = -Infinity;
+
+        // Map of move index to score
+        const moveScores = new Map();
+
+        for (let moveIndex = 0; moveIndex < 64; moveIndex++) {
+            const child = this.board.doMove(moveIndex);
+
+            // Field is not a valid move
+            if (!child) {
+                continue;
             }
-        });
+
+            const evaluation = EvaluationsMap.get(child.normalize().toString());
+
+            // Evaluation is not available for this move
+            if (!evaluation) {
+                showBestMoves = false;
+                continue;
+            }
+
+            const score = -evaluation.score; // Invert score for current player's perspective
+            moveScores.set(moveIndex, score);
+            highestScore = Math.max(highestScore, score);
+        }
 
         // Update UI for all cells
         const cells = document.querySelectorAll('.cell');
@@ -627,26 +635,27 @@ class OthelloGame {
                 cell.removeChild(existingCircle);
             }
 
-            if (score !== undefined) {
-                // Remove valid-move class only for cells with evaluations
-                cell.classList.remove('valid-move');
+            if (score === undefined) {
+                return;
+            }
 
-                // Update score display
-                let scoreDisplay = cell.querySelector('.score-display');
-                if (!scoreDisplay) {
-                    scoreDisplay = document.createElement('div');
-                    scoreDisplay.className = 'score-display';
-                    cell.appendChild(scoreDisplay);
-                }
-                scoreDisplay.textContent = score > 0 ? `+${score}` : score;
-                scoreDisplay.style.color = this.board.blackTurn ? '#000000' : '#ecf0f1';
+            cell.classList.remove('valid-move');
 
-                // Add circle for best moves only if we have all evaluations
-                if (showBestMoves && score === highestScore) {
-                    const circle = document.createElement('div');
-                    circle.className = 'best-move-circle';
-                    cell.appendChild(circle);
-                }
+            // Update score display
+            let scoreDisplay = cell.querySelector('.score-display');
+            if (!scoreDisplay) {
+                scoreDisplay = document.createElement('div');
+                scoreDisplay.className = 'score-display';
+                cell.appendChild(scoreDisplay);
+            }
+            scoreDisplay.textContent = score > 0 ? `+${score}` : score;
+            scoreDisplay.style.color = this.board.blackTurn ? '#000000' : '#ecf0f1';
+
+            // Add circle for best moves only if we have all evaluations
+            if (showBestMoves && score === highestScore) {
+                const circle = document.createElement('div');
+                circle.className = 'best-move-circle';
+                cell.appendChild(circle);
             }
         });
     }
