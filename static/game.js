@@ -1,16 +1,4 @@
-function BigIntFromParts(high, low) {
-    // Convert both numbers to BigInt and ensure they're 32-bit unsigned
-    const highBits = BigInt(high >>> 0);
-    const lowBits = BigInt(low >>> 0);
-
-    // Shift high bits left by 32 and combine with low bits
-    return (highBits << BigInt(32)) | lowBits;
-}
-
-
-// This is the javascript equivalent of the largest 64-bit unsigned integer.
-// Cannot use BigInt(0xFFFFFFFFFFFFFFFF) because the int literal is too large.
-const BITBOARD_MASK = BigIntFromParts(0xFFFFFFFF, 0xFFFFFFFF);
+const BITBOARD_MASK = 0xFFFFFFFFFFFFFFFFn;
 
 class WebSocketClient {
     constructor(game) {
@@ -26,14 +14,18 @@ class WebSocketClient {
 
         this.ws.onopen = () => {
             // Request initial evaluations once connected
-            this.requestEvaluations(this.game.board);
+            let positions = this.game.board.getChildren()
+                .map(child => child.normalize().toString())
+                .filter(pos => !this.game.evaluations_map.has(pos));
+
+            this.requestEvaluations(positions);
         };
 
         this.ws.onmessage = (event) => {
             try {
                 const response = JSON.parse(event.data);
                 if (response.data && response.data.evaluations) {
-                    this.game.handleEvaluations(response.data.evaluations);
+                    this.game.handleEdaxWsEvaluations(response.data.evaluations);
                 }
             } catch (error) {
                 console.error('Error parsing WebSocket message:', error);
@@ -49,13 +41,14 @@ class WebSocketClient {
         };
     }
 
-    requestEvaluations(board) {
+    requestEvaluations(positions) {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             return;
         }
 
-        let positions = board.getChildren().map(child => child.normalize().toString());
-        positions = [...new Set(positions)];
+        if (positions.length === 0) {
+            return;
+        }
 
         const message = {
             id: this.messageId++,
@@ -70,9 +63,9 @@ class WebSocketClient {
 }
 
 function flipHorizontally(x) {
-    const k1 = BigIntFromParts(0x55555555, 0x55555555);
-    const k2 = BigIntFromParts(0x33333333, 0x33333333);
-    const k4 = BigIntFromParts(0x0F0F0F0F, 0x0F0F0F0F);
+    const k1 = 0x5555555555555555n;
+    const k2 = 0x3333333333333333n;
+    const k4 = 0x0F0F0F0F0F0F0F0Fn;
 
     x = ((x >> 1n) & k1) | ((x & k1) << 1n);
     x = ((x >> 2n) & k2) | ((x & k2) << 2n);
@@ -81,9 +74,9 @@ function flipHorizontally(x) {
 }
 
 function flipVertically(x) {
-    const k1 = BigIntFromParts(0x00FF00FF, 0x00FF00FF);
-    const k2 = BigIntFromParts(0x0000FFFF, 0x0000FFFF);
-    const mask = BigIntFromParts(0xFFFFFFFF, 0xFFFFFFFF);
+    const k1 = 0x00FF00FF00FF00FFn;
+    const k2 = 0x0000FFFF0000FFFFn;
+    const mask = 0xFFFFFFFFFFFFFFFFn;
 
     x = ((x >> 8n) & k1) | ((x & k1) << 8n);
     x = ((x >> 16n) & k2) | ((x & k2) << 16n);
@@ -92,10 +85,10 @@ function flipVertically(x) {
 }
 
 function flipDiagonally(x) {
-    const k1 = BigIntFromParts(0x55005500, 0x55005500);
-    const k2 = BigIntFromParts(0x33330000, 0x33330000);
-    const k4 = BigIntFromParts(0x0F0F0F0F, 0x00000000);
-    const mask = BigIntFromParts(0xFFFFFFFF, 0xFFFFFFFF);
+    const k1 = 0x5500550055005500n;
+    const k2 = 0x3333000033330000n;
+    const k4 = 0x0F0F0F0F00000000n;
+    const mask = 0xFFFFFFFFFFFFFFFFn;
 
     let t = k4 & (x ^ (x << 28n));
     x ^= t ^ (t >> 28n);
@@ -118,6 +111,66 @@ function rotateBits(x, rotation) {
     }
     return x
 }
+
+// TODO rename this function
+function js_evaluate_position(board) {
+    const empties = board.emptyCount();
+
+    let depth;
+    if (empties < 8) {
+        depth = 8;
+    } else {
+        depth = 3;
+    }
+
+    let score = evaluate_alpha_beta(board, depth, -64, 64);
+
+    return {
+        score: Number(score)
+    }
+}
+
+function evaluate_alpha_beta(board, depth, alpha, beta) {
+    if (depth === 0) {
+        return heuristic_evaluate(board);
+    }
+
+    let children = board.getChildren();
+
+    if (children.length === 0) {
+        let passed = board.clone();
+        passed.passMove();
+
+        if (!passed.hasValidMoves()) {
+            return board.finalScore();
+        }
+
+        return -evaluate_alpha_beta(passed, depth, -beta, -alpha);
+    }
+
+    for (const child of children) {
+        let score = -evaluate_alpha_beta(child, depth - 1, -beta, -alpha);
+
+        if (score >= beta) {
+            return beta;
+        }
+
+        if (score > alpha) {
+            alpha = score;
+        }
+    }
+
+    return alpha;
+}
+
+function heuristic_evaluate(board) {
+    let passed = board.clone();
+    passed.passMove();
+
+    // TODO tweak this
+    return board.countMoves() - passed.countMoves();
+}
+
 
 class OthelloBoard {
     constructor() {
@@ -194,30 +247,36 @@ class OthelloBoard {
     }
 
     countDiscs(color) {
-        let discs;
-
-        if (color === 'black') {
-            if (this.blackTurn) {
-                discs = this.playerBits;
-            } else {
-                discs = this.opponentBits;
-            }
-        } else {
-            if (this.blackTurn) {
-                discs = this.opponentBits;
-            } else {
-                discs = this.playerBits;
-            }
+        if ((color === 'black') === this.blackTurn) {
+            return this.playerDiscCount();
         }
+        return this.opponentDiscCount();
+    }
 
+    playerDiscCount() {
         // Emulate popcount
         let count = 0n;
-        let n = discs;
+        let n = this.playerBits;
         while (n > 0n) {
             count += n & 1n;
             n >>= 1n;
         }
-        return count;
+        return Number(count);
+    }
+
+    opponentDiscCount() {
+        // Emulate popcount
+        let count = 0n;
+        let n = this.opponentBits;
+        while (n > 0n) {
+            count += n & 1n;
+            n >>= 1n;
+        }
+        return Number(count);
+    }
+
+    emptyCount() {
+        return 64 - this.opponentDiscCount() - this.playerDiscCount();
     }
 
     passMove() {
@@ -402,7 +461,25 @@ class OthelloBoard {
     toString() {
         const playerStr = this.playerBits.toString(16).padStart(16, '0');
         const opponentStr = this.opponentBits.toString(16).padStart(16, '0');
-        return `${playerStr}${opponentStr}`;
+        return (playerStr + opponentStr).toUpperCase();
+    }
+
+    finalScore() {
+        const player = Number(this.playerDiscCount());
+        const opponent = Number(this.opponentDiscCount());
+
+        // Player wins
+        if (player > opponent) {
+            return 64 - (2 * opponent);
+        }
+
+        // Opponent wins
+        if (player < opponent) {
+            return 64 - (2 * player);
+        }
+
+        // Draw
+        return 0;
     }
 }
 
@@ -411,6 +488,7 @@ class OthelloGame {
         this.wsClient = new WebSocketClient(this);
         this.board = new OthelloBoard();
         this.boardHistory = []; // Store previous board states
+        this.evaluations_map = new Map();
         this.initializeBoard();
         this.initializeButtons();
         this.renderBoard(null, false); // No animation on initial load
@@ -502,6 +580,7 @@ class OthelloGame {
         this.updateValidMoves();
         this.updateScore();
         this.updateGameStatus();
+        this.renderEvaluations();
     }
 
     onDoMoveClick(index) {
@@ -582,46 +661,88 @@ class OthelloGame {
         });
 
         if (validMoves !== 0n) {
-            this.wsClient.requestEvaluations(this.board);
+            let positions = this.board.getChildren()
+                .map(child => child.normalize().toString())
+                .filter(pos => !this.evaluations_map.has(pos));
+            positions = [...new Set(positions)];
+
+            this.wsClient.requestEvaluations(positions);
         }
     }
 
-    handleEvaluations(evaluations) {
-        // Get all valid moves and their normalized children
-        const validMoves = [];
-        for (let i = 0; i < 64; i++) {
-            const child = this.board.doMove(i);
-            if (child) {
-                validMoves.push({
-                    index: i,
-                    normalized: child.normalize().toString()
+    handleEdaxWsEvaluations(evaluations) {
+        for (const evaluation of evaluations) {
+            const value = {
+                source: 'edax_ws',
+                data: evaluation
+            }
+
+            this.evaluations_map.set(evaluation.position, value);
+        }
+
+        // Get all normalized children positions that are not in evaluations_map
+        const normalizedChildren = this.board.getChildren()
+            .map(child => child.normalize())
+            .filter(n_child => !this.evaluations_map.has(n_child.toString()));
+
+        // Remove duplicates
+        const uniquePositions = [...new Set(normalizedChildren)];
+
+        // Evaluate each position
+        for (const board of uniquePositions) {
+            const evaluation = js_evaluate_position(board);
+            if (evaluation) {
+                this.evaluations_map.set(board.toString(), {
+                    source: 'js',
+                    data: evaluation
                 });
             }
         }
 
-        // Find the highest evaluation score first
+        this.renderEvaluations();
+    }
+
+    renderEvaluations() {
         let highestScore = -Infinity;
+
+        // Map of move index to score
         const moveScores = new Map();
 
-        validMoves.forEach(move => {
-            const evaluation = evaluations.find(e => e.position.toLowerCase() === move.normalized.toLowerCase());
-            if (evaluation) {
-                const score = -evaluation.score; // Invert score for current player's perspective
-                moveScores.set(move.index, score);
-                highestScore = Math.max(highestScore, score);
-            }
-        });
+        // Only highlight best moves if we have evaluations for all children
+        let showBestMoves = true;
 
-        // Only show best moves if we have evaluations for all valid moves
-        const showBestMoves = validMoves.every(move =>
-            evaluations.some(e => e.position.toLowerCase() === move.normalized.toLowerCase())
-        );
+        for (let moveIndex = 0; moveIndex < 64; moveIndex++) {
+            const child = this.board.doMove(moveIndex);
+
+            // Field is not a valid move
+            if (!child) {
+                continue;
+            }
+
+            const entry = this.evaluations_map.get(child.normalize().toString());
+
+            // Evaluation is not available for this move
+            if (!entry) {
+                showBestMoves = false;
+                continue;
+            }
+
+            if (entry.source !== 'edax_ws' && entry.source !== 'js') {
+                console.error("Unhandled evaluation source", entry);
+                continue;
+            }
+
+            let score = -entry.data.score; // Invert score for current player's perspective
+            highestScore = Math.max(highestScore, score);
+
+            moveScores.set(moveIndex, entry);
+        }
 
         // Update UI for all cells
         const cells = document.querySelectorAll('.cell');
         cells.forEach(cell => {
             const index = parseInt(cell.dataset.index);
-            const score = moveScores.get(index);
+            const entry = moveScores.get(index);
 
             // Remove existing circle if present
             const existingCircle = cell.querySelector('.best-move-circle');
@@ -629,26 +750,46 @@ class OthelloGame {
                 cell.removeChild(existingCircle);
             }
 
-            if (score !== undefined) {
-                // Remove valid-move class only for cells with evaluations
-                cell.classList.remove('valid-move');
+            if (entry === undefined) {
+                return;
+            }
 
-                // Update score display
-                let scoreDisplay = cell.querySelector('.score-display');
-                if (!scoreDisplay) {
-                    scoreDisplay = document.createElement('div');
-                    scoreDisplay.className = 'score-display';
-                    cell.appendChild(scoreDisplay);
-                }
-                scoreDisplay.textContent = score > 0 ? `+${score}` : score;
+            // Invert score for current player's perspective
+            let score = -entry.data.score;
+
+            let source = entry.source;
+
+            cell.classList.remove('valid-move');
+
+            // Update score display
+            let scoreDisplay = cell.querySelector('.score-display');
+            if (!scoreDisplay) {
+                scoreDisplay = document.createElement('div');
+                scoreDisplay.className = 'score-display';
+                cell.appendChild(scoreDisplay);
+            }
+            scoreDisplay.textContent = score > 0 ? `+${score}` : score;
+
+            if (source === 'edax_ws') {
                 scoreDisplay.style.color = this.board.blackTurn ? '#000000' : '#ecf0f1';
+            } else if (source === 'js') {
+                // Show more grayish score, because it's not as reliable
+                scoreDisplay.style.color = this.board.blackTurn ? '#333333' : '#999999';
+            } else {
+                console.error("Unhandled evaluation source", data);
+                return;
+            }
 
-                // Add circle for best moves only if we have all evaluations
-                if (showBestMoves && score === highestScore) {
-                    const circle = document.createElement('div');
-                    circle.className = 'best-move-circle';
-                    cell.appendChild(circle);
+            // Add circle for best moves only if we have all evaluations
+            if (showBestMoves && score === highestScore) {
+                const circle = document.createElement('div');
+                circle.className = 'best-move-circle';
+                if (source === 'edax_ws') {
+                    circle.style.borderColor = this.board.blackTurn ? '#000000' : '#ecf0f1';
+                } else if (source === 'js') {
+                    circle.style.borderColor = this.board.blackTurn ? '#333333' : '#999999';
                 }
+                cell.appendChild(circle);
             }
         });
     }
