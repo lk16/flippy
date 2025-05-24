@@ -26,14 +26,18 @@ class WebSocketClient {
 
         this.ws.onopen = () => {
             // Request initial evaluations once connected
-            this.requestEvaluations(this.game.board);
+            let positions = this.game.board.getChildren()
+                .map(child => child.normalize().toString())
+                .filter(pos => !this.game.evaluations_map.has(pos));
+
+            this.requestEvaluations(positions);
         };
 
         this.ws.onmessage = (event) => {
             try {
                 const response = JSON.parse(event.data);
                 if (response.data && response.data.evaluations) {
-                    this.game.handleEvaluations(response.data.evaluations);
+                    this.game.handleEdaxWsEvaluations(response.data.evaluations);
                 }
             } catch (error) {
                 console.error('Error parsing WebSocket message:', error);
@@ -49,13 +53,14 @@ class WebSocketClient {
         };
     }
 
-    requestEvaluations(board) {
+    requestEvaluations(positions) {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             return;
         }
 
-        let positions = board.getChildren().map(child => child.normalize().toString());
-        positions = [...new Set(positions)];
+        if (positions.length === 0) {
+            return;
+        }
 
         const message = {
             id: this.messageId++,
@@ -411,6 +416,7 @@ class OthelloGame {
         this.wsClient = new WebSocketClient(this);
         this.board = new OthelloBoard();
         this.boardHistory = []; // Store previous board states
+        this.evaluations_map = new Map();
         this.initializeBoard();
         this.initializeButtons();
         this.renderBoard(null, false); // No animation on initial load
@@ -502,6 +508,7 @@ class OthelloGame {
         this.updateValidMoves();
         this.updateScore();
         this.updateGameStatus();
+        this.renderEvaluations();
     }
 
     onDoMoveClick(index) {
@@ -582,25 +589,38 @@ class OthelloGame {
         });
 
         if (validMoves !== 0n) {
-            this.wsClient.requestEvaluations(this.board);
+            let positions = this.board.getChildren()
+                .map(child => child.normalize().toString())
+                .filter(pos => !this.evaluations_map.has(pos));
+            positions = [...new Set(positions)];
+
+            this.wsClient.requestEvaluations(positions);
         }
     }
 
-    handleEvaluations(evaluations) {
-        let EvaluationsMap = new Map();
+    handleEdaxWsEvaluations(evaluations) {
 
         // Build map of normalized positions to evaluations for easy lookup
         for (const evaluation of evaluations) {
-            EvaluationsMap.set(evaluation.position, evaluation);
+            const value = {
+                source: 'edax_ws',
+                data: evaluation
+            }
+
+            this.evaluations_map.set(evaluation.position, value);
         }
 
-        // Only highlight best moves if we have evaluations for all children
-        let showBestMoves = true;
+        this.renderEvaluations();
+    }
 
+    renderEvaluations() {
         let highestScore = -Infinity;
 
         // Map of move index to score
         const moveScores = new Map();
+
+        // Only highlight best moves if we have evaluations for all children
+        let showBestMoves = true;
 
         for (let moveIndex = 0; moveIndex < 64; moveIndex++) {
             const child = this.board.doMove(moveIndex);
@@ -610,15 +630,23 @@ class OthelloGame {
                 continue;
             }
 
-            const evaluation = EvaluationsMap.get(child.normalize().toString());
+            const entry = this.evaluations_map.get(child.normalize().toString());
 
             // Evaluation is not available for this move
-            if (!evaluation) {
+            if (!entry) {
                 showBestMoves = false;
                 continue;
             }
 
-            const score = -evaluation.score; // Invert score for current player's perspective
+            let score = 0;
+
+            if (entry.source === 'edax_ws') {
+                score = -entry.data.score; // Invert score for current player's perspective
+            } else {
+                console.error("Unhandled evaluation source", entry);
+                return;
+            }
+
             moveScores.set(moveIndex, score);
             highestScore = Math.max(highestScore, score);
         }
