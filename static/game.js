@@ -124,14 +124,77 @@ function rotateBits(x, rotation) {
     return x
 }
 
-function js_evaluate_position(position) {
-    // Pretend we're evaluating the position
-    let score = 69;
+// TODO rename this function
+function js_evaluate_position(board) {
+    const empties = board.emptyCount();
+
+    let depth;
+    if (empties < 8) {
+        depth = 8;
+    } else {
+        depth = 3;
+    }
+
+    let score;
+    if (board.hasValidMoves()) {
+        score = evaluate_alpha_beta(board, depth, -64, 64);
+    } else {
+        let passed = board.clone();
+        passed.passMove();
+
+        if (passed.hasValidMoves()) {
+            score = -evaluate_alpha_beta(passed, depth, -64, 64);
+        } else {
+            score = board.finalScore();
+        }
+    }
 
     return {
-        score: score
+        score: Number(score)
     }
 }
+
+function evaluate_alpha_beta(board, depth, alpha, beta) {
+    if (depth === 0) {
+        return heuristic_evaluate(board);
+    }
+
+    let children = board.getChildren();
+
+    if (children.length === 0) {
+        let passed = board.clone();
+        passed.passMove();
+
+        if (!passed.hasValidMoves()) {
+            return board.finalScore();
+        }
+
+        return -evaluate_alpha_beta(passed, depth, -beta, -alpha);
+    }
+
+    for (const child of children) {
+        let score = -evaluate_alpha_beta(child, depth - 1, -beta, -alpha);
+
+        if (score >= beta) {
+            return beta;
+        }
+
+        if (score > alpha) {
+            alpha = score;
+        }
+    }
+
+    return alpha;
+}
+
+function heuristic_evaluate(board) {
+    let passed = board.clone();
+    passed.passMove();
+
+    // TODO tweak this
+    return board.countMoves() - passed.countMoves();
+}
+
 
 class OthelloBoard {
     constructor() {
@@ -208,30 +271,36 @@ class OthelloBoard {
     }
 
     countDiscs(color) {
-        let discs;
-
-        if (color === 'black') {
-            if (this.blackTurn) {
-                discs = this.playerBits;
-            } else {
-                discs = this.opponentBits;
-            }
-        } else {
-            if (this.blackTurn) {
-                discs = this.opponentBits;
-            } else {
-                discs = this.playerBits;
-            }
+        if ((color === 'black') === this.blackTurn) {
+            return this.playerDiscCount();
         }
+        return this.opponentDiscCount();
+    }
 
+    playerDiscCount() {
         // Emulate popcount
         let count = 0n;
-        let n = discs;
+        let n = this.playerBits;
         while (n > 0n) {
             count += n & 1n;
             n >>= 1n;
         }
-        return count;
+        return Number(count);
+    }
+
+    opponentDiscCount() {
+        // Emulate popcount
+        let count = 0n;
+        let n = this.opponentBits;
+        while (n > 0n) {
+            count += n & 1n;
+            n >>= 1n;
+        }
+        return Number(count);
+    }
+
+    emptyCount() {
+        return 64 - this.opponentDiscCount() - this.playerDiscCount();
     }
 
     passMove() {
@@ -417,6 +486,24 @@ class OthelloBoard {
         const playerStr = this.playerBits.toString(16).padStart(16, '0');
         const opponentStr = this.opponentBits.toString(16).padStart(16, '0');
         return (playerStr + opponentStr).toUpperCase();
+    }
+
+    finalScore() {
+        const player = Number(this.playerDiscCount());
+        const opponent = Number(this.opponentDiscCount());
+
+        // Player wins
+        if (player > opponent) {
+            return 64 - (2 * opponent);
+        }
+
+        // Opponent wins
+        if (player < opponent) {
+            return 64 - (2 * player);
+        }
+
+        // Draw
+        return 0;
     }
 }
 
@@ -663,6 +750,8 @@ class OthelloGame {
                 showBestMoves = false;
                 continue;
             }
+
+            console.log("entry", entry);
 
             if (entry.source !== 'edax_ws' && entry.source !== 'js') {
                 console.error("Unhandled evaluation source", entry);
