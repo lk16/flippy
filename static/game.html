@@ -35,17 +35,14 @@
     </div>
 
     <!-- Load WebAssembly -->
-    <script src="/static/wasm_exec.js"></script>
-    <script>
+    <script type="module">
+        import init, { evaluate_position } from './static/flippy_wasm.js';
+
         // Load the WebAssembly module
-        async function init() {
+        async function initWasm() {
             try {
-                const go = new Go();
-                const result = await WebAssembly.instantiateStreaming(
-                    fetch("/static/evaluate.wasm"),
-                    go.importObject
-                );
-                go.run(result.instance);
+                await init({ url: '/static/flippy_wasm_bg.wasm' });
+                window.evaluate_position = evaluate_position;
                 return true;
             } catch (error) {
                 console.error('Failed to initialize WebAssembly:', error);
@@ -54,7 +51,7 @@
         }
 
         // Initialize WebAssembly before loading the game
-        init().then((success) => {
+        initWasm().then((success) => {
             if (!success) {
                 document.getElementById('game-status').textContent = 'Failed to initialize WebAssembly';
                 return;

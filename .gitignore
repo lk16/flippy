@@ -178,4 +178,4 @@ wthor/
 # flippy app data
 .flippy/
 
-static/evaluate.wasm
+static/flippy_wasm_bg.wasm

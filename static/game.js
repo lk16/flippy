@@ -112,17 +112,6 @@ function rotateBits(x, rotation) {
     return x
 }
 
-function js_evaluate_position(board) {
-    const empties = board.emptyCount();
-    const depth = empties < 12 ? 12 : 6;
-
-    // Call the WebAssembly function
-    const result = evaluatePosition(board.toString(), depth);
-    return {
-        score: result.score
-    };
-}
-
 class OthelloBoard {
     constructor() {
         this.playerBits = BigInt(0);
@@ -639,15 +628,21 @@ class OthelloGame {
         // Remove duplicates
         const uniquePositions = [...new Set(normalizedChildren)];
 
+        // Find out depth for WebAssembly evaluation
+        const empties = this.board.emptyCount();
+        const depth = empties < 12 ? 12 : 6;
+
         // Evaluate each position
         for (const board of uniquePositions) {
-            const evaluation = js_evaluate_position(board);
-            if (evaluation) {
-                this.evaluations_map.set(board.toString(), {
-                    source: 'js',
-                    data: evaluation
-                });
-            }
+            // This calls the WebAssembly function
+            const score = evaluate_position(board.toString(), depth);
+
+            this.evaluations_map.set(board.toString(), {
+                source: 'wasm',
+                data: {
+                    score: score
+                }
+            });
         }
 
         this.renderEvaluations();
@@ -678,7 +673,7 @@ class OthelloGame {
                 continue;
             }
 
-            if (entry.source !== 'edax_ws' && entry.source !== 'js') {
+            if (entry.source !== 'edax_ws' && entry.source !== 'wasm') {
                 console.error("Unhandled evaluation source", entry);
                 continue;
             }
@@ -723,7 +718,7 @@ class OthelloGame {
 
             if (source === 'edax_ws') {
                 scoreDisplay.style.color = this.board.blackTurn ? '#000000' : '#ecf0f1';
-            } else if (source === 'js') {
+            } else if (source === 'wasm') {
                 // Show more grayish score, because it's not as reliable
                 scoreDisplay.style.color = this.board.blackTurn ? '#333333' : '#999999';
             } else {
@@ -737,7 +732,7 @@ class OthelloGame {
                 circle.className = 'best-move-circle';
                 if (source === 'edax_ws') {
                     circle.style.borderColor = this.board.blackTurn ? '#000000' : '#ecf0f1';
-                } else if (source === 'js') {
+                } else if (source === 'wasm') {
                     circle.style.borderColor = this.board.blackTurn ? '#333333' : '#999999';
                 }
                 cell.appendChild(circle);
