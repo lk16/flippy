@@ -117,9 +117,9 @@ function js_evaluate_position(board) {
     const depth = empties < 12 ? 12 : 6;
 
     // Call the WebAssembly function
-    const result = evaluatePosition(board.toString(), depth);
+    const score = evaluate_position(board.toString(), depth);
     return {
-        score: result.score
+        score: score
     };
 }
 
