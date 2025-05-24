@@ -112,65 +112,16 @@ function rotateBits(x, rotation) {
     return x
 }
 
-// TODO rename this function
 function js_evaluate_position(board) {
     const empties = board.emptyCount();
+    const depth = empties < 12 ? 12 : 6;
 
-    let depth;
-    if (empties < 8) {
-        depth = 8;
-    } else {
-        depth = 3;
-    }
-
-    let score = evaluate_alpha_beta(board, depth, -64, 64);
-
+    // Call the WebAssembly function
+    const result = evaluatePosition(board.toString(), depth);
     return {
-        score: Number(score)
-    }
+        score: result.score
+    };
 }
-
-function evaluate_alpha_beta(board, depth, alpha, beta) {
-    if (depth === 0) {
-        return heuristic_evaluate(board);
-    }
-
-    let children = board.getChildren();
-
-    if (children.length === 0) {
-        let passed = board.clone();
-        passed.passMove();
-
-        if (!passed.hasValidMoves()) {
-            return board.finalScore();
-        }
-
-        return -evaluate_alpha_beta(passed, depth, -beta, -alpha);
-    }
-
-    for (const child of children) {
-        let score = -evaluate_alpha_beta(child, depth - 1, -beta, -alpha);
-
-        if (score >= beta) {
-            return beta;
-        }
-
-        if (score > alpha) {
-            alpha = score;
-        }
-    }
-
-    return alpha;
-}
-
-function heuristic_evaluate(board) {
-    let passed = board.clone();
-    passed.passMove();
-
-    // TODO tweak this
-    return board.countMoves() - passed.countMoves();
-}
-
 
 class OthelloBoard {
     constructor() {
@@ -824,6 +775,6 @@ class OthelloGame {
 }
 
 // Initialize the game when the page loads
-window.addEventListener('load', () => {
-    const game = new OthelloGame();
-});
+window.startOthelloGame = function () {
+    new OthelloGame();
+}
