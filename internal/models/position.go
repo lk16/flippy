@@ -447,3 +447,32 @@ func (p Position) GetChildren() []Position {
 
 	return children
 }
+
+// FinalScore returns the final score of the position.
+func (p Position) FinalScore() int {
+	player := bits.OnesCount64(p.player)
+	opponent := bits.OnesCount64(p.opponent)
+
+	// Player wins
+	if player > opponent {
+		return 64 - (2 * opponent)
+	}
+
+	// Opponent wins
+	if player < opponent {
+		return 64 - (2 * player)
+	}
+
+	// Draw
+	return 0
+}
+
+// PlayerDiscs returns the discs of the player.
+func (p Position) PlayerDiscs() uint64 {
+	return p.player
+}
+
+// OpponentDiscs returns the discs of the opponent.
+func (p Position) OpponentDiscs() uint64 {
+	return p.opponent
+}
