@@ -1,16 +1,4 @@
-function BigIntFromParts(high, low) {
-    // Convert both numbers to BigInt and ensure they're 32-bit unsigned
-    const highBits = BigInt(high >>> 0);
-    const lowBits = BigInt(low >>> 0);
-
-    // Shift high bits left by 32 and combine with low bits
-    return (highBits << BigInt(32)) | lowBits;
-}
-
-
-// This is the javascript equivalent of the largest 64-bit unsigned integer.
-// Cannot use BigInt(0xFFFFFFFFFFFFFFFF) because the int literal is too large.
-const BITBOARD_MASK = BigIntFromParts(0xFFFFFFFF, 0xFFFFFFFF);
+const BITBOARD_MASK = 0xFFFFFFFFFFFFFFFFn;
 
 class WebSocketClient {
     constructor(game) {
@@ -75,9 +63,9 @@ class WebSocketClient {
 }
 
 function flipHorizontally(x) {
-    const k1 = BigIntFromParts(0x55555555, 0x55555555);
-    const k2 = BigIntFromParts(0x33333333, 0x33333333);
-    const k4 = BigIntFromParts(0x0F0F0F0F, 0x0F0F0F0F);
+    const k1 = 0x5555555555555555n;
+    const k2 = 0x3333333333333333n;
+    const k4 = 0x0F0F0F0F0F0F0F0Fn;
 
     x = ((x >> 1n) & k1) | ((x & k1) << 1n);
     x = ((x >> 2n) & k2) | ((x & k2) << 2n);
@@ -86,9 +74,9 @@ function flipHorizontally(x) {
 }
 
 function flipVertically(x) {
-    const k1 = BigIntFromParts(0x00FF00FF, 0x00FF00FF);
-    const k2 = BigIntFromParts(0x0000FFFF, 0x0000FFFF);
-    const mask = BigIntFromParts(0xFFFFFFFF, 0xFFFFFFFF);
+    const k1 = 0x00FF00FF00FF00FFn;
+    const k2 = 0x0000FFFF0000FFFFn;
+    const mask = 0xFFFFFFFFFFFFFFFFn;
 
     x = ((x >> 8n) & k1) | ((x & k1) << 8n);
     x = ((x >> 16n) & k2) | ((x & k2) << 16n);
@@ -97,10 +85,10 @@ function flipVertically(x) {
 }
 
 function flipDiagonally(x) {
-    const k1 = BigIntFromParts(0x55005500, 0x55005500);
-    const k2 = BigIntFromParts(0x33330000, 0x33330000);
-    const k4 = BigIntFromParts(0x0F0F0F0F, 0x00000000);
-    const mask = BigIntFromParts(0xFFFFFFFF, 0xFFFFFFFF);
+    const k1 = 0x5500550055005500n;
+    const k2 = 0x3333000033330000n;
+    const k4 = 0x0F0F0F0F00000000n;
+    const mask = 0xFFFFFFFFFFFFFFFFn;
 
     let t = k4 & (x ^ (x << 28n));
     x ^= t ^ (t >> 28n);
@@ -135,19 +123,7 @@ function js_evaluate_position(board) {
         depth = 3;
     }
 
-    let score;
-    if (board.hasValidMoves()) {
-        score = evaluate_alpha_beta(board, depth, -64, 64);
-    } else {
-        let passed = board.clone();
-        passed.passMove();
-
-        if (passed.hasValidMoves()) {
-            score = -evaluate_alpha_beta(passed, depth, -64, 64);
-        } else {
-            score = board.finalScore();
-        }
-    }
+    let score = evaluate_alpha_beta(board, depth, -64, 64);
 
     return {
         score: Number(score)
@@ -750,8 +726,6 @@ class OthelloGame {
                 showBestMoves = false;
                 continue;
             }
-
-            console.log("entry", entry);
 
             if (entry.source !== 'edax_ws' && entry.source !== 'js') {
                 console.error("Unhandled evaluation source", entry);
