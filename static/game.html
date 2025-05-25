@@ -34,7 +34,41 @@
         </div>
     </div>
 
-    <script src="/static/game.js"></script>
+    <!-- Load WebAssembly -->
+    <script type="module">
+        import init, { evaluate_position } from './static/flippy_wasm.js';
+
+        // Load the WebAssembly module
+        async function initWasm() {
+            try {
+                await init({ url: '/static/flippy_wasm_bg.wasm' });
+                window.evaluate_position = evaluate_position;
+                return true;
+            } catch (error) {
+                console.error('Failed to initialize WebAssembly:', error);
+                return false;
+            }
+        }
+
+        // Initialize WebAssembly before loading the game
+        initWasm().then((success) => {
+            if (!success) {
+                document.getElementById('game-status').textContent = 'Failed to initialize WebAssembly';
+                return;
+            }
+
+            const script = document.createElement('script');
+            script.src = '/static/game.js';
+            script.onerror = (error) => {
+                console.error('Failed to load game script:', error);
+            };
+            document.body.appendChild(script);
+
+            script.onload = function () {
+                window.startOthelloGame();
+            };
+        });
+    </script>
 </body>
 
 </html>
