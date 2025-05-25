@@ -9,16 +9,3 @@ MAX_UI_SEARCH_LEVEL = 32
 
 # Maxmium number of discs for a board to be potentially saved in DB.
 MAX_SAVABLE_DISCS = 30
-
-
-def get_learn_level(disc_count: int) -> int:
-    if disc_count <= 12:
-        return 40
-
-    if disc_count <= 16:
-        return 36
-
-    if disc_count <= 20:
-        return 34
-
-    return 32
