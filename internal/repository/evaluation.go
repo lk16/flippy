@@ -459,7 +459,11 @@ func (repo *EvaluationRepository) GetJob(ctx context.Context, clientID string) (
 
 // getLearnLevel returns the target level for a given disc count.
 func getLearnLevel(discCount int) int {
-	if discCount <= 12 { //nolint:mnd
+	if discCount <= 9 { //nolint:mnd
+		return 44 //nolint:mnd
+	}
+
+	if discCount <= 13 { //nolint:mnd
 		return 40 //nolint:mnd
 	}
 
