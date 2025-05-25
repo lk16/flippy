@@ -28,7 +28,7 @@ jobs:
       run: |
         cd python/flippy
         pdm add pre-commit &&
-        SKIP=golangci-lint pdm run pre-commit run --all-files
+        SKIP=golangci-lint,cargo-check,cargo-fmt,cargo-clippy pdm run pre-commit run --all-files
     - name: Run Python tests
       run: |
         cd python/flippy
@@ -93,3 +93,23 @@ jobs:
         FLIPPY_BOOK_SERVER_STATIC_DIR: '${{ github.workspace }}/static'
       run: |
         go test -v ./internal/...
+
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Build
+        run: |
+          cd wasm
+          ./build.sh
+      - name: Run linters
+        run: |
+          cd wasm
+          pip install pre-commit
+          pre-commit run -a cargo-check
+          pre-commit run -a cargo-fmt
+          pre-commit run -a cargo-clippy

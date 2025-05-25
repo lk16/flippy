@@ -36,3 +36,21 @@ repos:
         entry: golangci-lint run --fix ./cmd/... ./internal/...
         types: [go]
         pass_filenames: false
+
+  - repo: local
+    hooks:
+      - id: cargo-check
+        name: cargo check
+        language: system
+        entry: bash -c 'cd wasm && cargo check'
+        pass_filenames: false
+      - id: cargo-fmt
+        name: cargo fmt
+        language: system
+        entry: bash -c 'cd wasm && cargo fmt'
+        pass_filenames: false
+      - id: cargo-clippy
+        name: cargo clippy
+        language: system
+        entry: bash -c 'cd wasm && cargo clippy --all-targets -- -Dwarnings'
+        pass_filenames: false
