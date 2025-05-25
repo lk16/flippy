@@ -630,7 +630,8 @@ class OthelloGame {
 
         // Find out depth for WebAssembly evaluation
         const empties = this.board.emptyCount();
-        const depth = empties < 12 ? 12 : 6;
+        const depth = empties <= 12 ? 12 : 6;
+        const source = empties <= 12 ? 'wasm_exact' : 'wasm';
 
         // Evaluate each position
         for (const board of uniquePositions) {
@@ -638,7 +639,7 @@ class OthelloGame {
             const score = evaluate_position(board.toString(), depth);
 
             this.evaluations_map.set(board.toString(), {
-                source: 'wasm',
+                source: source,
                 data: {
                     score: score
                 }
@@ -673,7 +674,7 @@ class OthelloGame {
                 continue;
             }
 
-            if (entry.source !== 'edax_ws' && entry.source !== 'wasm') {
+            if (entry.source !== 'edax_ws' && entry.source !== 'wasm' && entry.source !== 'wasm_exact') {
                 console.error("Unhandled evaluation source", entry);
                 continue;
             }
@@ -716,7 +717,7 @@ class OthelloGame {
             }
             scoreDisplay.textContent = score > 0 ? `+${score}` : score;
 
-            if (source === 'edax_ws') {
+            if (source === 'edax_ws' || source === 'wasm_exact') {
                 scoreDisplay.style.color = this.board.blackTurn ? '#000000' : '#ecf0f1';
             } else if (source === 'wasm') {
                 // Show more grayish score, because it's not as reliable
@@ -730,7 +731,7 @@ class OthelloGame {
             if (showBestMoves && score === highestScore) {
                 const circle = document.createElement('div');
                 circle.className = 'best-move-circle';
-                if (source === 'edax_ws') {
+                if (source === 'edax_ws' || source === 'wasm_exact') {
                     circle.style.borderColor = this.board.blackTurn ? '#000000' : '#ecf0f1';
                 } else if (source === 'wasm') {
                     circle.style.borderColor = this.board.blackTurn ? '#333333' : '#999999';
