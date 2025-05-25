@@ -74,7 +74,7 @@ function passStringToWasm0(arg, malloc, realloc) {
     return ptr;
 }
 /**
- * Evaluates a position and returns the score for the player to move
+ * Evaluates a position at given depth and returns the score for the player to move
  * @param {string} position_string
  * @param {number} depth
  * @returns {number}
@@ -83,6 +83,18 @@ export function evaluate_position(position_string, depth) {
     const ptr0 = passStringToWasm0(position_string, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.evaluate_position(ptr0, len0, depth);
+    return ret;
+}
+
+/**
+ * Evaluates a position and returns the exact score for the player to move
+ * @param {string} position_string
+ * @returns {number}
+ */
+export function evaluate_position_exact(position_string) {
+    const ptr0 = passStringToWasm0(position_string, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.evaluate_position_exact(ptr0, len0);
     return ret;
 }
 
