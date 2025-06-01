@@ -2,7 +2,6 @@ import typer
 from pathlib import Path
 from typing import Annotated
 
-from flippy import PROJECT_ROOT
 from flippy.config import PgnConfig
 from flippy.othello.game import Game
 
@@ -40,7 +39,7 @@ class RecentGames:
             result = f"loss: {color_char} -{abs(score):>2}"
 
         assert game.file
-        path = str(game.file.relative_to(PROJECT_ROOT))
+        path = str(game.file.relative_to(Path.cwd(), walk_up=True))
 
         return players + [result, path]
 
