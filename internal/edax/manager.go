@@ -98,7 +98,7 @@ func (m *Manager) ParseOutput(reader *bufio.Reader) (string, error) {
 			tableBorderLineCount++
 		}
 
-		if tableBorderLineCount == 2 { //nolint:mnd
+		if tableBorderLineCount == 2 {
 			evalLine = lines[len(lines)-3]
 			slog.Debug("Evaluation line", "line", evalLine)
 			break
@@ -167,7 +167,7 @@ func (m *Manager) parseEvaluationLine(line string, job models.Job, startTime tim
 
 	// Normalize whitespace and split into columns
 	columns := strings.Fields(line)
-	if len(columns) < 2 { //nolint:mnd  // TODO this constant is wrong
+	if len(columns) < 2 { // TODO this constant is wrong
 		return nil, fmt.Errorf("not enough columns in evaluation line: %s", line)
 	}
 
