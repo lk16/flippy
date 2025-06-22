@@ -58,7 +58,7 @@ func (repo *EvaluationRepository) SubmitEvaluations(ctx context.Context, payload
 
 	// Create a single VALUES clause with all the data
 	valuesClause := ""
-	params := make([]interface{}, 0, len(payload.Evaluations)*7) //nolint:mnd
+	params := make([]interface{}, 0, len(payload.Evaluations)*7)
 
 	positionBytesList := make([][]byte, len(payload.Evaluations))
 	for i, eval := range payload.Evaluations {
@@ -70,7 +70,7 @@ func (repo *EvaluationRepository) SubmitEvaluations(ctx context.Context, payload
 			valuesClause += ", "
 		}
 		valuesClause += fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d)",
-			i*7+2, i*7+3, i*7+4, i*7+5, i*7+6, i*7+7, i*7+8) //nolint:mnd
+			i*7+2, i*7+3, i*7+4, i*7+5, i*7+6, i*7+7, i*7+8)
 
 		params = append(params,
 			positionBytesList[i],
@@ -459,21 +459,21 @@ func (repo *EvaluationRepository) GetJob(ctx context.Context, clientID string) (
 
 // getLearnLevel returns the target level for a given disc count.
 func getLearnLevel(discCount int) int {
-	if discCount <= 9 { //nolint:mnd
-		return 44 //nolint:mnd
+	if discCount <= 9 {
+		return 44
 	}
 
-	if discCount <= 13 { //nolint:mnd
-		return 40 //nolint:mnd
+	if discCount <= 13 {
+		return 40
 	}
 
-	if discCount <= 16 { //nolint:mnd
-		return 36 //nolint:mnd
+	if discCount <= 16 {
+		return 36
 	}
 
-	if discCount <= 20 { //nolint:mnd
-		return 34 //nolint:mnd
+	if discCount <= 20 {
+		return 34
 	}
 
-	return 32 //nolint:mnd
+	return 32
 }

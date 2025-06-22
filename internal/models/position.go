@@ -31,9 +31,9 @@ func flipHorizontally(x uint64) uint64 {
 		k4 = uint64(0x0F0F0F0F0F0F0F0F)
 	)
 
-	x = ((x >> 1) & k1) | ((x & k1) << 1) //nolint:mnd  // Bitwise swap
-	x = ((x >> 2) & k2) | ((x & k2) << 2) //nolint:mnd  // Bitwise swap
-	x = ((x >> 4) & k4) | ((x & k4) << 4) //nolint:mnd  // Bitwise swap
+	x = ((x >> 1) & k1) | ((x & k1) << 1) // Bitwise swap
+	x = ((x >> 2) & k2) | ((x & k2) << 2) // Bitwise swap
+	x = ((x >> 4) & k4) | ((x & k4) << 4) // Bitwise swap
 	return x
 }
 
@@ -44,9 +44,9 @@ func flipVertically(x uint64) uint64 {
 		k2 = uint64(0x0000FFFF0000FFFF)
 	)
 
-	x = ((x >> 8) & k1) | ((x & k1) << 8)   //nolint:mnd // Bitwise swap
-	x = ((x >> 16) & k2) | ((x & k2) << 16) //nolint:mnd // Bitwise swap
-	x = (x >> 32) | (x << 32)               //nolint:mnd // Bitwise swap
+	x = ((x >> 8) & k1) | ((x & k1) << 8)   // Bitwise swap
+	x = ((x >> 16) & k2) | ((x & k2) << 16) // Bitwise swap
+	x = (x >> 32) | (x << 32)               // Bitwise swap
 	return x
 }
 
@@ -58,12 +58,12 @@ func flipDiagonally(x uint64) uint64 {
 		k4 = uint64(0x0F0F0F0F00000000)
 	)
 
-	t := k4 & (x ^ (x << 28)) //nolint:mnd  // Bitwise swap
-	x ^= t ^ (t >> 28)        //nolint:mnd  // Bitwise swap
-	t = k2 & (x ^ (x << 14))  //nolint:mnd  // Bitwise swap
-	x ^= t ^ (t >> 14)        //nolint:mnd  // Bitwise swap
-	t = k1 & (x ^ (x << 7))   //nolint:mnd  // Bitwise swap
-	x ^= t ^ (t >> 7)         //nolint:mnd  // Bitwise swap
+	t := k4 & (x ^ (x << 28)) // Bitwise swap
+	x ^= t ^ (t >> 28)        // Bitwise swap
+	t = k2 & (x ^ (x << 14))  // Bitwise swap
+	x ^= t ^ (t >> 14)        // Bitwise swap
+	t = k1 & (x ^ (x << 7))   // Bitwise swap
+	x ^= t ^ (t >> 7)         // Bitwise swap
 	return x
 }
 
@@ -231,50 +231,50 @@ func (p Position) Moves() uint64 {
 	flipL := mask & (p.player << 1)
 	flipL |= mask & (flipL << 1)
 	maskL := mask & (mask << 1)
-	flipL |= maskL & (flipL << 2) // nolint:mnd
-	flipL |= maskL & (flipL << 2) // nolint:mnd
+	flipL |= maskL & (flipL << 2)
+	flipL |= maskL & (flipL << 2)
 	flipR := mask & (p.player >> 1)
 	flipR |= mask & (flipR >> 1)
 	maskR := mask & (mask >> 1)
-	flipR |= maskR & (flipR >> 2) // nolint:mnd
-	flipR |= maskR & (flipR >> 2) // nolint:mnd
+	flipR |= maskR & (flipR >> 2)
+	flipR |= maskR & (flipR >> 2)
 	movesSet := (flipL << 1) | (flipR >> 1)
 
-	flipL = mask & (p.player << 7)          // nolint:mnd
-	flipL |= mask & (flipL << 7)            // nolint:mnd
-	maskL = mask & (mask << 7)              // nolint:mnd
-	flipL |= maskL & (flipL << 14)          // nolint:mnd
-	flipL |= maskL & (flipL << 14)          // nolint:mnd
-	flipR = mask & (p.player >> 7)          // nolint:mnd
-	flipR |= mask & (flipR >> 7)            // nolint:mnd
-	maskR = mask & (mask >> 7)              // nolint:mnd
-	flipR |= maskR & (flipR >> 14)          // nolint:mnd
-	flipR |= maskR & (flipR >> 14)          // nolint:mnd
-	movesSet |= (flipL << 7) | (flipR >> 7) // nolint:mnd
+	flipL = mask & (p.player << 7)
+	flipL |= mask & (flipL << 7)
+	maskL = mask & (mask << 7)
+	flipL |= maskL & (flipL << 14)
+	flipL |= maskL & (flipL << 14)
+	flipR = mask & (p.player >> 7)
+	flipR |= mask & (flipR >> 7)
+	maskR = mask & (mask >> 7)
+	flipR |= maskR & (flipR >> 14)
+	flipR |= maskR & (flipR >> 14)
+	movesSet |= (flipL << 7) | (flipR >> 7)
 
-	flipL = mask & (p.player << 9)          // nolint:mnd
-	flipL |= mask & (flipL << 9)            // nolint:mnd
-	maskL = mask & (mask << 9)              // nolint:mnd
-	flipL |= maskL & (flipL << 18)          // nolint:mnd
-	flipL |= maskL & (flipL << 18)          // nolint:mnd
-	flipR = mask & (p.player >> 9)          // nolint:mnd
-	flipR |= mask & (flipR >> 9)            // nolint:mnd
-	maskR = mask & (mask >> 9)              // nolint:mnd
-	flipR |= maskR & (flipR >> 18)          // nolint:mnd
-	flipR |= maskR & (flipR >> 18)          // nolint:mnd
-	movesSet |= (flipL << 9) | (flipR >> 9) // nolint:mnd
+	flipL = mask & (p.player << 9)
+	flipL |= mask & (flipL << 9)
+	maskL = mask & (mask << 9)
+	flipL |= maskL & (flipL << 18)
+	flipL |= maskL & (flipL << 18)
+	flipR = mask & (p.player >> 9)
+	flipR |= mask & (flipR >> 9)
+	maskR = mask & (mask >> 9)
+	flipR |= maskR & (flipR >> 18)
+	flipR |= maskR & (flipR >> 18)
+	movesSet |= (flipL << 9) | (flipR >> 9)
 
-	flipL = p.opponent & (p.player << 8)    // nolint:mnd
-	flipL |= p.opponent & (flipL << 8)      // nolint:mnd
-	maskL = p.opponent & (p.opponent << 8)  // nolint:mnd
-	flipL |= maskL & (flipL << 16)          // nolint:mnd
-	flipL |= maskL & (flipL << 16)          // nolint:mnd
-	flipR = p.opponent & (p.player >> 8)    // nolint:mnd
-	flipR |= p.opponent & (flipR >> 8)      // nolint:mnd
-	maskR = p.opponent & (p.opponent >> 8)  // nolint:mnd
-	flipR |= maskR & (flipR >> 16)          // nolint:mnd
-	flipR |= maskR & (flipR >> 16)          // nolint:mnd
-	movesSet |= (flipL << 8) | (flipR >> 8) // nolint:mnd
+	flipL = p.opponent & (p.player << 8)
+	flipL |= p.opponent & (flipL << 8)
+	maskL = p.opponent & (p.opponent << 8)
+	flipL |= maskL & (flipL << 16)
+	flipL |= maskL & (flipL << 16)
+	flipR = p.opponent & (p.player >> 8)
+	flipR |= p.opponent & (flipR >> 8)
+	maskR = p.opponent & (p.opponent >> 8)
+	flipR |= maskR & (flipR >> 16)
+	flipR |= maskR & (flipR >> 16)
+	movesSet |= (flipL << 8) | (flipR >> 8)
 
 	movesSet &^= p.player | p.opponent
 	return movesSet
@@ -377,7 +377,7 @@ func (p Position) IsValidMove(move int) bool {
 // ASCIIArtLines returns the ascii art lines for the position.
 func (p Position) ASCIIArtLines() []string {
 	moves := p.Moves()
-	lines := make([]string, MaxY+2) //nolint:mnd
+	lines := make([]string, MaxY+2)
 
 	lines[0] = "+-a-b-c-d-e-f-g-h-+"
 	for y := range MaxY {

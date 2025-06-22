@@ -1,4 +1,4 @@
-package models //nolint:testpackage
+package models
 
 import (
 	"encoding/binary"
