@@ -209,23 +209,51 @@ func savePgnState(lastReadPgn string) error {
 	return os.WriteFile(pgnJSONPath, data, 0600)
 }
 
-func learnNewPositions( //nolint:gocognit,funlen
+func learnNewPositions(
 	positions map[models.NormalizedPosition]struct{},
 	client *book.APIClient,
 	edaxManager *edax.Manager,
 ) error {
 	// Filter positions that are DB savable
+	pgnPositions := filterDBSavablePositions(positions)
+
+	slog.Info("Looking up positions in DB", "count", len(pgnPositions))
+
+	// Look up existing positions in batches
+	foundPositions, err := lookupExistingPositions(client, pgnPositions)
+	if err != nil {
+		return fmt.Errorf("failed to lookup existing positions: %w", err)
+	}
+
+	// Find positions that need to be learned
+	learnPositions := findPositionsToLearn(pgnPositions, foundPositions)
+
+	if len(learnPositions) == 0 {
+		slog.Info("No new positions to learn")
+		return nil
+	}
+
+	slog.Info("Learning new positions", "count", len(learnPositions))
+
+	// Process positions in chunks
+	return processPositionsInChunks(learnPositions, client, edaxManager)
+}
+
+func filterDBSavablePositions(positions map[models.NormalizedPosition]struct{}) []models.NormalizedPosition {
 	pgnPositions := make([]models.NormalizedPosition, 0)
 	for pos := range positions {
 		if pos.IsDBSavable() {
 			pgnPositions = append(pgnPositions, pos)
 		}
 	}
+	return pgnPositions
+}
 
-	slog.Info("Looking up positions in DB", "count", len(pgnPositions))
-
-	// Look up existing positions in batches
-	foundPositions := make(map[models.NormalizedPosition]struct{})
+func lookupExistingPositions(
+	client *book.APIClient,
+	pgnPositions []models.NormalizedPosition,
+) (map[models.NormalizedPosition]bool, error) {
+	foundPositions := make(map[models.NormalizedPosition]bool)
 	batchSize := 100
 
 	for i := 0; i < len(pgnPositions); i += batchSize {
@@ -238,31 +266,35 @@ func learnNewPositions( //nolint:gocognit,funlen
 
 		evaluations, err := client.LookupPositions(batch)
 		if err != nil {
-			slog.Error("Failed to lookup positions", "error", err, "batch_start", i, "batch_end", end)
-			continue
+			return nil, fmt.Errorf("failed to lookup positions: %w", err)
 		}
 
 		for _, eval := range evaluations {
-			foundPositions[eval.Position] = struct{}{}
+			foundPositions[eval.Position] = true
 		}
 	}
 
-	// Find positions that need to be learned
+	return foundPositions, nil
+}
+
+func findPositionsToLearn(
+	pgnPositions []models.NormalizedPosition,
+	foundPositions map[models.NormalizedPosition]bool,
+) []models.NormalizedPosition {
 	learnPositions := make([]models.NormalizedPosition, 0)
 	for _, pos := range pgnPositions {
 		if _, found := foundPositions[pos]; !found {
 			learnPositions = append(learnPositions, pos)
 		}
 	}
+	return learnPositions
+}
 
-	if len(learnPositions) == 0 {
-		slog.Info("No new positions to learn")
-		return nil
-	}
-
-	slog.Info("Learning new positions", "count", len(learnPositions))
-
-	// Process positions in chunks
+func processPositionsInChunks(
+	learnPositions []models.NormalizedPosition,
+	client *book.APIClient,
+	edaxManager *edax.Manager,
+) error {
 	totalSeconds := 0.0
 
 	chunkCount := int(math.Ceil(float64(len(learnPositions)) / learnChunkSize))
@@ -276,48 +308,27 @@ func learnNewPositions( //nolint:gocognit,funlen
 		chunk := learnPositions[chunkStart:chunkEnd]
 
 		// Evaluate positions in chunk
-		evaluations := make([]models.Evaluation, 0, len(chunk))
-
-		before := time.Now()
-
-		for _, pos := range chunk {
-			// If position has no moves, we need to pass
-			if !pos.HasMoves() {
-				pos = pos.Position().DoMove(models.PassMove).Normalized()
-			}
-
-			job := models.Job{
-				Position: pos,
-				Level:    config.MinBookLearnLevel,
-			}
-
-			result, err := edaxManager.DoJob(job)
-			if err != nil {
-				return fmt.Errorf("failed to evaluate position: %w", err)
-			}
-
-			evaluations = append(evaluations, result.Evaluation)
+		evaluations, seconds, err := evaluateChunk(chunk, edaxManager)
+		if err != nil {
+			return fmt.Errorf("failed to evaluate chunk %d: %w", chunkID, err)
 		}
 
-		after := time.Now()
-		seconds := after.Sub(before).Seconds()
 		totalSeconds += seconds
 
 		// Save evaluations
-		if err := client.SaveLearnedEvaluations(evaluations); err != nil {
+		if err = client.SaveLearnedEvaluations(evaluations); err != nil {
 			return fmt.Errorf("failed to save evaluations: %w", err)
 		}
 
 		// Calculate ETA
-		computedPositions := chunkEnd
-		average := totalSeconds / float64(computedPositions)
-		remainingPositions := len(learnPositions) - computedPositions
+		average := totalSeconds / float64(chunkEnd)
+		remainingPositions := len(learnPositions) - chunkEnd
 		etaSeconds := average * float64(remainingPositions)
 		eta := time.Now().Add(time.Duration(etaSeconds * float64(time.Second)))
 
 		slog.Info("Processed chunk",
 			"chunk_id", chunkID+1,
-			"processed", computedPositions,
+			"processed", chunkEnd,
 			"total", len(learnPositions),
 			"seconds", fmt.Sprintf("%7.3f", seconds),
 			"eta", eta.Format("2006-01-02 15:04:05"),
@@ -325,4 +336,34 @@ func learnNewPositions( //nolint:gocognit,funlen
 	}
 
 	return nil
+}
+
+func evaluateChunk(chunk []models.NormalizedPosition, edaxManager *edax.Manager) ([]models.Evaluation, float64, error) {
+	evaluations := make([]models.Evaluation, 0, len(chunk))
+
+	before := time.Now()
+
+	for _, pos := range chunk {
+		// If position has no moves, we need to pass
+		if !pos.HasMoves() {
+			pos = pos.Position().DoMove(models.PassMove).Normalized()
+		}
+
+		job := models.Job{
+			Position: pos,
+			Level:    config.MinBookLearnLevel,
+		}
+
+		result, err := edaxManager.DoJob(job)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to evaluate position: %w", err)
+		}
+
+		evaluations = append(evaluations, result.Evaluation)
+	}
+
+	after := time.Now()
+	seconds := after.Sub(before).Seconds()
+
+	return evaluations, seconds, nil
 }
