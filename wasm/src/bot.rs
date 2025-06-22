@@ -69,6 +69,35 @@ impl Bot {
         alpha
     }
 
+    pub fn alpha_beta_exact(&mut self, pos: &Position, alpha: i32, beta: i32) -> i32 {
+        self.nodes += 1;
+
+        let move_indices = pos.iter_move_indices();
+
+        if move_indices.is_empty() {
+            let passed = pos.pass();
+
+            if !passed.has_moves() {
+                return pos.final_score();
+            }
+
+            return -self.alpha_beta_exact(&passed, -beta, -alpha);
+        }
+
+        let mut alpha = alpha;
+
+        for index in move_indices {
+            let child = pos.do_move(index);
+            let score = -self.alpha_beta_exact(&child, -beta, -alpha);
+            alpha = alpha.max(score);
+            if alpha >= beta {
+                break;
+            }
+        }
+
+        alpha
+    }
+
     pub fn print_stats(&self) {
         let elapsed_time = current_time() - self.start_time;
 

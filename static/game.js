@@ -629,14 +629,17 @@ class OthelloGame {
         const uniquePositions = [...new Set(normalizedChildren)];
 
         // Find out depth for WebAssembly evaluation
-        const empties = this.board.emptyCount();
-        const depth = empties <= 12 ? 12 : 6;
-        const source = empties <= 12 ? 'wasm_exact' : 'wasm';
+        const exactSearch = this.board.emptyCount() <= 12;
+        const source = exactSearch ? 'wasm_exact' : 'wasm';
 
-        // Evaluate each position
+        // Evaluate each missing position with WebAssembly
         for (const board of uniquePositions) {
-            // This calls the WebAssembly function
-            const score = evaluate_position(board.toString(), depth);
+            let score;
+            if (exactSearch) {
+                score = evaluate_position_exact(board.toString());
+            } else {
+                score = evaluate_position(board.toString(), 6);
+            }
 
             this.evaluations_map.set(board.toString(), {
                 source: source,
