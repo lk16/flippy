@@ -49,6 +49,8 @@ class PGNMode(BaseMode):
                 self.toggle_show_all_move_evaluations()
             elif event.key == pygame.K_l:
                 self.toggle_show_level()
+            elif event.key == pygame.K_f:
+                self.flip_board()
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == pygame.BUTTON_RIGHT:
             self.show_prev_position()
@@ -367,3 +369,15 @@ class PGNMode(BaseMode):
         # Ignoring type error is fine here since start_evaluation expects Queue[EdaxResponse],
         # but we have Queue[EdaxResponse | EdaxEvaluations]. EdaxResponse is a subset of our queue's types.
         start_evaluation(request, self.recv_queue)  # type:ignore[arg-type]
+
+    def flip_board(self) -> None:
+        if self.game is None:
+            return
+
+        flipped_moves = [63 - move for move in self.game.moves]
+
+        game = Game.from_moves(flipped_moves)
+        game.metadata = self.game.metadata
+        game.file = self.game.file
+
+        self.game = game
