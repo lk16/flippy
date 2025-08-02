@@ -21,8 +21,7 @@ from flippy.othello.position import InvalidMove, NormalizedPosition, Position
 
 class PGNMode(BaseMode):
     def __init__(self, args: Arguments) -> None:
-        self.args = args.pgn
-        self.game: Optional[Game] = None
+        self.game: Optional[Game] = args.pgn.game
         self.game_board_index = 0
         self.alternative_moves: list[Board] = []
         self.recv_queue: Queue[EdaxResponse | EdaxEvaluations] = Queue()
@@ -31,8 +30,7 @@ class PGNMode(BaseMode):
         self.show_level = False
         self.api_client = APIClient()
 
-        if self.args.pgn_file:
-            self.game = Game.from_pgn(self.args.pgn_file)
+        if self.game:
             self.search_game_positions(self.game, MIN_UI_SEARCH_LEVEL)
 
     def on_frame(self, event: Event) -> None:

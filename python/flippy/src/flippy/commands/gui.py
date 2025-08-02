@@ -41,10 +41,11 @@ def main(
     lost_only: Annotated[bool, typer.Option("-l")] = False,
     most_recent: Annotated[Optional[int], typer.Option("-r")] = None,
     pgn_file: Annotated[Optional[Path], typer.Option("-p")] = None,
+    oq_string: Annotated[Optional[str], typer.Option("-o")] = None,
     mode_name: Annotated[str, typer.Option("-m")] = "game",
 ) -> None:
     freq_args = PositionFrequencyArguments(lost_only, most_recent)
-    pgn_args = PGNArguments(pgn_file)
+    pgn_args = PGNArguments(pgn_file, oq_string)
     args = Arguments(freq_args, pgn_args)
 
     try:
