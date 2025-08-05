@@ -133,7 +133,7 @@ pub mod tests {
             let regular = get_moves(player, opponent);
 
             println!("Position:");
-            println!("{}", position);
+            println!("{position}");
 
             println!("Regular:");
             print_bitset(regular);

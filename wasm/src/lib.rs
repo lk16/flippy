@@ -17,7 +17,7 @@ pub fn evaluate_position(position_string: &str, depth: i32) -> i32 {
     let position = match Position::from_string(position_string) {
         Ok(pos) => pos,
         Err(e) => {
-            console_error(&format!("Error parsing position: {}", e));
+            console_error(&format!("Error parsing position: {e}"));
             return 0;
         }
     };
