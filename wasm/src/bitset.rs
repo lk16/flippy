@@ -4,7 +4,7 @@ pub mod tests {
     pub fn print_bitset(bitset: u64) {
         let mut buffer = String::new();
         print_bitset_to(bitset, &mut buffer).unwrap();
-        println!("{}", buffer);
+        println!("{buffer}");
     }
 
     fn print_bitset_to<W: std::fmt::Write>(bitset: u64, writer: &mut W) -> std::fmt::Result {

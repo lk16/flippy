@@ -46,6 +46,12 @@ class Game:
         return game
 
     @classmethod
+    def from_othello_quest_string(cls, string: str) -> Game:
+        move_fields = [string[i : i + 2] for i in range(0, len(string), 2)]
+        moves = [Board.field_to_index(move_field) for move_field in move_fields]
+        return cls.from_moves(moves)
+
+    @classmethod
     def from_string(cls, string: str) -> Game:
         game = Game()
 

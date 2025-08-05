@@ -42,9 +42,9 @@ impl Position {
         }
 
         let player = u64::from_str_radix(&s[0..16], 16)
-            .map_err(|e| format!("invalid player discs hex: {}", e))?;
+            .map_err(|e| format!("invalid player discs hex: {e}"))?;
         let opponent = u64::from_str_radix(&s[16..32], 16)
-            .map_err(|e| format!("invalid opponent discs hex: {}", e))?;
+            .map_err(|e| format!("invalid opponent discs hex: {e}"))?;
 
         Ok(Self::new_from_bitboards(player, opponent))
     }
@@ -151,9 +151,9 @@ impl Position {
                 let index = row * 8 + col;
                 let mask = 1u64 << index;
                 if self.player & mask != 0 {
-                    line.push_str(&format!("{} ", player_char));
+                    line.push_str(&format!("{player_char} "));
                 } else if self.opponent & mask != 0 {
-                    line.push_str(&format!("{} ", opponent_char));
+                    line.push_str(&format!("{opponent_char} "));
                 } else if moves & mask != 0 {
                     line.push_str("· ");
                 } else {
@@ -167,14 +167,10 @@ impl Position {
 
         let space = "   ";
 
-        lines[2] += &format!(
-            "{} {} ○ {:2} - {:2} moves",
-            space, black_move_arrow, black_count, black_moves
-        );
-        lines[3] += &format!(
-            "{} {} ● {:2} - {:2} moves",
-            space, white_move_arrow, white_count, white_moves
-        );
+        lines[2] +=
+            &format!("{space} {black_move_arrow} ○ {black_count:2} - {black_moves:2} moves");
+        lines[3] +=
+            &format!("{space} {white_move_arrow} ● {white_count:2} - {white_moves:2} moves");
 
         lines[7] += &format!(
             "{}(0x{:016X}, 0x{:016X})",

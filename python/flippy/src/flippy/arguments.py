@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+from flippy.othello.game import Game
+
 
 class PositionFrequencyArguments:
     def __init__(self, lost_only: bool, most_recent: Optional[int]) -> None:
@@ -11,8 +13,13 @@ class PositionFrequencyArguments:
 
 
 class PGNArguments:
-    def __init__(self, pgn_file: Optional[Path]) -> None:
-        self.pgn_file = pgn_file
+    def __init__(self, pgn_file: Optional[Path], oq_string: Optional[str]) -> None:
+        if pgn_file:
+            self.game = Game.from_pgn(pgn_file)
+        elif oq_string:
+            self.game = Game.from_othello_quest_string(oq_string)
+        else:
+            self.game = Game()
 
 
 class Arguments:
@@ -28,5 +35,5 @@ class Arguments:
     def empty(cls) -> Arguments:
         return Arguments(
             PositionFrequencyArguments(False, None),
-            PGNArguments(None),
+            PGNArguments(None, None),
         )

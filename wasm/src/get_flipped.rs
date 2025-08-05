@@ -1358,14 +1358,11 @@ mod tests {
                 let slow = get_flipped_edax_slow(player, opponent, move_);
 
                 if get_flipped != simple && get_flipped != slow {
-                    println!("move = {}", move_);
+                    println!("move = {move_}");
 
                     println!("position:");
-                    println!(
-                        "Position::new_from_bitboards(0x{:x}, 0x{:x})",
-                        player, opponent
-                    );
-                    println!("{}", position);
+                    println!("Position::new_from_bitboards(0x{player:x}, 0x{opponent:x})");
+                    println!("{position}");
 
                     println!("simple:");
                     print_bitset(simple);
