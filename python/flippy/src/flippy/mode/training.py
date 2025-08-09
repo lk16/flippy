@@ -21,6 +21,7 @@ class TrainingMode(GameMode):
         self.node_index = 0
         self.board = self.get_new_exercise_board()
         self.wrong_moves: set[int] = set()
+        self.exercise_mistake = False
 
     def get_new_exercise_board(self) -> Board:
         exercise = self.exercises[self.exercise_index]
@@ -46,6 +47,7 @@ class TrainingMode(GameMode):
 
         if child.position.normalized() not in node.best_moves:
             self.wrong_moves.add(move)
+            self.exercise_mistake = True
             return
 
         if self.node_index < len(exercise.nodes) - 1:
@@ -72,6 +74,13 @@ class TrainingMode(GameMode):
                 return
 
         self.node_index = 0
+
+        # If the user made a mistake, do the exercise again.
+        if self.exercise_mistake:
+            self.exercise_mistake = False
+            self.wrong_moves.clear()
+            self.board = self.get_new_exercise_board()
+            return
 
         if self.exercise_index < len(self.exercises) - 1:
             self.exercise_index += 1
