@@ -72,9 +72,10 @@ class TrainingMode(GameMode):
 
         if self.exercise_index < len(self.exercises) - 1:
             self.exercise_index += 1
-            return
+        else:
+            self.exercise_index = 0
 
-        self.exercise_index = 0
+        self.board = self.get_new_exercise_board()
 
     def get_ui_details(self) -> dict[str, Any]:
         return {}
