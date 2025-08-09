@@ -22,5 +22,11 @@ def show() -> None:
     training_file.print_ascii_art()
 
 
+@app.command()
+def list_exercises() -> None:
+    training_file = TrainingFile(DEFAULT_TRAINING_FILE_PATH)
+    training_file.list_exercises()
+
+
 if __name__ == "__main__":
     app()

@@ -12,7 +12,7 @@ from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxEvaluations, EdaxRequest
 from flippy.othello.board import BLACK, WHITE, Board, opponent
 from flippy.othello.game import Game
-from flippy.othello.position import NormalizedPosition
+from flippy.othello.position import NormalizedPosition, Position
 
 DEFAULT_TRAINING_FILE_PATH = PROJECT_ROOT / ".flippy/training.json"
 
@@ -79,6 +79,11 @@ class TrainingNode:
                 ),
             },
         )
+
+
+class Exercise:
+    def __init__(self, nodes: list[TrainingNode]) -> None:
+        self.nodes = nodes
 
 
 class TrainingFile:
@@ -241,3 +246,53 @@ class TrainingFile:
 
         total_nodes = len(self.black_nodes) + len(self.white_nodes)
         print("Total nodes:", total_nodes)
+
+    def get_exercises(self) -> list[Exercise]:
+        black_root = Position.start().normalized()
+        white_root = Position.start().do_move(19).normalized()
+
+        def _get_exercises(
+            nodes: dict[NormalizedPosition, TrainingNode], node: TrainingNode
+        ) -> list[Exercise]:
+            children = node.position.to_position().get_normalized_children()
+
+            grand_children: set[NormalizedPosition] = set()
+            for child in children:
+                grand_children.update(child.to_position().get_normalized_children())
+
+            missing_grand_children = grand_children - set(nodes.keys())
+
+            # All grandchildren are missing
+            if len(missing_grand_children) == len(grand_children):
+                return [Exercise([node])]
+
+            exercises: list[Exercise] = []
+            for grand_child in grand_children:
+                if grand_child in nodes:
+                    grand_child_exercises = _get_exercises(nodes, nodes[grand_child])
+                    for grand_child_exercise in grand_child_exercises:
+                        grand_child_exercise.nodes.insert(0, node)
+
+                    exercises.extend(grand_child_exercises)
+
+            return exercises
+
+        exercises: list[Exercise] = []
+
+        if black_root in self.black_nodes:
+            exercises += _get_exercises(self.black_nodes, self.black_nodes[black_root])
+
+        if white_root in self.white_nodes:
+            exercises += _get_exercises(self.white_nodes, self.white_nodes[white_root])
+
+        return exercises
+
+    def list_exercises(self) -> None:
+        exercises = self.get_exercises()
+        for exercise in exercises:
+            for node in exercise.nodes:
+                print(f"{node.position.to_api()} -> {node.best_move.to_api()}")
+
+            print()
+
+        print(f"Total exercises: {len(exercises)}")
