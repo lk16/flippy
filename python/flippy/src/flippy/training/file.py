@@ -82,7 +82,8 @@ class TrainingNode:
 
 
 class Exercise:
-    def __init__(self, nodes: list[TrainingNode]) -> None:
+    def __init__(self, color: int, nodes: list[TrainingNode]) -> None:
+        self.color = color
         self.nodes = nodes
 
 
@@ -251,9 +252,12 @@ class TrainingFile:
         black_root = Position.start().normalized()
         white_root = Position.start().do_move(19).normalized()
 
-        def _get_exercises(
-            nodes: dict[NormalizedPosition, TrainingNode], node: TrainingNode
-        ) -> list[Exercise]:
+        def _get_exercises(color: int, node: TrainingNode) -> list[Exercise]:
+            if color == BLACK:
+                nodes = self.black_nodes
+            else:
+                nodes = self.white_nodes
+
             children = node.position.to_position().get_normalized_children()
 
             grand_children: set[NormalizedPosition] = set()
@@ -264,12 +268,12 @@ class TrainingFile:
 
             # All grandchildren are missing
             if len(missing_grand_children) == len(grand_children):
-                return [Exercise([node])]
+                return [Exercise(color, [node])]
 
             exercises: list[Exercise] = []
             for grand_child in grand_children:
                 if grand_child in nodes:
-                    grand_child_exercises = _get_exercises(nodes, nodes[grand_child])
+                    grand_child_exercises = _get_exercises(color, nodes[grand_child])
                     for grand_child_exercise in grand_child_exercises:
                         grand_child_exercise.nodes.insert(0, node)
 
@@ -280,10 +284,10 @@ class TrainingFile:
         exercises: list[Exercise] = []
 
         if black_root in self.black_nodes:
-            exercises += _get_exercises(self.black_nodes, self.black_nodes[black_root])
+            exercises += _get_exercises(BLACK, self.black_nodes[black_root])
 
         if white_root in self.white_nodes:
-            exercises += _get_exercises(self.white_nodes, self.white_nodes[white_root])
+            exercises += _get_exercises(WHITE, self.white_nodes[white_root])
 
         return exercises
 

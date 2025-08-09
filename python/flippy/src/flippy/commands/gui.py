@@ -20,6 +20,7 @@ from flippy.mode.evaluate import EvaluateMode
 from flippy.mode.frequency import FrequencyMode
 from flippy.mode.game import GameMode
 from flippy.mode.pgn import PGNMode
+from flippy.mode.training import TrainingMode
 from flippy.mode.watch import WatchMode
 from flippy.window import Window
 
@@ -30,6 +31,7 @@ MODES = {
     "frequency": FrequencyMode,
     "game": GameMode,
     "pgn": PGNMode,
+    "training": TrainingMode,
     "watch": WatchMode,
 }
 
