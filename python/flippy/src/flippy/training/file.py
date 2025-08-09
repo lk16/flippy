@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import random
 from pathlib import Path
 from typing import Any
 
@@ -40,43 +39,35 @@ class TrainingNode:
         self,
         position: NormalizedPosition,
         rotations: set[int],
-        best_move: NormalizedPosition,
-        alternative_moves: set[NormalizedPosition],
+        best_moves: set[NormalizedPosition],
     ) -> None:
         assert all(r in range(8) for r in rotations)
         assert len(rotations) > 0
 
         children = position.to_position().get_normalized_children()
-        assert best_move in children
-        assert alternative_moves.issubset(children)
-        assert best_move not in alternative_moves
+        assert len(best_moves) > 0
+        assert best_moves.issubset(children)
 
         self.rotations = rotations
         self.position = position
-        self.best_move = best_move
-        self.alternative_moves = alternative_moves
+        self.best_moves = best_moves
 
     @classmethod
     def from_json(cls, key: str, value: dict[str, Any]) -> TrainingNode:
         position = key
         rotations = set(value["rotations"])
-        best_move = value["best_move"]
-        alternative_moves = value["alternative_moves"]
+        best_moves = value["best_moves"]
 
         assert all(isinstance(r, int) for r in rotations)
 
         assert isinstance(position, str)
-        assert isinstance(best_move, str)
-        assert isinstance(alternative_moves, list)
-        assert all(isinstance(move, str) for move in alternative_moves)
+        assert isinstance(best_moves, list)
+        assert all(isinstance(move, str) for move in best_moves)
 
         return cls(
             position=NormalizedPosition.from_api(position),
             rotations=rotations,
-            best_move=NormalizedPosition.from_api(best_move),
-            alternative_moves=set(
-                NormalizedPosition.from_api(move) for move in alternative_moves
-            ),
+            best_moves=set(NormalizedPosition.from_api(move) for move in best_moves),
         )
 
     def to_json(self) -> tuple[str, dict[str, Any]]:
@@ -84,10 +75,7 @@ class TrainingNode:
             self.position.to_api(),
             {
                 "rotations": sorted(self.rotations),
-                "best_move": self.best_move.to_api(),
-                "alternative_moves": sorted(
-                    move.to_api() for move in self.alternative_moves
-                ),
+                "best_moves": sorted(move.to_api() for move in self.best_moves),
             },
         )
 
@@ -163,23 +151,16 @@ class TrainingFile:
         # Find lowest score for opponent, so best move for us.
         min_score = min(evaluation.score for evaluation in evaluations.values())
 
-        best_evals = [
-            evaluation
+        best_moves: set[NormalizedPosition] = set(
+            evaluation.position.normalized()
             for evaluation in evaluations.values()
             if evaluation.score == min_score
-        ]
-
-        if len(best_evals) == 1:
-            best_move = best_evals[0].position.normalized()
-        else:
-            # TODO let user pick which move to use as the best_move
-            best_move = random.choice(best_evals).position.normalized()
+        )
 
         nodes[position] = TrainingNode(
             position=position,
             rotations=self._get_normalized_position_rotations(board.turn, position),
-            best_move=best_move,
-            alternative_moves=set(),
+            best_moves=best_moves,
         )
 
     def _get_normalized_position_rotations(
@@ -279,20 +260,18 @@ class TrainingFile:
                 board = Board(node.position.to_position(), color)
                 board.show()
 
-                print("Best move:")
+                print("Best moves:")
                 children = board.get_children()
 
-                # Best move is normalized, so we need to rotate the board it to show it.
-                for rot in range(8):
-                    child_position = node.best_move.to_position().rotated(rot)
-                    child_board = Board(child_position, opponent(color))
+                # Best moves are normalized, so we need to rotate the board to show them.
+                for best_move in sorted(node.best_moves, key=lambda m: m.to_api()):
+                    for rot in range(8):
+                        child_position = best_move.to_position().rotated(rot)
+                        child_board = Board(child_position, opponent(color))
 
-                    if child_board in children:
-                        child_board.show()
-                        break
-
-                if node.alternative_moves:
-                    print(f"Found {len(node.alternative_moves)} alternative moves.")
+                        if child_board in children:
+                            child_board.show()
+                            break
 
                 print()
 
@@ -354,7 +333,8 @@ class TrainingFile:
         exercises = self.get_exercises()
         for exercise in exercises:
             for node in exercise.nodes:
-                print(f"{node.position.to_api()} -> {node.best_move.to_api()}")
+                best_moves_sorted = sorted(m.to_api() for m in node.best_moves)
+                print(f"{node.position.to_api()} -> {best_moves_sorted}")
 
             print()
 

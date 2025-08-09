@@ -45,25 +45,30 @@ class TrainingMode(GameMode):
         exercise = self.exercises[self.exercise_index]
         node = exercise.nodes[self.node_index]
 
-        if child.position.normalized() != node.best_move:
+        if child.position.normalized() not in node.best_moves:
             print("Wrong move")  # TODO remove
             return
 
         if self.node_index < len(exercise.nodes) - 1:
-            self.node_index += 1
-
-            normalized_grand_child = (
-                self.exercises[self.exercise_index].nodes[self.node_index].position
+            next_node_position = (
+                self.exercises[self.exercise_index].nodes[self.node_index + 1].position
             )
 
             valid_grand_children = []
 
             for grand_child in child.get_children():
-                if grand_child.position.normalized() == normalized_grand_child:
+                if grand_child.position.normalized() == next_node_position:
                     valid_grand_children.append(grand_child)
 
-            self.board = random.choice(valid_grand_children)
-            return
+            if valid_grand_children:
+                self.node_index += 1
+                self.board = random.choice(valid_grand_children)
+                return
+            else:
+                print(
+                    "Best move played, but it doesn't lead to the next precomputed node."
+                )
+                return
 
         self.node_index = 0
 
