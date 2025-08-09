@@ -11,10 +11,16 @@ app = typer.Typer(pretty_exceptions_enable=False)
 
 
 @app.command()
-def add_game(game_file: Annotated[Path, typer.Argument()]) -> None:
+def add_game(
+    game_files: Annotated[list[Path], typer.Argument(help="One or more PGN files")],
+) -> None:
     training_file = TrainingFile(DEFAULT_TRAINING_FILE_PATH)
-    game = Game.from_pgn(game_file)
-    training_file.add_game(game)
+
+    for game_file in game_files:
+        print(f"Adding game from {game_file}")
+        game = Game.from_pgn(game_file)
+        training_file.add_game(game)
+
     training_file.save()
 
 
