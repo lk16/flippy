@@ -65,6 +65,7 @@ class TrainingMode(GameMode):
                 self.board = random.choice(valid_grand_children)
                 return
             else:
+                # TODO handle this better
                 print(
                     "Best move played, but it doesn't lead to the next precomputed node."
                 )
