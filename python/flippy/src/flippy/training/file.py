@@ -5,13 +5,16 @@ import random
 from pathlib import Path
 from typing import Any
 
+from flippy import PROJECT_ROOT
 from flippy.book.api_client import APIClient
 from flippy.config import PgnConfig
 from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxEvaluations, EdaxRequest
-from flippy.othello.board import BLACK, Board
+from flippy.othello.board import BLACK, WHITE, Board, opponent
 from flippy.othello.game import Game
 from flippy.othello.position import NormalizedPosition
+
+DEFAULT_TRAINING_FILE_PATH = PROJECT_ROOT / ".flippy/training.json"
 
 
 def get_learn_level(disc_count: int) -> int:
@@ -113,7 +116,7 @@ class TrainingFile:
             key, value = node.to_json()
             data["white"][key] = value
 
-        self.file.write_text(json.dumps(data))
+        self.file.write_text(json.dumps(data, indent=4, sort_keys=True))
 
     def add_board(self, board: Board) -> None:
         position = board.position.normalized()
@@ -203,3 +206,38 @@ class TrainingFile:
         min_score = min(evaluation.score for evaluation in evaluations.values())
 
         return evaluations[next_position].score == min_score
+
+    def print_ascii_art(self) -> None:
+        for color, nodes in [(BLACK, self.black_nodes), (WHITE, self.white_nodes)]:
+            for node in nodes.values():
+                print(f"Node normalized: {node.position.to_api()}")
+
+                print("Board:")
+                board = Board(node.position.to_position(), color)
+                board.show()
+
+                print("Best move:")
+                children = board.get_children()
+
+                # Best move is normalized, so we need to rotate the board it to show it.
+                for rot in range(8):
+                    child_position = node.best_move.to_position().rotated(rot)
+                    child_board = Board(child_position, opponent(color))
+
+                    if child_board in children:
+                        child_board.show()
+                        break
+
+                if node.alternative_moves:
+                    print(f"Found {len(node.alternative_moves)} alternative moves.")
+
+                print()
+
+        print("---")
+        print()
+
+        print(f"Black nodes: {len(self.black_nodes)}")
+        print(f"White nodes: {len(self.white_nodes)}")
+
+        total_nodes = len(self.black_nodes) + len(self.white_nodes)
+        print("Total nodes:", total_nodes)
