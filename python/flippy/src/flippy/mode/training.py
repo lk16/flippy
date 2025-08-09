@@ -20,6 +20,7 @@ class TrainingMode(GameMode):
         self.exercise_index = 0
         self.node_index = 0
         self.board = self.get_new_exercise_board()
+        self.wrong_moves: set[int] = set()
 
     def get_new_exercise_board(self) -> Board:
         exercise = self.exercises[self.exercise_index]
@@ -38,15 +39,13 @@ class TrainingMode(GameMode):
         try:
             child = board.do_move(move)
         except InvalidMove:
-            # TODO show wrong moves played
-            print("Invalid move")  # TODO remove
             return
 
         exercise = self.exercises[self.exercise_index]
         node = exercise.nodes[self.node_index]
 
         if child.position.normalized() not in node.best_moves:
-            print("Wrong move")  # TODO remove
+            self.wrong_moves.add(move)
             return
 
         if self.node_index < len(exercise.nodes) - 1:
@@ -61,6 +60,7 @@ class TrainingMode(GameMode):
                     valid_grand_children.append(grand_child)
 
             if valid_grand_children:
+                self.wrong_moves.clear()
                 self.node_index += 1
                 self.board = random.choice(valid_grand_children)
                 return
@@ -77,7 +77,10 @@ class TrainingMode(GameMode):
         else:
             self.exercise_index = 0
 
+        self.wrong_moves.clear()
         self.board = self.get_new_exercise_board()
 
     def get_ui_details(self) -> dict[str, Any]:
-        return {}
+        return {
+            "wrong_moves": self.wrong_moves,
+        }
