@@ -38,14 +38,19 @@ class TrainingNode:
     def __init__(
         self,
         position: NormalizedPosition,
+        rotations: set[int],
         best_move: NormalizedPosition,
         alternative_moves: set[NormalizedPosition],
     ) -> None:
+        assert all(r in range(8) for r in rotations)
+        assert len(rotations) > 0
+
         children = position.to_position().get_normalized_children()
         assert best_move in children
         assert alternative_moves.issubset(children)
         assert best_move not in alternative_moves
 
+        self.rotations = rotations
         self.position = position
         self.best_move = best_move
         self.alternative_moves = alternative_moves
@@ -53,8 +58,11 @@ class TrainingNode:
     @classmethod
     def from_json(cls, key: str, value: dict[str, Any]) -> TrainingNode:
         position = key
+        rotations = set(value["rotations"])
         best_move = value["best_move"]
         alternative_moves = value["alternative_moves"]
+
+        assert all(isinstance(r, int) for r in rotations)
 
         assert isinstance(position, str)
         assert isinstance(best_move, str)
@@ -63,6 +71,7 @@ class TrainingNode:
 
         return cls(
             position=NormalizedPosition.from_api(position),
+            rotations=rotations,
             best_move=NormalizedPosition.from_api(best_move),
             alternative_moves=set(
                 NormalizedPosition.from_api(move) for move in alternative_moves
@@ -73,6 +82,7 @@ class TrainingNode:
         return (
             self.position.to_api(),
             {
+                "rotations": sorted(self.rotations),
                 "best_move": self.best_move.to_api(),
                 "alternative_moves": sorted(
                     move.to_api() for move in self.alternative_moves
@@ -166,9 +176,52 @@ class TrainingFile:
 
         nodes[position] = TrainingNode(
             position=position,
+            rotations=self._get_normalized_position_rotations(board.turn, position),
             best_move=best_move,
             alternative_moves=set(),
         )
+
+    def _get_normalized_position_rotations(
+        self, color: int, position: NormalizedPosition
+    ) -> set[int]:
+        start_normalized = Position.start().normalized()
+        first_move_normalized = Position.start().do_move(19).normalized()
+
+        if position == start_normalized:
+            return {0}
+
+        if position == first_move_normalized:
+            return {
+                child.normalize()[1]
+                for child in start_normalized.to_position().get_children()
+            }
+
+        if color == BLACK:
+            nodes = self.black_nodes
+        else:
+            nodes = self.white_nodes
+
+        potential_grand_parents: list[Board] = []
+        grand_parent_disc_count = position.to_position().count_discs() - 2
+
+        for node in nodes.values():
+            if node.position.to_position().count_discs() == grand_parent_disc_count:
+                for rotation in node.rotations:
+                    grand_parent_position = node.position.to_position().rotated(
+                        rotation
+                    )
+                    potential_grand_parents.append(Board(grand_parent_position, color))
+
+        rotations: set[int] = set()
+
+        for potential_grand_parent in potential_grand_parents:
+            for potential_parent in potential_grand_parent.get_children():
+                for potential_rotated in potential_parent.get_children():
+                    if potential_rotated.position.normalized() == position:
+                        rotation = potential_rotated.position.normalize()[1]
+                        rotations.add(rotation)
+
+        return rotations
 
     def add_game(self, game: Game) -> None:
         all_usernames = PgnConfig().all_usernames
@@ -250,6 +303,8 @@ class TrainingFile:
 
     def get_exercises(self) -> list[Exercise]:
         black_root = Position.start().normalized()
+
+        # TODO it seems white_root is not found
         white_root = Position.start().do_move(19).normalized()
 
         def _get_exercises(color: int, node: TrainingNode) -> list[Exercise]:

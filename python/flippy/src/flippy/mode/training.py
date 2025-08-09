@@ -23,12 +23,9 @@ class TrainingMode(GameMode):
 
     def get_new_exercise_board(self) -> Board:
         exercise = self.exercises[self.exercise_index]
-
-        position = (
-            exercise.nodes[self.node_index]
-            .position.to_position()
-            .rotated(random.randint(0, 7))
-        )
+        node = exercise.nodes[self.node_index]
+        rotation = random.choice(list(node.rotations))
+        position = node.position.to_position().rotated(rotation)
 
         return Board(position, exercise.color)
 
