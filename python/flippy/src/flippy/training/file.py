@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from flippy import PROJECT_ROOT
+from flippy.book import MAX_SAVABLE_DISCS
 from flippy.book.api_client import APIClient
 from flippy.config import PgnConfig
 from flippy.edax.process import start_evaluation_sync
@@ -32,6 +33,10 @@ def get_learn_level(disc_count: int) -> int:
         return 34
 
     return 32
+
+
+class TooManyDiscsError(Exception):
+    pass
 
 
 class TrainingNode:
@@ -138,12 +143,18 @@ class TrainingFile:
         evaluations = self.api_client.lookup_positions(children)
         child_disc_count = board.count_discs() + 1
 
-        edax_request = EdaxRequest(
-            positions=evaluations.get_missing_children(board.position),
-            level=get_learn_level(child_disc_count),
-            source=None,
-        )
+        if child_disc_count > MAX_SAVABLE_DISCS:
+            raise TooManyDiscsError
 
+        missing_children = evaluations.get_missing_children(board.position)
+        level = get_learn_level(child_disc_count)
+
+        if missing_children:
+            print(
+                f"Running edax for {len(missing_children)} positions with {child_disc_count} discs at level {level}"
+            )
+
+        edax_request = EdaxRequest(positions=missing_children, level=level, source=None)
         new_evaluations: EdaxEvaluations = start_evaluation_sync(edax_request)
         self.api_client.save_learned_evaluations(new_evaluations.values())
         evaluations.update(new_evaluations)
@@ -223,7 +234,13 @@ class TrainingFile:
             if board.turn != color:
                 continue
 
-            self.add_board(board)
+            try:
+                self.add_board(board)
+            except TooManyDiscsError:
+                print(
+                    f"Skipping board because child has {board.count_discs() + 1} discs."
+                )
+                break
 
             if not self.is_best_move(board, next_board):
                 break
