@@ -10,6 +10,7 @@ from flippy.book.api_client import APIClient
 from flippy.config import PgnConfig
 from flippy.edax.process import start_evaluation_sync
 from flippy.edax.types import EdaxEvaluations, EdaxRequest
+from flippy.othello.bitset import REVERSE_ROTATION
 from flippy.othello.board import BLACK, WHITE, Board, opponent
 from flippy.othello.game import Game
 from flippy.othello.position import NormalizedPosition, Position
@@ -192,7 +193,7 @@ class TrainingFile:
 
         if position == first_move_normalized:
             return {
-                child.normalize()[1]
+                REVERSE_ROTATION[child.normalize()[1]]
                 for child in start_normalized.to_position().get_children()
             }
 
@@ -219,7 +220,10 @@ class TrainingFile:
                 for potential_rotated in potential_parent.get_children():
                     if potential_rotated.position.normalized() == position:
                         rotation = potential_rotated.position.normalize()[1]
-                        rotations.add(rotation)
+                        rotations.add(REVERSE_ROTATION[rotation])
+
+        if not rotations:
+            raise ValueError(f"No rotations found for {position} with color {color}.")
 
         return rotations
 
