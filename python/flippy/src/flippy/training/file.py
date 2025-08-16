@@ -84,19 +84,22 @@ class Training:
             reverse=True,
         )
 
-        def weight(pos: NormalizedPosition) -> float:
-            score_weight = 500 * (0.2 ** scores.index(-self.evaluations[pos].score))
+        def get_score_weight(pos: NormalizedPosition) -> float:
+            return 500 * (0.2 ** scores.index(-self.evaluations[pos].score))
 
+        def get_rating_weight(pos: NormalizedPosition) -> float:
             rating = self.positions.get(pos, DEFAULT_RATING)
+            return 5 * (rating - DEFAULT_RATING)
 
-            rating_weight = rating - DEFAULT_RATING
-
+        def get_weight(pos: NormalizedPosition) -> float:
+            score_weight = get_score_weight(pos)
+            rating_weight = get_rating_weight(pos)
             return min(500, max(10, score_weight + rating_weight))
 
         # Weight probabilities by rating - higher rated positions are more likely
-        total_rating = sum([weight(pos) for pos in child_ratings.keys()])
+        total_rating = sum([get_weight(pos) for pos in child_ratings.keys()])
         normalized_weights = [
-            weight(pos) / total_rating for pos in child_ratings.keys()
+            get_weight(pos) / total_rating for pos in child_ratings.keys()
         ]
 
         # Print table header
@@ -113,10 +116,10 @@ class Training:
             pos_str = pos.to_api()
             rating_str = str(rating) if rating != DEFAULT_RATING else "-"
             eval_str = str(-self.evaluations[pos].score)
-            score_w = 500 * (0.3 ** scores.index(-self.evaluations[pos].score))
-            rating_w = rating - DEFAULT_RATING
-            total_w = min(500, max(10, score_w + rating_w))
-            chance = (weight(pos) / total_rating) * 100
+            score_w = get_score_weight(pos)
+            rating_w = get_rating_weight(pos)
+            total_w = get_weight(pos)
+            chance = (get_weight(pos) / total_rating) * 100
             position_details.append(
                 (pos_str, rating_str, eval_str, score_w, rating_w, total_w, chance)
             )
