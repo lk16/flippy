@@ -23,6 +23,7 @@ class Training:
     def __init__(self, score_path: Path) -> None:
         self.score_path = score_path
         self.api_client = APIClient()
+        self.evaluations = EdaxEvaluations()
 
         try:
             data = json.loads(score_path.read_text())
@@ -76,12 +77,15 @@ class Training:
         if not child_ratings:
             return None
 
-        evaluations = self._get_child_evaluations(board)
+        self._load_child_evaluations(board)
 
-        scores = sorted(set(-e.score for e in evaluations.values()), reverse=True)
+        scores = sorted(
+            set(-self.evaluations[child].score for child in normalized_children),
+            reverse=True,
+        )
 
         def weight(pos: NormalizedPosition) -> float:
-            score_weight = 500 * (0.2 ** scores.index(-evaluations[pos].score))
+            score_weight = 500 * (0.2 ** scores.index(-self.evaluations[pos].score))
 
             rating = self.positions.get(pos, DEFAULT_RATING)
 
@@ -108,8 +112,8 @@ class Training:
         for pos, rating in child_ratings.items():
             pos_str = pos.to_api()
             rating_str = str(rating) if rating != DEFAULT_RATING else "-"
-            eval_str = str(-evaluations[pos].score)
-            score_w = 500 * (0.3 ** scores.index(-evaluations[pos].score))
+            eval_str = str(-self.evaluations[pos].score)
+            score_w = 500 * (0.3 ** scores.index(-self.evaluations[pos].score))
             rating_w = rating - DEFAULT_RATING
             total_w = min(500, max(10, score_w + rating_w))
             chance = (weight(pos) / total_rating) * 100
@@ -143,9 +147,13 @@ class Training:
 
         raise ValueError("No rotation matches child position")  # Should never happen.
 
-    def _get_child_evaluations(self, board: Board) -> EdaxEvaluations:
+    def _load_child_evaluations(self, board: Board) -> None:
         children = board.position.get_normalized_children()
-        evaluations = self.api_client.lookup_positions(children)
+
+        missing_children = self.evaluations.get_missing(children)
+
+        if missing_children:
+            self.evaluations.update(self.api_client.lookup_positions(missing_children))
 
         child_disc_count = board.count_discs() + 1
         if child_disc_count > MAX_SAVABLE_DISCS:
@@ -153,7 +161,7 @@ class Training:
                 f"Child with {child_disc_count} discs won't be found or saved in DB."
             )
 
-        missing_children = evaluations.get_missing_children(board.position)
+        missing_children = self.evaluations.get_missing_children(board.position)
 
         # Do not compute missing children all the way, because it takes too long to do during training.
         edax_request = EdaxRequest(
@@ -161,19 +169,17 @@ class Training:
         )
         new_evaluations: EdaxEvaluations = start_evaluation_sync(edax_request)
         self.api_client.save_learned_evaluations(new_evaluations.values())
-        evaluations.update(new_evaluations)
-
-        return evaluations
+        self.evaluations.update(new_evaluations)
 
     def is_best_move(self, board: Board, next_board: Board) -> bool:
-        evaluations = self._get_child_evaluations(board)
+        children = board.position.get_normalized_children()
+
+        self._load_child_evaluations(board)
 
         # Find lowest score for opponent, so best move for us.
-        min_score = min(evaluation.score for evaluation in evaluations.values())
+        min_score = min(self.evaluations[child].score for child in children)
         best_moves: set[NormalizedPosition] = set(
-            evaluation.position.normalized()
-            for evaluation in evaluations.values()
-            if evaluation.score == min_score
+            child for child in children if self.evaluations[child].score == min_score
         )
 
         return next_board.position.normalized() in best_moves
