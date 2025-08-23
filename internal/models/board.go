@@ -78,3 +78,26 @@ func (b Board) GetChildPositions() []Position {
 func (b Board) Equal(other Board) bool {
 	return b.position == other.position && b.turn == other.turn
 }
+
+// GetSquare returns the square at the given index.
+func (b Board) GetSquare(index int) int {
+	mask := uint64(1) << index
+	if b.position.player&mask != 0 {
+		if b.turn == WHITE {
+			return WHITE
+		}
+		return BLACK
+	}
+	if b.position.opponent&mask != 0 {
+		if b.turn == BLACK {
+			return WHITE
+		}
+		return BLACK
+	}
+	return EMPTY
+}
+
+// Turn returns the turn.
+func (b Board) Turn() int {
+	return b.turn
+}
