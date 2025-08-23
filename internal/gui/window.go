@@ -2,6 +2,7 @@ package gui
 
 import (
 	rl "github.com/gen2brain/raylib-go/raylib"
+	"github.com/lk16/flippy/api/internal/gui/modes"
 	"github.com/lk16/flippy/api/internal/models"
 )
 
@@ -15,10 +16,13 @@ const (
 )
 
 type Window struct {
+	mode modes.Mode
 }
 
 func NewWindow() *Window {
-	return &Window{}
+	return &Window{
+		mode: modes.NewGameMode(),
+	}
 }
 
 func (w *Window) Run() {
@@ -30,6 +34,7 @@ func (w *Window) Run() {
 	rl.SetTargetFPS(60)
 
 	for !rl.WindowShouldClose() {
+		w.handleEvents()
 		w.draw()
 	}
 }
@@ -40,7 +45,7 @@ func (w *Window) draw() {
 	backgroundColor := rl.NewColor(0, 128, 0, 255)
 	rl.ClearBackground(backgroundColor)
 
-	board := models.NewBoardStart()
+	board := w.mode.GetBoard()
 
 	for index := range 64 {
 		switch board.GetSquare(index) {
@@ -80,4 +85,35 @@ func (w *Window) drawDisc(index int, color rl.Color) {
 func (w *Window) drawMoveIndicator(index int, color rl.Color) {
 	centerX, centerY := w.getSquareCenter(index)
 	rl.DrawCircle(centerX, centerY, MoveIndicatorRadius, color)
+}
+
+func (w *Window) handleEvents() {
+	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
+		mousePos := rl.GetMousePosition()
+		mouseX := int(mousePos.X)
+		mouseY := int(mousePos.Y)
+
+		squareX := mouseX / SquareSize
+		squareY := mouseY / SquareSize
+
+		if squareX < 0 || squareX >= 8 || squareY < 0 || squareY >= 8 {
+			w.mode.OnClick(rl.MouseLeftButton, mouseX, mouseY)
+			return
+		}
+
+		index := squareX + squareY*8
+		w.mode.OnMove(index)
+		return
+	}
+
+	if rl.IsMouseButtonPressed(rl.MouseRightButton) {
+		mousePos := rl.GetMousePosition()
+		mouseX := int(mousePos.X)
+		mouseY := int(mousePos.Y)
+		w.mode.OnClick(rl.MouseRightButton, mouseX, mouseY)
+	}
+
+	if rl.IsKeyPressed(rl.KeyN) {
+		w.mode.OnKeyPress(rl.KeyN)
+	}
 }

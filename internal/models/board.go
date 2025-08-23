@@ -101,3 +101,8 @@ func (b Board) GetSquare(index int) int {
 func (b Board) Turn() int {
 	return b.turn
 }
+
+// HasMoves checks if the board has moves.
+func (b Board) HasMoves() bool {
+	return b.position.HasMoves()
+}
