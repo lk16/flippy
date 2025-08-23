@@ -1,6 +1,8 @@
 package gui
 
 import (
+	"fmt"
+
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/lk16/flippy/api/internal/gui/modes"
 	"github.com/lk16/flippy/api/internal/models"
@@ -19,10 +21,18 @@ type Window struct {
 	mode modes.Mode
 }
 
-func NewWindow() *Window {
-	return &Window{
-		mode: modes.NewGameMode(),
+func NewWindow(modeName string) (*Window, error) {
+	var mode modes.Mode
+	switch modeName {
+	case "game":
+		mode = modes.NewGame()
+	default:
+		return nil, fmt.Errorf("invalid mode: %s", modeName)
 	}
+
+	return &Window{
+		mode: mode,
+	}, nil
 }
 
 func (w *Window) Run() {

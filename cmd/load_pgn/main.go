@@ -100,7 +100,7 @@ func loadPgn(client *book.APIClient, edaxManager *edax.Manager) error {
 		}
 
 		// Get all normalized positions from the game
-		gamePositions := game.GetNormalizedPositions(true)
+		gamePositions := game.GetNormalizedPositionsWithChildren()
 		for pos := range gamePositions {
 			positions[pos] = struct{}{}
 		}

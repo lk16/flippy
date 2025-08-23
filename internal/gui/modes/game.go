@@ -5,73 +5,43 @@ import (
 	"github.com/lk16/flippy/api/internal/models"
 )
 
-type GameMode struct {
-	// TODO implement with models.Game
-	boards []models.Board
-	index  int
+type Game struct {
+	game *models.Game
 }
 
-var _ Mode = &GameMode{}
+var _ Mode = &Game{}
 
-func NewGameMode() *GameMode {
-	return &GameMode{
-		boards: []models.Board{models.NewBoardStart()},
-		index:  0,
+func NewGame() *Game {
+	return &Game{
+		game: models.NewGame(),
 	}
 }
 
-func (m *GameMode) GetBoard() models.Board {
-	return m.boards[m.index]
+func (m *Game) GetBoard() models.Board {
+	return m.game.LastBoard()
 }
 
-func (m *GameMode) OnMove(index int) {
-	board := m.GetBoard()
-
-	if !board.IsValidMove(index) {
-		return
-	}
-
-	child := board.DoMove(index)
-
-	if !child.HasMoves() {
-		passed := child.DoMove(models.PassMove)
-
-		if passed.HasMoves() {
-			child = passed
-		}
-	}
-
-	m.boards = append(m.boards, child)
-	m.index = len(m.boards) - 1
+func (m *Game) OnMove(index int) {
+	_ = m.game.PushMove(index)
 }
 
-func (m *GameMode) OnClick(button rl.MouseButton, _, _ int) {
+func (m *Game) OnClick(button rl.MouseButton, _, _ int) {
 	if button == rl.MouseRightButton {
-		m.undoMove()
+		m.game.PopMove()
 		return
 	}
 }
 
-func (m *GameMode) OnKeyPress(key int) {
+func (m *Game) OnKeyPress(key int) {
 	if key == rl.KeyN {
 		m.resetBoard()
 	}
 }
 
-func (m *GameMode) GetUIOptions() *UIOPtions {
+func (m *Game) GetUIOptions() *UIOPtions {
 	return nil
 }
 
-func (m *GameMode) resetBoard() {
-	m.boards = []models.Board{models.NewBoardStart()}
-	m.index = 0
-}
-
-func (m *GameMode) undoMove() {
-	if m.index == 0 {
-		return
-	}
-
-	m.index--
-	m.boards = m.boards[:m.index+1]
+func (m *Game) resetBoard() {
+	*m.game = *models.NewGame()
 }

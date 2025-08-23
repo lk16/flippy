@@ -1,9 +1,10 @@
 package models
 
 const (
-	BLACK = -1
+	BLACK = 0
 	WHITE = 1
-	EMPTY = 0
+	EMPTY = 2
+	DRAW  = EMPTY
 )
 
 // Board represents an Othello board with position and turn information.

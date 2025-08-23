@@ -361,16 +361,15 @@ func (p Position) DoMove(move int) Position {
 
 // IsValidMove checks if a move is valid.
 func (p Position) IsValidMove(move int) bool {
-	if move < PassMove || move >= 64 {
-		return false
+	if move == PassMove {
+		return !p.HasMoves()
+	}
+
+	if move < 0 || move >= 64 {
+		panic("IsValidMove: move out of range")
 	}
 
 	validMoves := p.Moves()
-
-	if validMoves == 0 {
-		return move == PassMove
-	}
-
 	return validMoves&(1<<move) != 0
 }
 

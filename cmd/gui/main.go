@@ -1,8 +1,20 @@
 package main
 
-import "github.com/lk16/flippy/api/internal/gui"
+import (
+	"flag"
+	"log"
+
+	"github.com/lk16/flippy/api/internal/gui"
+)
 
 func main() {
-	window := gui.NewWindow()
+	mode := flag.String("mode", "game", "the mode to run")
+	flag.Parse()
+
+	window, err := gui.NewWindow(*mode)
+	if err != nil {
+		log.Fatalf("failed to create window: %v", err)
+	}
+
 	window.Run()
 }
