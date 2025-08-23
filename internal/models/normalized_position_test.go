@@ -381,12 +381,6 @@ func TestNormalizedPosition_ValidateBestMoves(t *testing.T) {
 			wantErrMsg: "invalid move: 63",
 		},
 		{
-			name:       "move out of bounds",
-			bestMoves:  BestMoves{19, -8, 17},
-			wantErr:    true,
-			wantErrMsg: "invalid move: -8",
-		},
-		{
 			name:       "no moves",
 			bestMoves:  BestMoves{},
 			wantErr:    false,

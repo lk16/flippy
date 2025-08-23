@@ -10,6 +10,8 @@ import (
 	"github.com/lk16/flippy/api/internal/config"
 )
 
+// TODO restructure: move these into folder subtree with routers, move othello related types into othello package
+
 // RegisterRequest represents the payload for client registration.
 type RegisterRequest struct {
 	Hostname  string `json:"hostname"`
@@ -60,10 +62,6 @@ type Evaluation struct {
 }
 
 func (e *Evaluation) Validate() error {
-	if !e.Position.IsDBSavable() {
-		return errors.New("position is not savable")
-	}
-
 	if e.Level < config.MinBookLearnLevel {
 		return fmt.Errorf("level is below the minimum learn level of %d", config.MinBookLearnLevel)
 	}
@@ -144,6 +142,10 @@ func (p *EvaluationsPayload) Validate() error {
 	for _, evaluation := range p.Evaluations {
 		if err := evaluation.Validate(); err != nil {
 			return err
+		}
+
+		if !evaluation.Position.IsDBSavable() {
+			return errors.New("position is not db-savable")
 		}
 	}
 

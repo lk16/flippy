@@ -179,3 +179,5 @@ wthor/
 .flippy/
 
 static/flippy_wasm_bg.wasm
+
+cmd/dummy

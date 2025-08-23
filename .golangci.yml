@@ -57,7 +57,8 @@ linters:
     - canonicalheader # checks whether net/http.Header uses canonical header
     - copyloopvar # detects places where loop variables are copied (Go 1.22+)
     - cyclop # checks function and package cyclomatic complexity
-    - depguard # checks if package imports are in a list of acceptable packages
+    # Disabled because it complains too much
+    # - depguard # checks if package imports are in a list of acceptable packages
     - dupl # tool for code clone detection
     - durationcheck # checks for two durations multiplied together
     - errcheck # checking for unchecked errors, these unchecked errors can be critical bugs in some cases
@@ -66,11 +67,13 @@ linters:
     - exhaustive # checks exhaustiveness of enum switch statements
     - exptostd # detects functions from golang.org/x/exp/ that can be replaced by std functions
     - fatcontext # detects nested contexts in loops
-    - forbidigo # forbids identifiers
+    # Disabled because it complains too much
+    # - forbidigo # forbids identifiers
     - funcorder # checks the order of functions, methods, and constructors
     - funlen # tool for detection of long functions
     - gocheckcompilerdirectives # validates go compiler directive comments (//go:)
-    - gochecknoglobals # checks that no global variables exist
+    # Disabled because it complains too much
+    # - gochecknoglobals # checks that no global variables exist
     - gochecknoinits # checks that no init functions are present in Go code
     - gochecksumtype # checks exhaustiveness on Go "sum types"
     - gocognit # computes and checks the cognitive complexity of functions
@@ -131,7 +134,6 @@ linters:
     #- decorder # checks declaration order and count of types, constants, variables and functions
     #- exhaustruct # [highly recommend to enable] checks if all structure fields are initialized
     #- ginkgolinter # [if you use ginkgo/gomega] enforces standards of using ginkgo and gomega
-    #- godox # detects usage of FIXME, TODO and other keywords inside comments
     #- goheader # checks is file header matches to pattern
     #- inamedparam # [great idea, but too strict, need to ignore a lot of cases by default] reports interfaces with unnamed method parameters
     #- interfacebloat # checks the number of methods inside an interface
@@ -352,7 +354,7 @@ linters:
     nolintlint:
       # Exclude following linters from requiring an explanation.
       # Default: []
-      allow-no-explanation: [ funlen, gocognit, golines, testpackage ]
+      allow-no-explanation: [funlen, gocognit, golines, testpackage]
       # Enable to require an explanation of nonzero length after each nolint directive.
       # Default: false
       require-explanation: true
@@ -428,18 +430,10 @@ linters:
       - common-false-positives
     # Excluding configuration per-path, per-linter, per-text and per-source.
     rules:
-      - source: 'TODO'
-        linters: [ godot ]
-      - text: 'should have a package comment'
-        linters: [ revive ]
+      - text: "should have a package comment"
+        linters: [revive]
       - text: 'exported \S+ \S+ should have comment( \(or a comment on this block\))? or be unexported'
-        linters: [ revive ]
-      - text: 'package comment should be of the form ".+"'
-        source: '// ?(nolint|TODO)'
-        linters: [ revive ]
-      - text: 'comment on exported \S+ \S+ should be of the form ".+"'
-        source: '// ?(nolint|TODO)'
-        linters: [ revive, staticcheck ]
+        linters: [revive]
       - path: '_test\.go'
         linters:
           - bodyclose

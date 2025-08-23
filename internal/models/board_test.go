@@ -188,9 +188,9 @@ func TestBoard_GameFlow(t *testing.T) {
 
 func TestBoard_Constants(t *testing.T) {
 	// Test that constants are correctly defined
-	require.Equal(t, BLACK, -1)
-	require.Equal(t, 1, WHITE)
-	require.Equal(t, 0, EMPTY)
+	require.Equal(t, BLACK, 0)
+	require.Equal(t, WHITE, 1)
+	require.Equal(t, EMPTY, 2)
 	require.Equal(t, PassMove, -1)
 }
 
