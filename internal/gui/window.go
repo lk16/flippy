@@ -2,6 +2,7 @@ package gui
 
 import (
 	"fmt"
+	"strconv"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/lk16/flippy/api/internal/gui/modes"
@@ -19,6 +20,17 @@ const (
 
 type Window struct {
 	mode modes.Mode
+}
+
+func TurnToColor(turn int) rl.Color {
+	switch turn {
+	case models.WHITE:
+		return rl.White
+	case models.BLACK:
+		return rl.Black
+	default:
+		panic("invalid turn")
+	}
 }
 
 func NewWindow(modeName string) (*Window, error) {
@@ -58,19 +70,21 @@ func (w *Window) draw() {
 	rl.ClearBackground(backgroundColor)
 
 	board := w.mode.GetBoard()
+	uiOptions := w.mode.GetUIOptions()
 
 	for index := range 64 {
 		switch board.GetSquare(index) {
 		case models.WHITE:
-			w.drawDisc(index, rl.White)
+			w.drawDisc(index, TurnToColor(models.WHITE))
 		case models.BLACK:
-			w.drawDisc(index, rl.Black)
+			w.drawDisc(index, TurnToColor(models.BLACK))
 		case models.EMPTY:
 			if board.IsValidMove(index) {
-				if board.Turn() == models.WHITE {
-					w.drawMoveIndicator(index, rl.White)
+				color := TurnToColor(board.Turn())
+				if eval, ok := uiOptions.Evaluations[index]; ok {
+					w.drawEvaluation(index, eval, color)
 				} else {
-					w.drawMoveIndicator(index, rl.Black)
+					w.drawMoveIndicator(index, color)
 				}
 			}
 		}
@@ -128,4 +142,17 @@ func (w *Window) handleEvents() {
 	if rl.IsKeyPressed(rl.KeyN) {
 		w.mode.OnKeyPress(rl.KeyN)
 	}
+}
+
+func (w *Window) drawEvaluation(index int, evaluation int, color rl.Color) {
+	centerX, centerY := w.getSquareCenter(index)
+
+	fontSize := int32(20)
+
+	text := strconv.Itoa(evaluation)
+	textWidth := rl.MeasureText(text, fontSize)
+	textX := centerX - textWidth/2
+	textY := centerY - fontSize/2
+
+	rl.DrawText(text, textX, textY, fontSize, color)
 }

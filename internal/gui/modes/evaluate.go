@@ -39,5 +39,18 @@ func (m *Evaluate) OnKeyPress(key int) {
 }
 
 func (m *Evaluate) GetUIOptions() *UIOPtions {
-	return nil
+	evaluations := make(map[int]int)
+
+	// TODO compute actual evaluations
+	board := m.GetBoard()
+	moves := board.Position().Moves()
+	for i := range 64 {
+		if moves&(1<<i) != 0 {
+			evaluations[i] = 0
+		}
+	}
+
+	return &UIOPtions{
+		Evaluations: evaluations,
+	}
 }

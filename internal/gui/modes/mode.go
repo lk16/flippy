@@ -6,7 +6,7 @@ import (
 )
 
 type UIOPtions struct {
-	// TODO
+	Evaluations map[int]int
 }
 
 type Mode interface {
