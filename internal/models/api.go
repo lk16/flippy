@@ -59,8 +59,8 @@ type Evaluation struct {
 	BestMoves  BestMoves          `json:"best_moves" db:"best_moves"`
 }
 
-func (e *Evaluation) Validate() error {
-	if !e.Position.IsDBSavable() {
+func (e *Evaluation) Validate(requireDBSavable bool) error {
+	if requireDBSavable && !e.Position.IsDBSavable() {
 		return errors.New("position is not savable")
 	}
 
@@ -142,7 +142,7 @@ func (p *EvaluationsPayload) Validate() error {
 	}
 
 	for _, evaluation := range p.Evaluations {
-		if err := evaluation.Validate(); err != nil {
+		if err := evaluation.Validate(true); err != nil {
 			return err
 		}
 	}

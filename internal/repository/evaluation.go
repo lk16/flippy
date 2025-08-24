@@ -305,7 +305,7 @@ func (repo *EvaluationRepository) getLearnableDiscCounts(ctx context.Context) ([
 	// Find disc counts that have positions needing work, use map[int]bool as set.
 	learnableDiscCountsMap := make(map[int]bool)
 	for _, bookStat := range bookStats {
-		if bookStat.Level < getLearnLevel(bookStat.DiscCount) {
+		if bookStat.Level < GetLearnLevel(bookStat.DiscCount) {
 			learnableDiscCountsMap[bookStat.DiscCount] = true
 		}
 	}
@@ -331,7 +331,7 @@ func (repo *EvaluationRepository) refreshJobCache(ctx context.Context, learnable
 	// Try to find job at different disc counts, starting with the lowest
 	var positionBytes [][]byte
 	for _, dc := range learnableDiscCounts {
-		learnLevel := getLearnLevel(dc)
+		learnLevel := GetLearnLevel(dc)
 		query := `
 			SELECT position
 			FROM edax
@@ -414,7 +414,7 @@ func (repo *EvaluationRepository) tryPopJob(ctx context.Context, clientID string
 
 	job := models.Job{
 		Position: position,
-		Level:    getLearnLevel(position.CountDiscs()),
+		Level:    GetLearnLevel(position.CountDiscs()),
 	}
 
 	clientRepo := NewClientRepositoryFromServices(repo.services)
@@ -457,8 +457,9 @@ func (repo *EvaluationRepository) GetJob(ctx context.Context, clientID string) (
 	return job, nil
 }
 
-// getLearnLevel returns the target level for a given disc count.
-func getLearnLevel(discCount int) int {
+// TODO move this out
+// GetLearnLevel returns the target level for a given disc count.
+func GetLearnLevel(discCount int) int {
 	if discCount <= 9 {
 		return 44
 	}

@@ -1,26 +1,41 @@
 package modes
 
 import (
-	"fmt"
 	"log" // nolint:depguard
 	"sync"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/lk16/flippy/api/internal/book"
 	"github.com/lk16/flippy/api/internal/config"
+	"github.com/lk16/flippy/api/internal/edax"
 	"github.com/lk16/flippy/api/internal/models"
+	"github.com/lk16/flippy/api/internal/repository"
 )
 
 type Evaluate struct {
+	// gameMode is used for storing the game state.
 	gameMode *Game
 
-	// computing is the board whose children are being computed.
-	computing models.Board
-
+	// apiClient is the API client used to lookup positions.
 	apiClient *book.APIClient
 
-	evaluations      map[models.NormalizedPosition]models.Evaluation
-	evaluationsMutex sync.Mutex
+	// cache is a map of normalized positions to evaluations.
+	cache map[models.NormalizedPosition]models.Evaluation
+
+	// cacheMutex is used to protect the cache map.
+	cacheMutex sync.Mutex
+
+	// procs is a list of edax processes.
+	procs []*edax.Process
+
+	// procsMutex is used to protect the procs list.
+	procsMutex sync.Mutex
+
+	// updateChan is a channel used to update the cache.
+	updateChan chan models.Evaluation
+
+	// isFirstFrame is used to know if this is the first frame of the game.
+	isFirstFrame bool
 }
 
 func NewEvaluate() *Evaluate {
@@ -30,14 +45,14 @@ func NewEvaluate() *Evaluate {
 		return nil
 	}
 
-	evaluate := &Evaluate{
-		gameMode:    NewGame(),
-		computing:   models.NewBoardEmpty(),
-		apiClient:   apiClient,
-		evaluations: make(map[models.NormalizedPosition]models.Evaluation),
+	return &Evaluate{
+		gameMode:     NewGame(),
+		apiClient:    apiClient,
+		cache:        make(map[models.NormalizedPosition]models.Evaluation),
+		procs:        []*edax.Process{},
+		updateChan:   make(chan models.Evaluation, 20),
+		isFirstFrame: true,
 	}
-
-	return evaluate
 }
 
 var _ Mode = &Evaluate{}
@@ -48,79 +63,154 @@ func (e *Evaluate) GetBoard() models.Board {
 
 func (e *Evaluate) OnMove(index int) {
 	e.gameMode.OnMove(index)
+	go e.OnBoardChange()
 }
 
 func (e *Evaluate) OnClick(button rl.MouseButton, x, y int) {
 	e.gameMode.OnClick(button, x, y)
+	go e.OnBoardChange()
 }
 
 func (e *Evaluate) OnKeyPress(key int) {
 	e.gameMode.OnKeyPress(key)
+	go e.OnBoardChange()
 }
 
 func (e *Evaluate) OnFrame() {
 	e.gameMode.OnFrame()
-	err := e.ComputeLatestBoard()
-	if err != nil {
-		log.Printf("error computing latest board: %s", err.Error())
+
+	if e.isFirstFrame {
+		go e.OnBoardChange()
+		go e.handleUpdateChan()
+		e.isFirstFrame = false
+	}
+}
+
+func (e *Evaluate) handleUpdateChan() {
+	for update := range e.updateChan {
+		e.cacheMutex.Lock()
+		cachedEval, cacheFound := e.cache[update.Position]
+
+		if !cacheFound || update.Depth > cachedEval.Depth {
+			log.Printf(
+				"updating cache for pos=%s depth=%2d score=%d",
+				update.Position.String(),
+				update.Depth,
+				update.Score,
+			)
+			e.cache[update.Position] = update
+		}
+		e.cacheMutex.Unlock()
 	}
 }
 
 func (e *Evaluate) GetUIOptions() *UIOPtions {
 	evaluations := make(map[int]int)
 
-	// TODO compute actual evaluations
 	board := e.GetBoard()
 	moves := board.Position().Moves()
 
-	e.evaluationsMutex.Lock()
+	e.cacheMutex.Lock()
 	for i := range 64 {
 		if moves&(1<<i) != 0 {
 			child := board.DoMove(i)
-			if eval, ok := e.evaluations[child.Position().Normalized()]; ok {
+			if eval, ok := e.cache[child.Position().Normalized()]; ok {
 				evaluations[i] = -eval.Score
 			}
 		}
 	}
-	e.evaluationsMutex.Unlock()
+	e.cacheMutex.Unlock()
 
 	return &UIOPtions{
 		Evaluations: evaluations,
 	}
 }
 
-func (e *Evaluate) ComputeLatestBoard() error {
-	board := e.GetBoard()
-
-	// If the board is the same as the one we're computing, do nothing.
-	if e.computing == board {
-		return nil
+func (e *Evaluate) killProcs() {
+	e.procsMutex.Lock()
+	for _, proc := range e.procs {
+		err := proc.Kill()
+		if err != nil {
+			log.Printf("error killing process: %s", err.Error())
+		}
 	}
+	e.procs = []*edax.Process{}
+	e.procsMutex.Unlock()
+}
 
-	// TODO from this point on, run in a goroutine
-
-	// TODO kill any running jobs
-
+func (e *Evaluate) getMissingChildren(board models.Board) []models.NormalizedPosition {
 	normalizedChildren := board.GetNormalizedChildren()
 
-	evaluations, err := e.apiClient.LookupPositions(normalizedChildren)
-	if err != nil {
-		return fmt.Errorf("error looking up positions: %w", err)
-	}
+	// TODO handle children without moves
 
-	e.evaluationsMutex.Lock()
-	for _, evaluation := range evaluations {
-		if found, ok := e.evaluations[evaluation.Position]; ok {
-			if found.Depth > evaluation.Depth {
-				continue
-			}
+	var missingChildren []models.NormalizedPosition
+	e.cacheMutex.Lock()
+	for _, child := range normalizedChildren {
+		if _, ok := e.cache[child]; !ok {
+			missingChildren = append(missingChildren, child)
 		}
-		e.evaluations[evaluation.Position] = evaluation
 	}
-	e.evaluationsMutex.Unlock()
+	e.cacheMutex.Unlock()
 
-	// TODO start computation for all that don't have max depth
+	return missingChildren
+}
 
-	e.computing = board
-	return nil
+func (e *Evaluate) lookupAndUpdateCache(positions []models.NormalizedPosition) {
+	if len(positions) == 0 {
+		return
+	}
+
+	evaluations, err := e.apiClient.LookupPositions(positions)
+	if err != nil {
+		log.Printf("error looking up positions: %s", err.Error())
+		return
+	}
+
+	e.cacheMutex.Lock()
+	for _, evaluation := range evaluations {
+		e.cache[evaluation.Position] = evaluation
+	}
+	e.cacheMutex.Unlock()
+}
+
+func (e *Evaluate) startProcs(board models.Board) {
+	learnLevel := repository.GetLearnLevel(board.Position().CountDiscs() + 1)
+	normalizedChildren := board.GetNormalizedChildren()
+
+	evaluationsToCompute := []models.NormalizedPosition{}
+	e.cacheMutex.Lock()
+	for _, child := range normalizedChildren {
+		if eval, ok := e.cache[child]; !ok || eval.Depth < learnLevel {
+			evaluationsToCompute = append(evaluationsToCompute, child)
+		}
+	}
+	e.cacheMutex.Unlock()
+
+	var procs []*edax.Process
+	for _, child := range evaluationsToCompute {
+		job := models.Job{
+			Position: child,
+			Level:    learnLevel,
+		}
+
+		proc := edax.NewProcess()
+		proc.SetEvaluationsChannel(e.updateChan)
+		procs = append(procs, proc)
+		go func() { _, _ = proc.DoJob(job) }()
+	}
+
+	e.procsMutex.Lock()
+	e.procs = procs
+	e.procsMutex.Unlock()
+}
+
+func (e *Evaluate) OnBoardChange() {
+	board := e.GetBoard()
+
+	e.killProcs()
+
+	missingChildren := e.getMissingChildren(board)
+	e.lookupAndUpdateCache(missingChildren)
+
+	e.startProcs(board)
 }
