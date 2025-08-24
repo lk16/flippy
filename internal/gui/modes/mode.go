@@ -24,4 +24,7 @@ type Mode interface {
 
 	// GetUIOptions returns the UI options.
 	GetUIOptions() *UIOPtions
+
+	// OnFrame is called when a frame is drawn.
+	OnFrame()
 }

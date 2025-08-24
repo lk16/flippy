@@ -59,6 +59,7 @@ func (w *Window) Run() {
 
 	for !rl.WindowShouldClose() {
 		w.handleEvents()
+		w.mode.OnFrame()
 		w.draw()
 	}
 }
@@ -147,7 +148,7 @@ func (w *Window) handleEvents() {
 func (w *Window) drawEvaluation(index int, evaluation int, color rl.Color) {
 	centerX, centerY := w.getSquareCenter(index)
 
-	fontSize := int32(20)
+	fontSize := int32(30)
 
 	text := strconv.Itoa(evaluation)
 	textWidth := rl.MeasureText(text, fontSize)

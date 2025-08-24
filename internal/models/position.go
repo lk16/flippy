@@ -446,3 +446,25 @@ func (p Position) GetChildren() []Position {
 
 	return children
 }
+
+// GetNormalizedChildren returns all normalized children for a position.
+func (p Position) GetNormalizedChildren() []NormalizedPosition {
+	children := p.GetChildren()
+	if len(children) == 0 {
+		return nil
+	}
+
+	// Pre-allocate with the worst-case size (all children unique)
+	result := make([]NormalizedPosition, 0, len(children))
+	seen := make(map[NormalizedPosition]bool, len(children))
+
+	for _, child := range children {
+		normalized := child.Normalized()
+		if !seen[normalized] {
+			seen[normalized] = true
+			result = append(result, normalized)
+		}
+	}
+
+	return result
+}

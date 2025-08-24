@@ -21,6 +21,14 @@ func NewBoardStart() Board {
 	}
 }
 
+// NewBoardEmpty creates a new board with an empty position.
+func NewBoardEmpty() Board {
+	return Board{
+		position: NewPositionEmpty(),
+		turn:     BLACK,
+	}
+}
+
 // Position returns the underlying position.
 func (b Board) Position() Position {
 	return b.position
@@ -106,4 +114,9 @@ func (b Board) Turn() int {
 // HasMoves checks if the board has moves.
 func (b Board) HasMoves() bool {
 	return b.position.HasMoves()
+}
+
+// GetNormalizedChildren returns all normalized children for a board.
+func (b Board) GetNormalizedChildren() []NormalizedPosition {
+	return b.position.GetNormalizedChildren()
 }

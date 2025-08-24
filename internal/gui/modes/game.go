@@ -43,3 +43,6 @@ func (m *Game) OnKeyPress(key int) {
 func (m *Game) GetUIOptions() *UIOPtions {
 	return nil
 }
+
+func (m *Game) OnFrame() {
+}
