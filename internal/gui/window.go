@@ -26,6 +26,8 @@ func NewWindow(modeName string) (*Window, error) {
 	switch modeName {
 	case "game":
 		mode = modes.NewGame()
+	case "evaluate":
+		mode = modes.NewEvaluate()
 	default:
 		return nil, fmt.Errorf("invalid mode: %s", modeName)
 	}

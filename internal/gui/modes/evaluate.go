@@ -5,41 +5,39 @@ import (
 	"github.com/lk16/flippy/api/internal/models"
 )
 
-type Game struct {
+type Evaluate struct {
 	game *models.Game
 }
 
-var _ Mode = &Game{}
-
-// TODO add evaluations
-
-func NewGame() *Game {
-	return &Game{
+func NewEvaluate() *Evaluate {
+	return &Evaluate{
 		game: models.NewGame(),
 	}
 }
 
-func (m *Game) GetBoard() models.Board {
+var _ Mode = &Evaluate{}
+
+func (m *Evaluate) GetBoard() models.Board {
 	return m.game.LastBoard()
 }
 
-func (m *Game) OnMove(index int) {
+func (m *Evaluate) OnMove(index int) {
 	_ = m.game.PushMove(index)
 }
 
-func (m *Game) OnClick(button rl.MouseButton, _, _ int) {
+func (m *Evaluate) OnClick(button rl.MouseButton, _, _ int) {
 	if button == rl.MouseRightButton {
 		m.game.PopMove()
 		return
 	}
 }
 
-func (m *Game) OnKeyPress(key int) {
+func (m *Evaluate) OnKeyPress(key int) {
 	if key == rl.KeyN {
 		m.game = models.NewGame()
 	}
 }
 
-func (m *Game) GetUIOptions() *UIOPtions {
+func (m *Evaluate) GetUIOptions() *UIOPtions {
 	return nil
 }
