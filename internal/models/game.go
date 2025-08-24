@@ -184,15 +184,13 @@ func (g *Game) PopMove() {
 		return
 	}
 
-	g.moves = g.moves[:len(g.moves)-1]
-
-	if len(g.moves) == 0 {
-		return
-	}
-
+	poppedMoves := 1
+	// Prevent having a last board without moves.
 	if g.moves[len(g.moves)-1] == PassMove {
-		g.moves = g.moves[:len(g.moves)-1]
+		poppedMoves = 2
 	}
+
+	g.moves = g.moves[:len(g.moves)-poppedMoves]
 }
 
 // GetFilename returns the filename of the game.

@@ -396,9 +396,14 @@ func TestPopMove(t *testing.T) {
 			expectedLen:  2,
 		},
 		{
-			name:         "with pass moves",
+			name:         "with earlier pass moves",
 			initialMoves: []int{44, 29, PassMove, 20},
-			expectedLen:  2, // Should remove both the move and the pass
+			expectedLen:  3,
+		},
+		{
+			name:         "with pass move",
+			initialMoves: []int{44, 29, PassMove},
+			expectedLen:  1, // Should remove the pass move and the move before it
 		},
 	}
 
