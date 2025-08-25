@@ -468,3 +468,26 @@ func (p Position) GetNormalizedChildren() []NormalizedPosition {
 
 	return result
 }
+
+// GetFinalScore returns the final score of the position.
+func (p Position) GetFinalScore() int {
+	meCount := bits.OnesCount64(p.player)
+	oppCount := bits.OnesCount64(p.opponent)
+
+	switch {
+	case meCount > oppCount:
+		return 64 - (2 * oppCount)
+	case oppCount > meCount:
+		return -64 + (2 * meCount)
+	default:
+		return 0
+	}
+}
+
+// Print prints the board to the console. This is used for debugging.
+func (p Position) Print() {
+	lines := p.ASCIIArtLines()
+	for _, line := range lines {
+		fmt.Println(line)
+	}
+}

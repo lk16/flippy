@@ -1,5 +1,7 @@
 package models
 
+import "fmt"
+
 const (
 	BLACK = 0
 	WHITE = 1
@@ -119,4 +121,65 @@ func (b Board) HasMoves() bool {
 // GetNormalizedChildren returns all normalized children for a board.
 func (b Board) GetNormalizedChildren() []NormalizedPosition {
 	return b.position.GetNormalizedChildren()
+}
+
+// GetFinalScore returns the final score of the board.
+func (b Board) GetFinalScore() int {
+	return b.position.GetFinalScore()
+}
+
+// Moves returns the moves for the board.
+func (b Board) Moves() uint64 {
+	return b.position.Moves()
+}
+
+// ASCIIArtLines returns the ascii art lines for the position.
+func (b Board) ASCIIArtLines() []string {
+	moves := b.Moves()
+
+	var black, white uint64
+
+	if b.turn == WHITE {
+		black = b.position.opponent
+		white = b.position.player
+	} else {
+		black = b.position.player
+		white = b.position.opponent
+	}
+	lines := make([]string, MaxY+2)
+
+	lines[0] = "+-a-b-c-d-e-f-g-h-+"
+	for y := range MaxY {
+		line := fmt.Sprintf("%d ", y+1)
+
+		for x := range MaxX {
+			index := (y * MaxX) + x
+			mask := uint64(1 << index)
+
+			switch {
+			case white&mask != 0:
+				line += "○ "
+			case black&mask != 0:
+				line += "● "
+			case moves&mask != 0:
+				line += "· "
+			default:
+				line += "  "
+			}
+		}
+
+		lines[y+1] = line + "|"
+	}
+
+	lines[9] = "+-----------------+"
+
+	return lines
+}
+
+// Print prints the board to the console. This is used for debugging.
+func (b Board) Print() {
+	lines := b.ASCIIArtLines()
+	for _, line := range lines {
+		fmt.Println(line)
+	}
 }

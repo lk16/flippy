@@ -105,22 +105,47 @@ func (e *Evaluate) handleUpdateChan() {
 	}
 }
 
+func (e *Evaluate) getUISquareEvaluation(move int) (int, bool) {
+	e.cacheMutex.Lock()
+	defer e.cacheMutex.Unlock()
+
+	board := e.GetBoard()
+
+	if !board.IsValidMove(move) {
+		return 0, false
+	}
+
+	child := board.DoMove(move)
+
+	if child.HasMoves() {
+		if eval, ok := e.cache[child.Position().Normalized()]; ok {
+			return -eval.Score, true
+		} else {
+			return 0, false
+		}
+	}
+
+	passed := child.DoMove(models.PassMove)
+
+	if passed.HasMoves() {
+		if eval, ok := e.cache[passed.Position().Normalized()]; ok {
+			return eval.Score, true
+		} else {
+			return 0, false
+		}
+	}
+
+	return passed.GetFinalScore(), true
+}
+
 func (e *Evaluate) GetUIOptions() *UIOPtions {
 	evaluations := make(map[int]int)
 
-	board := e.GetBoard()
-	moves := board.Position().Moves()
-
-	e.cacheMutex.Lock()
 	for i := range 64 {
-		if moves&(1<<i) != 0 {
-			child := board.DoMove(i)
-			if eval, ok := e.cache[child.Position().Normalized()]; ok {
-				evaluations[i] = -eval.Score
-			}
+		if score, ok := e.getUISquareEvaluation(i); ok {
+			evaluations[i] = score
 		}
 	}
-	e.cacheMutex.Unlock()
 
 	bestEvaluation := math.MinInt
 	for _, eval := range evaluations {
@@ -147,14 +172,35 @@ func (e *Evaluate) killProcs() {
 	e.procsMutex.Unlock()
 }
 
-func (e *Evaluate) getMissingChildren(board models.Board) []models.NormalizedPosition {
+func (e *Evaluate) getSearchableChildren(board models.Board) []models.NormalizedPosition {
 	normalizedChildren := board.GetNormalizedChildren()
 
-	// TODO handle children without moves
+	searchableChildren := []models.NormalizedPosition{}
+	for _, child := range normalizedChildren {
+		if child.HasMoves() {
+			searchableChildren = append(searchableChildren, child)
+			continue
+		}
+
+		// Check if passing gives a searchable child.
+		passed := child.Position().DoMove(models.PassMove)
+		if passed.HasMoves() {
+			searchableChildren = append(searchableChildren, passed.Normalized())
+		}
+
+		// If neither player has moves, the child is not searchable.
+	}
+
+	return searchableChildren
+}
+
+func (e *Evaluate) getMissingSearchableChildren(board models.Board) []models.NormalizedPosition {
+	searchableChildren := e.getSearchableChildren(board)
 
 	var missingChildren []models.NormalizedPosition
+
 	e.cacheMutex.Lock()
-	for _, child := range normalizedChildren {
+	for _, child := range searchableChildren {
 		if _, ok := e.cache[child]; !ok {
 			missingChildren = append(missingChildren, child)
 		}
@@ -182,13 +228,24 @@ func (e *Evaluate) lookupAndUpdateCache(positions []models.NormalizedPosition) {
 	e.cacheMutex.Unlock()
 }
 
+func (e *Evaluate) getLearnLevel(board models.Board) int {
+	childDiscCount := board.Position().CountDiscs() + 1
+
+	if childDiscCount > config.MaxBookSavableDiscs {
+		return 60
+	}
+
+	return repository.GetLearnLevel(childDiscCount)
+}
+
 func (e *Evaluate) startProcs(board models.Board) {
-	learnLevel := repository.GetLearnLevel(board.Position().CountDiscs() + 1)
-	normalizedChildren := board.GetNormalizedChildren()
+	learnLevel := e.getLearnLevel(board)
+	searchableChildren := e.getSearchableChildren(board)
 
 	evaluationsToCompute := []models.NormalizedPosition{}
+
 	e.cacheMutex.Lock()
-	for _, child := range normalizedChildren {
+	for _, child := range searchableChildren {
 		if eval, ok := e.cache[child]; !ok || eval.Depth < learnLevel {
 			evaluationsToCompute = append(evaluationsToCompute, child)
 		}
@@ -218,7 +275,7 @@ func (e *Evaluate) OnBoardChange() {
 
 	e.killProcs()
 
-	missingChildren := e.getMissingChildren(board)
+	missingChildren := e.getMissingSearchableChildren(board)
 	e.lookupAndUpdateCache(missingChildren)
 
 	e.startProcs(board)
