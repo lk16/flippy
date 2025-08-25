@@ -20,24 +20,29 @@ const (
 	tableBorder = "------+-----+--------------+-------------+----------+---------------------"
 )
 
-type Manager struct {
-	level  int
-	cmd    *exec.Cmd
-	cfg    *config.EdaxConfig
-	stdin  io.WriteCloser
-	stdout io.ReadCloser
+type Process struct {
+	level       int
+	cmd         *exec.Cmd
+	cfg         *config.EdaxConfig
+	stdin       io.WriteCloser
+	stdout      io.ReadCloser
+	evaluations chan<- models.Evaluation
 }
 
-func NewManager() *Manager {
+func NewProcess() *Process {
 	cfg := config.LoadEdaxConfig()
 
-	return &Manager{
+	return &Process{
 		level: 0,
 		cfg:   cfg,
 	}
 }
 
-func (m *Manager) Restart() error {
+func (m *Process) SetEvaluationsChannel(evaluations chan<- models.Evaluation) {
+	m.evaluations = evaluations
+}
+
+func (m *Process) Restart() error {
 	slog.Debug("Restarting Edax")
 
 	if m.cmd != nil {
@@ -78,15 +83,15 @@ func (m *Manager) Restart() error {
 	return nil
 }
 
-func (m *Manager) ParseOutput(reader *bufio.Reader) (string, error) {
+func (m *Process) ParseOutput(reader *bufio.Reader, job models.Job, startTime time.Time) (string, error) {
 	lines := []string{}
 	tableBorderLineCount := 0
-	evalLine := ""
+	finalEvalLine := ""
 
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			return "", fmt.Errorf("error reading from stdout: %w", err)
@@ -98,17 +103,27 @@ func (m *Manager) ParseOutput(reader *bufio.Reader) (string, error) {
 			tableBorderLineCount++
 		}
 
+		if m.evaluations != nil {
+			var eval *models.JobResult
+			eval, err = m.parseEvaluationLine(line, job, startTime, false)
+			if err != nil {
+				slog.Error("failed to parse evaluation line", "line", line, "error", err)
+				continue
+			}
+			m.evaluations <- eval.Evaluation
+		}
+
 		if tableBorderLineCount == 2 {
-			evalLine = lines[len(lines)-3]
-			slog.Debug("Evaluation line", "line", evalLine)
+			finalEvalLine = lines[len(lines)-3]
+			slog.Debug("Final Evaluation line", "line", finalEvalLine)
 			break
 		}
 	}
 
-	return evalLine, nil
+	return finalEvalLine, nil
 }
 
-func (m *Manager) DoJob(job models.Job) (*models.JobResult, error) {
+func (m *Process) DoJob(job models.Job) (*models.JobResult, error) {
 	if err := m.SetLevel(job.Level); err != nil {
 		return nil, fmt.Errorf("failed to set Edax level: %w", err)
 	}
@@ -123,12 +138,12 @@ func (m *Manager) DoJob(job models.Job) (*models.JobResult, error) {
 	}
 
 	reader := bufio.NewReader(m.stdout)
-	evalLine, err := m.ParseOutput(reader)
+	finalEvalLine, err := m.ParseOutput(reader, job, startTime)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse output: %w", err)
 	}
 
-	result, err := m.parseEvaluationLine(evalLine, job, startTime)
+	result, err := m.parseEvaluationLine(finalEvalLine, job, startTime, true)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +151,7 @@ func (m *Manager) DoJob(job models.Job) (*models.JobResult, error) {
 	return result, nil
 }
 
-func (m *Manager) SetLevel(level int) error {
+func (m *Process) SetLevel(level int) error {
 	if level == 0 {
 		panic("Attempt to set Edax level to 0")
 	}
@@ -155,7 +170,12 @@ func (m *Manager) SetLevel(level int) error {
 	return nil
 }
 
-func (m *Manager) parseEvaluationLine(line string, job models.Job, startTime time.Time) (*models.JobResult, error) {
+func (m *Process) parseEvaluationLine(
+	line string,
+	job models.Job,
+	startTime time.Time,
+	requireDBSavable bool,
+) (*models.JobResult, error) {
 	if line == "" {
 		return nil, errors.New("empty evaluation line")
 	}
@@ -214,7 +234,7 @@ func (m *Manager) parseEvaluationLine(line string, job models.Job, startTime tim
 		BestMoves:  bestMoves,
 	}
 
-	if err = evaluation.Validate(); err != nil {
+	if err = evaluation.Validate(requireDBSavable); err != nil {
 		return nil, fmt.Errorf("invalid evaluation: %w", err)
 	}
 
@@ -226,4 +246,16 @@ func (m *Manager) parseEvaluationLine(line string, job models.Job, startTime tim
 	slog.Debug("Edax result", "result", result)
 
 	return result, nil
+}
+
+func (m *Process) Kill() error {
+	if m.cmd == nil {
+		return nil
+	}
+
+	if err := m.cmd.Process.Kill(); err != nil {
+		return fmt.Errorf("failed to kill Edax process: %w", err)
+	}
+
+	return nil
 }

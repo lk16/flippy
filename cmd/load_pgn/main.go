@@ -41,7 +41,7 @@ func main() {
 	}
 
 	// Create Edax manager
-	edaxManager := edax.NewManager()
+	edaxManager := edax.NewProcess()
 
 	// Load PGN files
 	if err = loadPgn(client, edaxManager); err != nil {
@@ -50,7 +50,7 @@ func main() {
 	}
 }
 
-func loadPgn(client *book.APIClient, edaxManager *edax.Manager) error {
+func loadPgn(client *book.APIClient, edaxManager *edax.Process) error {
 	// Get PGN target folder from environment
 	targetFolder := os.Getenv("FLIPPY_PGN_TARGET_FOLDER")
 	if targetFolder == "" {
@@ -100,7 +100,7 @@ func loadPgn(client *book.APIClient, edaxManager *edax.Manager) error {
 		}
 
 		// Get all normalized positions from the game
-		gamePositions := game.GetNormalizedPositions(true)
+		gamePositions := game.GetNormalizedPositionsWithChildren()
 		for pos := range gamePositions {
 			positions[pos] = struct{}{}
 		}
@@ -212,7 +212,7 @@ func savePgnState(lastReadPgn string) error {
 func learnNewPositions(
 	positions map[models.NormalizedPosition]struct{},
 	client *book.APIClient,
-	edaxManager *edax.Manager,
+	edaxManager *edax.Process,
 ) error {
 	// Filter positions that are DB savable
 	pgnPositions := filterDBSavablePositions(positions)
@@ -293,7 +293,7 @@ func findPositionsToLearn(
 func processPositionsInChunks(
 	learnPositions []models.NormalizedPosition,
 	client *book.APIClient,
-	edaxManager *edax.Manager,
+	edaxManager *edax.Process,
 ) error {
 	totalSeconds := 0.0
 
@@ -338,7 +338,7 @@ func processPositionsInChunks(
 	return nil
 }
 
-func evaluateChunk(chunk []models.NormalizedPosition, edaxManager *edax.Manager) ([]models.Evaluation, float64, error) {
+func evaluateChunk(chunk []models.NormalizedPosition, edaxManager *edax.Process) ([]models.Evaluation, float64, error) {
 	evaluations := make([]models.Evaluation, 0, len(chunk))
 
 	before := time.Now()

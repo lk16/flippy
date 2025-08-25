@@ -1,9 +1,12 @@
 package models
 
+import "fmt"
+
 const (
-	BLACK = -1
+	BLACK = 0
 	WHITE = 1
-	EMPTY = 0
+	EMPTY = 2
+	DRAW  = EMPTY
 )
 
 // Board represents an Othello board with position and turn information.
@@ -16,6 +19,14 @@ type Board struct {
 func NewBoardStart() Board {
 	return Board{
 		position: NewPositionStart(),
+		turn:     BLACK,
+	}
+}
+
+// NewBoardEmpty creates a new board with an empty position.
+func NewBoardEmpty() Board {
+	return Board{
+		position: NewPositionEmpty(),
 		turn:     BLACK,
 	}
 }
@@ -77,4 +88,98 @@ func (b Board) GetChildPositions() []Position {
 // Equal checks if two boards are equal.
 func (b Board) Equal(other Board) bool {
 	return b.position == other.position && b.turn == other.turn
+}
+
+// GetSquare returns the square at the given index.
+func (b Board) GetSquare(index int) int {
+	mask := uint64(1) << index
+	if b.position.player&mask != 0 {
+		if b.turn == WHITE {
+			return WHITE
+		}
+		return BLACK
+	}
+	if b.position.opponent&mask != 0 {
+		if b.turn == BLACK {
+			return WHITE
+		}
+		return BLACK
+	}
+	return EMPTY
+}
+
+// Turn returns the turn.
+func (b Board) Turn() int {
+	return b.turn
+}
+
+// HasMoves checks if the board has moves.
+func (b Board) HasMoves() bool {
+	return b.position.HasMoves()
+}
+
+// GetNormalizedChildren returns all normalized children for a board.
+func (b Board) GetNormalizedChildren() []NormalizedPosition {
+	return b.position.GetNormalizedChildren()
+}
+
+// GetFinalScore returns the final score of the board.
+func (b Board) GetFinalScore() int {
+	return b.position.GetFinalScore()
+}
+
+// Moves returns the moves for the board.
+func (b Board) Moves() uint64 {
+	return b.position.Moves()
+}
+
+// ASCIIArtLines returns the ascii art lines for the position.
+func (b Board) ASCIIArtLines() []string {
+	moves := b.Moves()
+
+	var black, white uint64
+
+	if b.turn == WHITE {
+		black = b.position.opponent
+		white = b.position.player
+	} else {
+		black = b.position.player
+		white = b.position.opponent
+	}
+	lines := make([]string, MaxY+2)
+
+	lines[0] = "+-a-b-c-d-e-f-g-h-+"
+	for y := range MaxY {
+		line := fmt.Sprintf("%d ", y+1)
+
+		for x := range MaxX {
+			index := (y * MaxX) + x
+			mask := uint64(1 << index)
+
+			switch {
+			case white&mask != 0:
+				line += "○ "
+			case black&mask != 0:
+				line += "● "
+			case moves&mask != 0:
+				line += "· "
+			default:
+				line += "  "
+			}
+		}
+
+		lines[y+1] = line + "|"
+	}
+
+	lines[9] = "+-----------------+"
+
+	return lines
+}
+
+// Print prints the board to the console. This is used for debugging.
+func (b Board) Print() {
+	lines := b.ASCIIArtLines()
+	for _, line := range lines {
+		fmt.Println(line)
+	}
 }

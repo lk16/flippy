@@ -34,14 +34,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	edaxManager := edax.NewManager()
+	edaxManager := edax.NewProcess()
 
 	for discs := minDiscs; discs <= *discCount; discs++ {
 		checkDiscCount(discs, client, edaxManager)
 	}
 }
 
-func checkDiscCount(discCount int, client *book.APIClient, edaxManager *edax.Manager) {
+func checkDiscCount(discCount int, client *book.APIClient, edaxManager *edax.Process) {
 	// Generate all possible allPositions for this disc count
 	allPositions := generateAllPositions(discCount)
 
@@ -159,7 +159,7 @@ func computeMissingPositions(
 	discCount int,
 	positions []models.NormalizedPosition,
 	level int,
-	edaxManager *edax.Manager,
+	edaxManager *edax.Process,
 	client *book.APIClient,
 ) error {
 	evaluations := make([]models.Evaluation, 0)

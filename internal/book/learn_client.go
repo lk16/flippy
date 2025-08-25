@@ -45,7 +45,7 @@ func (c *LearnClient) heartbeatLoop() {
 func (c *LearnClient) doJobsLoop() {
 	jobCount := 0
 	totalJobTimeSec := 0.0
-	edaxManager := edax.NewManager()
+	edaxManager := edax.NewProcess()
 	for {
 		job, err := c.apiClient.GetJob()
 		if err != nil {
