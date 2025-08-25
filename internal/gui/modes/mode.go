@@ -6,7 +6,11 @@ import (
 )
 
 type UIOPtions struct {
+	// Evaluations is a map of index to evaluation.
 	Evaluations map[int]int
+
+	// BestEvaluation is the score of the best evaluation.
+	BestEvaluation int
 }
 
 type Mode interface {

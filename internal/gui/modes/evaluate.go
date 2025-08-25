@@ -2,6 +2,7 @@ package modes
 
 import (
 	"log" // nolint:depguard
+	"math"
 	"sync"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -121,8 +122,16 @@ func (e *Evaluate) GetUIOptions() *UIOPtions {
 	}
 	e.cacheMutex.Unlock()
 
+	bestEvaluation := math.MinInt
+	for _, eval := range evaluations {
+		if eval > bestEvaluation {
+			bestEvaluation = eval
+		}
+	}
+
 	return &UIOPtions{
-		Evaluations: evaluations,
+		Evaluations:    evaluations,
+		BestEvaluation: bestEvaluation,
 	}
 }
 

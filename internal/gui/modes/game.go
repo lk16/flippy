@@ -41,7 +41,9 @@ func (m *Game) OnKeyPress(key int) {
 }
 
 func (m *Game) GetUIOptions() *UIOPtions {
-	return nil
+	return &UIOPtions{
+		Evaluations: make(map[int]int),
+	}
 }
 
 func (m *Game) OnFrame() {

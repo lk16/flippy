@@ -84,6 +84,9 @@ func (w *Window) draw() {
 				color := TurnToColor(board.Turn())
 				if eval, ok := uiOptions.Evaluations[index]; ok {
 					w.drawEvaluation(index, eval, color)
+					if eval == uiOptions.BestEvaluation {
+						w.drawBestEvaluationIndicator(index, color)
+					}
 				} else {
 					w.drawMoveIndicator(index, color)
 				}
@@ -156,4 +159,10 @@ func (w *Window) drawEvaluation(index int, evaluation int, color rl.Color) {
 	textY := centerY - fontSize/2
 
 	rl.DrawText(text, textX, textY, fontSize, color)
+}
+
+func (w *Window) drawBestEvaluationIndicator(index int, color rl.Color) {
+	centerX, centerY := w.getSquareCenter(index)
+	center := rl.Vector2{X: float32(centerX), Y: float32(centerY)}
+	rl.DrawRing(center, DiscRadius-1, DiscRadius, 0, 360, 40, color)
 }
