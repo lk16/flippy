@@ -279,4 +279,30 @@ func (e *Evaluate) OnBoardChange() {
 	e.lookupAndUpdateCache(missingChildren)
 
 	e.startProcs(board)
+
+	e.cacheGrandchildren(board)
+}
+
+func (e *Evaluate) cacheGrandchildren(board models.Board) {
+	children := board.GetChildren()
+
+	if len(children) == 0 {
+		children = board.DoMove(models.PassMove).GetChildren()
+	}
+
+	var grandchildren []models.NormalizedPosition
+	seen := make(map[models.NormalizedPosition]bool)
+
+	for _, child := range children {
+		for _, grandchild := range child.GetNormalizedChildren() {
+			if seen[grandchild] {
+				continue
+			}
+			seen[grandchild] = true
+			grandchildren = append(grandchildren, grandchild)
+		}
+	}
+
+	log.Printf("caching %d grandchildren", len(grandchildren))
+	e.lookupAndUpdateCache(grandchildren)
 }
