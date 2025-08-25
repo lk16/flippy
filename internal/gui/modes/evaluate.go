@@ -290,7 +290,7 @@ func (e *Evaluate) cacheGrandchildren(board models.Board) {
 		children = board.DoMove(models.PassMove).GetChildren()
 	}
 
-	var grandchildren []models.NormalizedPosition
+	var allGrandchildren []models.NormalizedPosition
 	seen := make(map[models.NormalizedPosition]bool)
 
 	for _, child := range children {
@@ -299,10 +299,19 @@ func (e *Evaluate) cacheGrandchildren(board models.Board) {
 				continue
 			}
 			seen[grandchild] = true
-			grandchildren = append(grandchildren, grandchild)
+			allGrandchildren = append(allGrandchildren, grandchild)
 		}
 	}
 
-	log.Printf("caching %d grandchildren", len(grandchildren))
-	e.lookupAndUpdateCache(grandchildren)
+	var missingGrandchildren []models.NormalizedPosition
+
+	e.cacheMutex.Lock()
+	for _, grandchild := range allGrandchildren {
+		if _, ok := e.cache[grandchild]; !ok {
+			missingGrandchildren = append(missingGrandchildren, grandchild)
+		}
+	}
+	e.cacheMutex.Unlock()
+
+	e.lookupAndUpdateCache(missingGrandchildren)
 }
