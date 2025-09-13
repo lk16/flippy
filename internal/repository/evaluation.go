@@ -83,6 +83,8 @@ func (repo *EvaluationRepository) SubmitEvaluations(ctx context.Context, payload
 		)
 	}
 
+	// TODO remove edax.level from DB
+
 	// Add positions array as first parameter
 	params = append([]interface{}{pq.Array(positionBytesList)}, params...)
 
@@ -101,7 +103,7 @@ func (repo *EvaluationRepository) SubmitEvaluations(ctx context.Context, payload
 			confidence = EXCLUDED.confidence,
 			score = EXCLUDED.score,
 			best_moves = EXCLUDED.best_moves
-		WHERE EXCLUDED.level > edax.level
+		WHERE EXCLUDED.level > edax.level OR EXCLUDED.depth > edax.depth
 		RETURNING
 			(SELECT level FROM current_levels WHERE position = edax.position) as old_level,
 			level as new_level,
