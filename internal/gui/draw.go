@@ -4,7 +4,7 @@ import (
 	"strconv"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
-	"github.com/lk16/flippy/api/internal/models"
+	"github.com/lk16/flippy/api/internal/othello"
 )
 
 const (
@@ -26,9 +26,9 @@ func newWindowDrawer(controller *Controller) *windowDrawer {
 
 func (w *windowDrawer) turnToColor(turn int) rl.Color {
 	switch turn {
-	case models.WHITE:
+	case othello.WHITE:
 		return rl.White
-	case models.BLACK:
+	case othello.BLACK:
 		return rl.Black
 	default:
 		panic("invalid turn")
@@ -46,11 +46,11 @@ func (w *windowDrawer) draw() {
 
 	for index := range 64 {
 		switch board.GetSquare(index) {
-		case models.WHITE:
-			w.drawDisc(index, w.turnToColor(models.WHITE))
-		case models.BLACK:
-			w.drawDisc(index, w.turnToColor(models.BLACK))
-		case models.EMPTY:
+		case othello.WHITE:
+			w.drawDisc(index, w.turnToColor(othello.WHITE))
+		case othello.BLACK:
+			w.drawDisc(index, w.turnToColor(othello.BLACK))
+		case othello.EMPTY:
 			w.drawEmptySquare(index, args)
 		}
 	}

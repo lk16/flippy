@@ -5,15 +5,15 @@ import (
 	"log"
 
 	"github.com/lk16/flippy/api/internal/gui"
-	"github.com/lk16/flippy/api/internal/models"
+	"github.com/lk16/flippy/api/internal/othello"
 )
 
 func main() {
-	defaultStart := models.NewBoardStart().String()
+	defaultStart := othello.NewBoardStart().String()
 	start := flag.String("start", defaultStart, "the start position")
 	flag.Parse()
 
-	startBoard, err := models.NewBoardFromString(*start)
+	startBoard, err := othello.NewBoardFromString(*start)
 	if err != nil {
 		log.Fatalf("failed to create board: %v", err)
 	}

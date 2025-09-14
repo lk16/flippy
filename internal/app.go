@@ -6,10 +6,9 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/lk16/flippy/api/internal/api"
 	"github.com/lk16/flippy/api/internal/config"
 	"github.com/lk16/flippy/api/internal/middleware"
-	"github.com/lk16/flippy/api/internal/routes"
-	"github.com/lk16/flippy/api/internal/services"
 )
 
 const (
@@ -35,7 +34,7 @@ func SetupApp() (*fiber.App, *config.ServerConfig) {
 	})
 
 	// Initialize services
-	services, err := services.InitServices(cfg)
+	services, err := api.InitServices(cfg)
 	if err != nil {
 		slog.Error("Failed to initialize services", "error", err)
 		os.Exit(1)
@@ -52,7 +51,7 @@ func SetupApp() (*fiber.App, *config.ServerConfig) {
 	app.Use(middleware.Logging())
 
 	// Setup all routes
-	routes.SetupRoutes(app)
+	api.SetupRoutes(app)
 
 	return app, cfg
 }

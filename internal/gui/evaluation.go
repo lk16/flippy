@@ -5,16 +5,15 @@ import (
 	"log"
 	"time"
 
-	"github.com/lk16/flippy/api/internal/book"
+	"github.com/lk16/flippy/api/internal/api"
 	"github.com/lk16/flippy/api/internal/config"
 	"github.com/lk16/flippy/api/internal/edax"
-	"github.com/lk16/flippy/api/internal/models"
-	"github.com/lk16/flippy/api/internal/repository"
+	"github.com/lk16/flippy/api/internal/othello"
 )
 
 var (
 	// stopSearch will stop all searches when sent over searchChan.
-	stopSearch models.Board = models.NewBoardEmpty()
+	stopSearch othello.Board = othello.NewBoardEmpty()
 )
 
 type evaluateChanListener struct {
@@ -25,23 +24,23 @@ type evaluateChanListener struct {
 	edaxResultChan chan edax.Result
 
 	// searchChan is a channel used to start a new search and stop the previous one.
-	searchChan chan models.Board
+	searchChan chan othello.Board
 
 	// evaluated is the currently evaluated board. An empty board indicates no evaluation was started yet.
-	evaluated models.Board
+	evaluated othello.Board
 
 	// cache prevents recomputing same positions repeatedly.
-	cache *models.Cache
+	cache *edax.Cache
 
 	// apiClient is the API client used to lookup positions.
-	apiClient *book.APIClient
+	apiClient *api.Client
 
 	// unsavedDBEvaluations is used to do periodic batch update posts to the api.
-	unsavedDBEvaluations map[models.NormalizedPosition]models.Evaluation
+	unsavedDBEvaluations map[othello.NormalizedPosition]api.Evaluation
 }
 
-func newEvaluateChanListener(searchChan chan models.Board, cache *models.Cache) (*evaluateChanListener, error) {
-	apiClient, err := book.NewAPIClient(config.LoadLearnClientConfig())
+func newEvaluateChanListener(searchChan chan othello.Board, cache *edax.Cache) (*evaluateChanListener, error) {
+	apiClient, err := api.NewClient(config.LoadLearnClientConfig())
 	if err != nil {
 		return nil, fmt.Errorf("error creating api client: %w", err)
 	}
@@ -53,7 +52,7 @@ func newEvaluateChanListener(searchChan chan models.Board, cache *models.Cache) 
 		evaluated:            stopSearch,
 		cache:                cache,
 		apiClient:            apiClient,
-		unsavedDBEvaluations: make(map[models.NormalizedPosition]models.Evaluation, 20),
+		unsavedDBEvaluations: make(map[othello.NormalizedPosition]api.Evaluation, 20),
 	}, nil
 }
 
@@ -88,7 +87,7 @@ func (l *evaluateChanListener) handleEdaxResult(result edax.Result) {
 	}
 }
 
-func (l *evaluateChanListener) handleSearch(board models.Board) {
+func (l *evaluateChanListener) handleSearch(board othello.Board) {
 	if board == stopSearch {
 		l.killProcs()
 		l.evaluated = stopSearch
@@ -110,10 +109,10 @@ func (l *evaluateChanListener) saveDBEvaluations() {
 	// Use struct-level map as local var and reset it.
 	// This needs to happen before creating go-routine to prevent race conditions.
 	unsavedEvaluations := l.unsavedDBEvaluations
-	l.unsavedDBEvaluations = make(map[models.NormalizedPosition]models.Evaluation, 20)
+	l.unsavedDBEvaluations = make(map[othello.NormalizedPosition]api.Evaluation, 20)
 
 	// Convert to slice.
-	updates := make([]models.Evaluation, 0, len(unsavedEvaluations))
+	updates := make([]api.Evaluation, 0, len(unsavedEvaluations))
 	for _, evaluation := range unsavedEvaluations {
 		updates = append(updates, evaluation)
 	}
@@ -136,10 +135,10 @@ func (l *evaluateChanListener) killProcs() {
 	l.procs = []*edax.Process{}
 }
 
-func (l *evaluateChanListener) getSearchableChildren(board models.Board) []models.NormalizedPosition {
+func (l *evaluateChanListener) getSearchableChildren(board othello.Board) []othello.NormalizedPosition {
 	normalizedChildren := board.GetNormalizedChildren()
 
-	searchableChildren := []models.NormalizedPosition{}
+	searchableChildren := []othello.NormalizedPosition{}
 	for _, child := range normalizedChildren {
 		if child.HasMoves() {
 			searchableChildren = append(searchableChildren, child)
@@ -147,7 +146,7 @@ func (l *evaluateChanListener) getSearchableChildren(board models.Board) []model
 		}
 
 		// Check if passing gives a searchable child.
-		passed := child.Position().DoMove(models.PassMove)
+		passed := child.Position().DoMove(othello.PassMove)
 		if passed.HasMoves() {
 			searchableChildren = append(searchableChildren, passed.Normalized())
 		}
@@ -158,7 +157,7 @@ func (l *evaluateChanListener) getSearchableChildren(board models.Board) []model
 	return searchableChildren
 }
 
-func (l *evaluateChanListener) lookupAndUpdateCache(positions []models.NormalizedPosition) {
+func (l *evaluateChanListener) lookupAndUpdateCache(positions []othello.NormalizedPosition) {
 	if len(positions) == 0 {
 		return
 	}
@@ -172,21 +171,21 @@ func (l *evaluateChanListener) lookupAndUpdateCache(positions []models.Normalize
 	l.cache.BulkUpsert(evaluations)
 }
 
-func (l *evaluateChanListener) getLearnLevel(board models.Board) int {
+func (l *evaluateChanListener) getLearnLevel(board othello.Board) int {
 	childDiscCount := board.Position().CountDiscs() + 1
 
 	if childDiscCount > config.MaxBookSavableDiscs {
 		return 60
 	}
 
-	return repository.GetLearnLevel(childDiscCount)
+	return api.GetLearnLevel(childDiscCount)
 }
 
-func (l *evaluateChanListener) startProcs(board models.Board) {
+func (l *evaluateChanListener) startProcs(board othello.Board) {
 	learnLevel := l.getLearnLevel(board)
 	searchableChildren := l.getSearchableChildren(board)
 
-	evaluationsToCompute := []models.NormalizedPosition{}
+	evaluationsToCompute := []othello.NormalizedPosition{}
 
 	for _, child := range searchableChildren {
 		if eval, ok := l.cache.Lookup(child); !ok || eval.Depth < learnLevel {
@@ -196,7 +195,7 @@ func (l *evaluateChanListener) startProcs(board models.Board) {
 
 	var procs []*edax.Process
 	for _, child := range evaluationsToCompute {
-		job := models.Job{
+		job := api.Job{
 			Position: child,
 			Level:    learnLevel,
 		}
@@ -209,7 +208,7 @@ func (l *evaluateChanListener) startProcs(board models.Board) {
 	l.procs = procs
 }
 
-func (l *evaluateChanListener) startSearch(board models.Board) {
+func (l *evaluateChanListener) startSearch(board othello.Board) {
 	l.killProcs()
 
 	searchableChildren := l.getSearchableChildren(board)
@@ -222,15 +221,15 @@ func (l *evaluateChanListener) startSearch(board models.Board) {
 	l.cacheGrandchildren(board)
 }
 
-func (l *evaluateChanListener) cacheGrandchildren(board models.Board) {
+func (l *evaluateChanListener) cacheGrandchildren(board othello.Board) {
 	children := board.GetChildren()
 
 	if len(children) == 0 {
-		children = board.DoMove(models.PassMove).GetChildren()
+		children = board.DoMove(othello.PassMove).GetChildren()
 	}
 
-	var allGrandchildren []models.NormalizedPosition
-	seen := make(map[models.NormalizedPosition]bool)
+	var allGrandchildren []othello.NormalizedPosition
+	seen := make(map[othello.NormalizedPosition]bool)
 
 	for _, child := range children {
 		for _, grandchild := range child.GetNormalizedChildren() {

@@ -1,10 +1,10 @@
 package edax
 
-import "github.com/lk16/flippy/api/internal/models"
+import "github.com/lk16/flippy/api/internal/api"
 
 // Result contains an edax evaluation or an error.
 type Result struct {
-	Result *models.JobResult
+	Result *api.JobResult
 	Err    error
 }
 
