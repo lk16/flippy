@@ -2,6 +2,7 @@ package book
 
 import (
 	"fmt"
+	"log"
 	"log/slog"
 	"time"
 
@@ -45,7 +46,10 @@ func (c *LearnClient) heartbeatLoop() {
 func (c *LearnClient) doJobsLoop() {
 	jobCount := 0
 	totalJobTimeSec := 0.0
-	edaxManager := edax.NewManager()
+
+	resultChan := make(chan edax.Result)
+	edaxManager := edax.NewProcess(resultChan)
+
 	for {
 		job, err := c.apiClient.GetJob()
 		if err != nil {
@@ -60,9 +64,9 @@ func (c *LearnClient) doJobsLoop() {
 			slog.Info("Position", "line", line)
 		}
 
-		jobResult, err := edaxManager.DoJob(job)
+		jobResult, err := edaxManager.DoJobSync(job)
 		if err != nil {
-			slog.Error("Failed to do job", "error", err)
+			log.Printf("failed to do job: %s", err.Error())
 			time.Sleep(errorSleepTime)
 			continue
 		}

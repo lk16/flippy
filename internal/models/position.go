@@ -330,6 +330,8 @@ func (p Position) flipped(move int) uint64 {
 
 // DoMove does a move on the position.
 func (p Position) DoMove(move int) Position {
+	// TODO return error on invalid move
+
 	if move == PassMove {
 		return Position{
 			player:   p.opponent,
@@ -361,16 +363,15 @@ func (p Position) DoMove(move int) Position {
 
 // IsValidMove checks if a move is valid.
 func (p Position) IsValidMove(move int) bool {
-	if move < PassMove || move >= 64 {
-		return false
+	if move == PassMove {
+		return !p.HasMoves()
+	}
+
+	if move < 0 || move >= 64 {
+		panic("IsValidMove: move out of range")
 	}
 
 	validMoves := p.Moves()
-
-	if validMoves == 0 {
-		return move == PassMove
-	}
-
 	return validMoves&(1<<move) != 0
 }
 
@@ -446,4 +447,49 @@ func (p Position) GetChildren() []Position {
 	}
 
 	return children
+}
+
+// GetNormalizedChildren returns all normalized children for a position.
+func (p Position) GetNormalizedChildren() []NormalizedPosition {
+	children := p.GetChildren()
+	if len(children) == 0 {
+		return nil
+	}
+
+	// Pre-allocate with the worst-case size (all children unique)
+	result := make([]NormalizedPosition, 0, len(children))
+	seen := make(map[NormalizedPosition]bool, len(children))
+
+	for _, child := range children {
+		normalized := child.Normalized()
+		if !seen[normalized] {
+			seen[normalized] = true
+			result = append(result, normalized)
+		}
+	}
+
+	return result
+}
+
+// GetFinalScore returns the final score of the position.
+func (p Position) GetFinalScore() int {
+	meCount := bits.OnesCount64(p.player)
+	oppCount := bits.OnesCount64(p.opponent)
+
+	switch {
+	case meCount > oppCount:
+		return 64 - (2 * oppCount)
+	case oppCount > meCount:
+		return -64 + (2 * meCount)
+	default:
+		return 0
+	}
+}
+
+// Print prints the board to the console. This is used for debugging.
+func (p Position) Print() {
+	lines := p.ASCIIArtLines()
+	for _, line := range lines {
+		fmt.Println(line)
+	}
 }
