@@ -1,9 +1,11 @@
 package main
 
 import (
+	"os"
+
 	"log"
 
-	"github.com/lk16/flippy/api/internal/book"
+	"github.com/lk16/flippy/api/internal/cmd/learn"
 	"github.com/lk16/flippy/api/internal/config"
 )
 
@@ -12,9 +14,10 @@ func main() {
 
 	cfg := config.LoadLearnClientConfig()
 
-	learnClient, err := book.NewLearnClient(cfg)
+	learnClient, err := learn.NewClient(cfg)
 	if err != nil {
-		log.Fatalf("Failed to create learn client: %v", err)
+		log.Printf("Failed to create learn client: %v", err)
+		os.Exit(1)
 	}
 
 	learnClient.Run()

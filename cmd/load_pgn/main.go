@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lk16/flippy/api/internal/book"
+	"github.com/lk16/flippy/api/internal/api"
 	"github.com/lk16/flippy/api/internal/config"
 	"github.com/lk16/flippy/api/internal/edax"
-	"github.com/lk16/flippy/api/internal/models"
+	"github.com/lk16/flippy/api/internal/othello"
 )
 
 const (
@@ -36,7 +36,7 @@ func main() {
 	cfg := config.LoadLearnClientConfig()
 
 	// Create API client
-	client, err := book.NewAPIClient(cfg)
+	client, err := api.NewClient(cfg)
 	if err != nil {
 		slog.Error("Failed to create API client", "error", err)
 		os.Exit(1)
@@ -53,7 +53,7 @@ func main() {
 	}
 }
 
-func loadPgn(client *book.APIClient, edaxManager *edax.Process) error {
+func loadPgn(client *api.Client, edaxManager *edax.Process) error {
 	// Get PGN target folder from environment
 	targetFolder := os.Getenv("FLIPPY_PGN_TARGET_FOLDER")
 	if targetFolder == "" {
@@ -92,11 +92,11 @@ func loadPgn(client *book.APIClient, edaxManager *edax.Process) error {
 	}
 
 	// Extract positions from PGN files
-	positions := make(map[models.NormalizedPosition]struct{})
+	positions := make(map[othello.NormalizedPosition]struct{})
 
 	for i, file := range pgnFiles {
-		var game *models.Game
-		game, err = models.NewGameFromPGN(file)
+		var game *othello.Game
+		game, err = othello.NewGameFromPGN(file)
 		if err != nil {
 			slog.Error("Failed to parse PGN file", "file", file, "error", err)
 			continue
@@ -213,8 +213,8 @@ func savePgnState(lastReadPgn string) error {
 }
 
 func learnNewPositions(
-	positions map[models.NormalizedPosition]struct{},
-	client *book.APIClient,
+	positions map[othello.NormalizedPosition]struct{},
+	client *api.Client,
 	edaxManager *edax.Process,
 ) error {
 	// Filter positions that are DB savable
@@ -242,8 +242,8 @@ func learnNewPositions(
 	return processPositionsInChunks(learnPositions, client, edaxManager)
 }
 
-func filterDBSavablePositions(positions map[models.NormalizedPosition]struct{}) []models.NormalizedPosition {
-	pgnPositions := make([]models.NormalizedPosition, 0)
+func filterDBSavablePositions(positions map[othello.NormalizedPosition]struct{}) []othello.NormalizedPosition {
+	pgnPositions := make([]othello.NormalizedPosition, 0)
 	for pos := range positions {
 		if pos.IsDBSavable() {
 			pgnPositions = append(pgnPositions, pos)
@@ -253,10 +253,10 @@ func filterDBSavablePositions(positions map[models.NormalizedPosition]struct{}) 
 }
 
 func lookupExistingPositions(
-	client *book.APIClient,
-	pgnPositions []models.NormalizedPosition,
-) (map[models.NormalizedPosition]bool, error) {
-	foundPositions := make(map[models.NormalizedPosition]bool)
+	client *api.Client,
+	pgnPositions []othello.NormalizedPosition,
+) (map[othello.NormalizedPosition]bool, error) {
+	foundPositions := make(map[othello.NormalizedPosition]bool)
 	batchSize := 100
 
 	for i := 0; i < len(pgnPositions); i += batchSize {
@@ -281,10 +281,10 @@ func lookupExistingPositions(
 }
 
 func findPositionsToLearn(
-	pgnPositions []models.NormalizedPosition,
-	foundPositions map[models.NormalizedPosition]bool,
-) []models.NormalizedPosition {
-	learnPositions := make([]models.NormalizedPosition, 0)
+	pgnPositions []othello.NormalizedPosition,
+	foundPositions map[othello.NormalizedPosition]bool,
+) []othello.NormalizedPosition {
+	learnPositions := make([]othello.NormalizedPosition, 0)
 	for _, pos := range pgnPositions {
 		if _, found := foundPositions[pos]; !found {
 			learnPositions = append(learnPositions, pos)
@@ -294,8 +294,8 @@ func findPositionsToLearn(
 }
 
 func processPositionsInChunks(
-	learnPositions []models.NormalizedPosition,
-	client *book.APIClient,
+	learnPositions []othello.NormalizedPosition,
+	client *api.Client,
 	edaxManager *edax.Process,
 ) error {
 	totalSeconds := 0.0
@@ -341,18 +341,18 @@ func processPositionsInChunks(
 	return nil
 }
 
-func evaluateChunk(chunk []models.NormalizedPosition, edaxManager *edax.Process) ([]models.Evaluation, float64, error) {
-	evaluations := make([]models.Evaluation, 0, len(chunk))
+func evaluateChunk(chunk []othello.NormalizedPosition, edaxManager *edax.Process) ([]api.Evaluation, float64, error) {
+	evaluations := make([]api.Evaluation, 0, len(chunk))
 
 	before := time.Now()
 
 	for _, pos := range chunk {
 		// If position has no moves, we need to pass
 		if !pos.HasMoves() {
-			pos = pos.Position().DoMove(models.PassMove).Normalized()
+			pos = pos.Position().DoMove(othello.PassMove).Normalized()
 		}
 
-		job := models.Job{
+		job := api.Job{
 			Position: pos,
 			Level:    config.MinBookLearnLevel,
 		}

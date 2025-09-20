@@ -1,11 +1,11 @@
 package gui
 
-import "github.com/lk16/flippy/api/internal/models"
+import "github.com/lk16/flippy/api/internal/othello"
 
 // DrawArgs contains arguments for drawing the window content.
 type DrawArgs struct {
 	// Board is the current board state
-	Board models.Board
+	Board othello.Board
 
 	// Evaluations is a map of index to evaluation.
 	SquareEvaluations map[int]*MoveEvaluation

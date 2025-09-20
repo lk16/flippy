@@ -11,7 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lk16/flippy/api/internal/models"
+	"github.com/lk16/flippy/api/internal/api"
+	"github.com/lk16/flippy/api/internal/othello"
 )
 
 const (
@@ -30,7 +31,7 @@ var (
 
 // parser reads edax output and send results over a channel. It should only be used for parsing the output of one job.
 type parser struct {
-	job              models.Job
+	job              api.Job
 	startTime        time.Time
 	reader           *bufio.Reader
 	resultChan       chan<- Result
@@ -41,7 +42,7 @@ type parser struct {
 }
 
 func newParser(
-	job models.Job,
+	job api.Job,
 	startTime time.Time,
 	reader *bufio.Reader,
 	resultChan chan<- Result,
@@ -161,7 +162,7 @@ func (p *parser) parseLine(line string) (*parsedLine, error) {
 	bestFields := strings.Fields(line[53:])
 	bestMoves := make([]int, len(bestFields))
 	for i, field := range bestFields {
-		bestMoves[i], err = models.FieldToIndex(field)
+		bestMoves[i], err = othello.FieldToIndex(field)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse best move: %w", err)
 		}
@@ -185,8 +186,8 @@ func (*parser) isExpectedError(err error) bool {
 		errors.Is(err, errBoardASCIIArtLine)
 }
 
-func (p *parser) makeEvaluation(parsedLine *parsedLine) (*models.Evaluation, error) {
-	evaluation := &models.Evaluation{
+func (p *parser) makeEvaluation(parsedLine *parsedLine) (*api.Evaluation, error) {
+	evaluation := &api.Evaluation{
 		Position:   p.job.Position,
 		Level:      p.job.Level,
 		Depth:      parsedLine.depth,
@@ -212,7 +213,7 @@ func (p *parser) sendIntermediateResult(parsedLine *parsedLine) {
 	}
 
 	result := Result{
-		Result: &models.JobResult{
+		Result: &api.JobResult{
 			Evaluation:      *evaluation,
 			ComputationTime: time.Since(p.startTime).Seconds(),
 		},

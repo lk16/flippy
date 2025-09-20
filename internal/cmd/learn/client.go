@@ -1,4 +1,4 @@
-package book
+package learn
 
 import (
 	"fmt"
@@ -17,22 +17,22 @@ const (
 	errorSleepTime    = 10 * time.Second
 )
 
-type LearnClient struct {
+type Client struct {
 	apiClient *api.Client
 }
 
-func NewLearnClient(config *config.LearnClientConfig) (*LearnClient, error) {
+func NewClient(config *config.LearnClientConfig) (*Client, error) {
 	apiClient, err := api.NewClient(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create api client: %w", err)
 	}
 
-	return &LearnClient{
+	return &Client{
 		apiClient: apiClient,
 	}, nil
 }
 
-func (c *LearnClient) heartbeatLoop() {
+func (c *Client) heartbeatLoop() {
 	for {
 		time.Sleep(heartbeatInterval)
 
@@ -43,7 +43,7 @@ func (c *LearnClient) heartbeatLoop() {
 	}
 }
 
-func (c *LearnClient) doJobsLoop() {
+func (c *Client) doJobsLoop() {
 	jobCount := 0
 	totalJobTimeSec := 0.0
 
@@ -89,7 +89,7 @@ func (c *LearnClient) doJobsLoop() {
 	}
 }
 
-func (c *LearnClient) Run() {
+func (c *Client) Run() {
 	go c.heartbeatLoop()
 	c.doJobsLoop()
 }

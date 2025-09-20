@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/lk16/flippy/api/internal/api"
 	"github.com/lk16/flippy/api/internal/config"
-	"github.com/lk16/flippy/api/internal/models"
 )
 
 type Process struct {
@@ -44,7 +44,7 @@ func (p *Process) SetVerbose(verbose bool) {
 }
 
 // DoJobSync does a job. It only returns the final evaluation.
-func (p *Process) DoJobSync(job models.Job) (*models.JobResult, error) {
+func (p *Process) DoJobSync(job api.Job) (*api.JobResult, error) {
 	go p.DoJob(job, true)
 
 	result := <-p.resultChan
@@ -56,7 +56,7 @@ func (p *Process) DoJobSync(job models.Job) (*models.JobResult, error) {
 }
 
 // DoJob should be used as a go-routine. It handles a job and returns one or more results in ResultChan.
-func (p *Process) DoJob(job models.Job, finalEvalOnly bool) {
+func (p *Process) DoJob(job api.Job, finalEvalOnly bool) {
 	if err := p.SetLevel(job.Level); err != nil {
 		p.resultChan <- Result{Err: err}
 		return

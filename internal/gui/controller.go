@@ -6,18 +6,20 @@ import (
 	"math"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
-	"github.com/lk16/flippy/api/internal/models"
+
+	"github.com/lk16/flippy/api/internal/edax"
+	"github.com/lk16/flippy/api/internal/othello"
 )
 
 type Controller struct {
 	// game contains the move history
-	game *models.Game
+	game *othello.Game
 
 	// cache prevents recomputing same positions repeatedly
-	cache *models.Cache
+	cache *edax.Cache
 
 	// searchChan is a channel used to start a new search and stop the previous one.
-	searchChan chan models.Board
+	searchChan chan othello.Board
 
 	// evaluationEnabled indicates if we're evaluating positions
 	evaluationEnabled bool
@@ -26,9 +28,9 @@ type Controller struct {
 	showSearchDepth bool
 }
 
-func NewWindow(start models.Board) (*Controller, error) {
-	searchChan := make(chan models.Board, 20)
-	cache := models.NewCache()
+func NewWindow(start othello.Board) (*Controller, error) {
+	searchChan := make(chan othello.Board, 20)
+	cache := edax.NewCache()
 
 	listener, err := newEvaluateChanListener(searchChan, cache)
 	if err != nil {
@@ -38,7 +40,7 @@ func NewWindow(start models.Board) (*Controller, error) {
 	go listener.Listen()
 
 	w := &Controller{
-		game:              models.NewGameWithStart(start),
+		game:              othello.NewGameWithStart(start),
 		searchChan:        searchChan,
 		cache:             cache,
 		evaluationEnabled: true,
@@ -104,7 +106,7 @@ func (c *Controller) handleEvents() {
 	}
 }
 
-func (c *Controller) GetBoard() models.Board {
+func (c *Controller) GetBoard() othello.Board {
 	return c.game.GetBoard()
 }
 
@@ -133,7 +135,7 @@ func (c *Controller) OnKeyPress(key int32) {
 
 	// Restart game
 	if key == rl.KeyN {
-		c.game = models.NewGame()
+		c.game = othello.NewGame()
 	}
 
 	// Toggle showing and computing evaluations
@@ -166,7 +168,7 @@ func (c *Controller) GetDrawArgs() *DrawArgs {
 	}
 }
 
-func (c *Controller) getSquareEvaluationMap(board models.Board) map[int]*MoveEvaluation {
+func (c *Controller) getSquareEvaluationMap(board othello.Board) map[int]*MoveEvaluation {
 	evals := make(map[int]*MoveEvaluation)
 
 	for i := range 64 {
