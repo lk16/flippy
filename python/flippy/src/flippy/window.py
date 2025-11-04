@@ -120,13 +120,13 @@ class Window:
         board = self.mode.get_board()
 
         ui_details = self.mode.get_ui_details()
-        move_mistakes: set[int] = ui_details.pop("move_mistakes", set())
         unknown_squares: set[int] = ui_details.pop("unknown_squares", set())
         child_frequencies: dict[int, int] = ui_details.pop("child_frequencies", {})
         evaluations: dict[int, dict[str, int]] = ui_details.pop("evaluations", {})
         played_move: Optional[int] = ui_details.pop("played_move", None)
         graph_data: list[Optional[tuple[int, int]]] = ui_details.pop("graph_data", [])
         graph_current_move: Optional[int] = ui_details.pop("graph_current_move", None)
+        wrong_moves: set[int] = ui_details.pop("wrong_moves", set())
 
         if ui_details:
             print(
@@ -158,8 +158,9 @@ class Window:
                 self.draw_disc(index, COLOR_BLACK_DISC)
             elif index in unknown_squares:
                 self.draw_disc(index, COLOR_GRAY_DISC)
-            elif index in move_mistakes:
+            elif index in wrong_moves:
                 self.draw_move_indicator(index, COLOR_WRONG_MOVE)
+                continue
             elif index in child_frequencies:
                 self.draw_number(index, turn_color, child_frequencies[index])
 
