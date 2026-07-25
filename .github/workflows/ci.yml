@@ -1,0 +1,55 @@
+name: Lint and test
+
+on: [push, pull_request]
+
+env:
+  GO_VERSION: "1.25"
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Check gofmt
+        run: test -z "$(gofmt -l .)"
+
+  golangci-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.12.2
+          args: ./cmd/... ./internal/...
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: flippy_test
+          POSTGRES_USER: flippy_test
+          POSTGRES_PASSWORD: flippy_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      FLIPPY_POSTGRES_URL: "postgres://flippy_test:flippy_test@localhost:5432/flippy_test?sslmode=disable"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Run tests
+        run: go test -cover ./...
