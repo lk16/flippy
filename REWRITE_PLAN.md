@@ -9,6 +9,15 @@ Rules while executing this plan:
 - Do not reference or import anything from `old/` — read-only reference.
 - Run `pre-commit run -a` and all tests before each commit.
 - All backend code except `cmd/*/main.go` entrypoints needs unit tests.
+- Prefer returning errors over panicking; panics are only for internal
+  invariant violations that indicate a bug, never for expected failure
+  conditions (invalid input, invalid moves, I/O errors, etc).
+- Don't refer to `old/` or its code as "legacy" (or at all) in generated
+  code, comments, or commit messages — it's read-only reference material for
+  us, not part of this codebase's history.
+- Run tests with code coverage. Coverage doesn't prove behavior is correct,
+  but uncovered lines outside `cmd/*/main.go` entrypoints flag missing
+  tests.
 
 Work through phases in order. Check off each item after it's done and merged.
 
@@ -22,13 +31,13 @@ Work through phases in order. Check off each item after it's done and merged.
 - [x] CI (if desired) mirroring old `.github/workflows`
 
 ## Phase 1 — Othello core types (`internal/othello`)
-- [ ] `Board`: white/black bitsets (uint64) + color to move
-- [ ] move generation / legal moves / apply move / pass handling
-- [ ] `Game`: sequence of `Board`
-- [ ] `NormalizedBoard`: wraps `Board`, normalized except color to move is
+- [x] `Board`: white/black bitsets (uint64) + color to move
+- [x] move generation / legal moves / apply move / pass handling
+- [x] `Game`: sequence of `Board`
+- [x] `NormalizedBoard`: wraps `Board`, normalized except color to move is
       preserved — confirm exact normalization algorithm against old
       python/go code before implementing
-- [ ] unit tests for normalization symmetry, move gen, pass detection
+- [x] unit tests for normalization symmetry, move gen, pass detection
 
 ## Phase 2 — Game/file format loaders (`internal/othello` or `internal/loader`)
 - [ ] wtb (Wthor) file parser → `Game` (port logic from old Go code)

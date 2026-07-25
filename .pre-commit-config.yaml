@@ -28,6 +28,6 @@ repos:
       - id: gotestsum
         name: run tests
         language: system
-        entry: gotestsum -- ./...
+        entry: gotestsum -- -cover ./...
         types: [go]
         pass_filenames: false
