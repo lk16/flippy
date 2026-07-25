@@ -13,13 +13,13 @@ Rules while executing this plan:
 Work through phases in order. Check off each item after it's done and merged.
 
 ## Phase 0 — Repo scaffold
-- [ ] `go.mod`, base folder layout: `cmd/{server,worker,loader}/main.go`,
+- [x] `go.mod`, base folder layout: `cmd/{server,worker,loader}/main.go`,
       `internal/`, `static/`
-- [ ] `.gitignore` for `db_data/`, `pgn/`, `wthor/`
-- [ ] `docker-compose.yml` for Postgres
-- [ ] `migrate` tool wired up (migrations folder + make/script target)
-- [ ] pre-commit config (fmt, vet/lint, gotestsum)
-- [ ] CI (if desired) mirroring old `.github/workflows`
+- [x] `.gitignore` for `db_data/`, `pgn/`, `wthor/`
+- [x] `docker-compose.yml` for Postgres
+- [x] `migrate` tool wired up (migrations folder + make/script target)
+- [x] pre-commit config (fmt, vet/lint, gotestsum)
+- [x] CI (if desired) mirroring old `.github/workflows`
 
 ## Phase 1 — Othello core types (`internal/othello`)
 - [ ] `Board`: white/black bitsets (uint64) + color to move

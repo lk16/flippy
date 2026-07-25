@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    ports:
+      - "12321:5432"
+    environment:
+      POSTGRES_USER: ${FLIPPY_POSTGRES_USER:-flippy}
+      POSTGRES_PASSWORD: ${FLIPPY_POSTGRES_PASSWORD:-flippy}
+      POSTGRES_DB: ${FLIPPY_POSTGRES_DB:-flippy}
+    volumes:
+      - ./db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${FLIPPY_POSTGRES_USER:-flippy}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5

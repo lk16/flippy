@@ -1,0 +1,31 @@
+stages:
+  - lint
+  - test
+
+variables:
+  GO_VERSION: "1.25"
+  POSTGRES_DB: flippy_test
+  POSTGRES_USER: flippy_test
+  POSTGRES_PASSWORD: flippy_test
+  FLIPPY_POSTGRES_URL: "postgres://flippy_test:flippy_test@postgres:5432/flippy_test?sslmode=disable"
+
+fmt:
+  stage: lint
+  image: golang:${GO_VERSION}
+  script:
+    - test -z "$(gofmt -l .)"
+
+golangci-lint:
+  stage: lint
+  image: golangci/golangci-lint:v2.12.2
+  script:
+    - golangci-lint run ./cmd/... ./internal/...
+
+test:
+  stage: test
+  image: golang:${GO_VERSION}
+  services:
+    - name: postgres:17
+      alias: postgres
+  script:
+    - go test ./...

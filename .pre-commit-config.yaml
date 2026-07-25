@@ -12,9 +12,22 @@ repos:
 
   - repo: local
     hooks:
+      - id: gofmt
+        name: gofmt
+        language: system
+        entry: gofmt -l -w
+        types: [go]
+
       - id: golangci-lint
         name: run golangci-lint
         language: system
         entry: golangci-lint run --fix ./cmd/... ./internal/...
+        types: [go]
+        pass_filenames: false
+
+      - id: gotestsum
+        name: run tests
+        language: system
+        entry: gotestsum -- ./...
         types: [go]
         pass_filenames: false
