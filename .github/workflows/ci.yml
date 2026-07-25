@@ -51,5 +51,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+      - name: Install migrate
+        run: go install -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+      - name: Run migrations
+        run: migrate -path migrations -database "$FLIPPY_POSTGRES_URL" up
       - name: Run tests
         run: go test -cover ./...

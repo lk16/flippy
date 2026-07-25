@@ -55,12 +55,12 @@ Work through phases in order. Check off each item after it's done and merged.
 - [x] unit test asserting the count and uniqueness
 
 ## Phase 4 — DB layer (`internal/db` or similar)
-- [ ] Schema: Board (disc count, search level, evaluation), no best-move
+- [x] Schema: Board (disc count, search level, evaluation), no best-move
       stored
-- [ ] Index design for Board lookups (must support disc-count/level ordered
+- [x] Index design for Board lookups (must support disc-count/level ordered
       scans and point lookups by normalized board)
-- [ ] Migrations via `migrate`
-- [ ] Repository/query layer with unit tests (against a real Postgres via
+- [x] Migrations via `migrate`
+- [x] Repository/query layer with unit tests (against a real Postgres via
       docker, isolated from local dev DB)
 
 ## Phase 5 — Edax integration (`internal/edax`)

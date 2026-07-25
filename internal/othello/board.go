@@ -1,10 +1,15 @@
 package othello
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math/bits"
 	"strconv"
 )
+
+// BoardBytesLength is the length in bytes of the encoding produced by
+// Board.Bytes.
+const BoardBytesLength = 17
 
 // PassMove is the sentinel move value representing a pass.
 const PassMove = -1
@@ -227,6 +232,41 @@ func ParseBoard(s string) (Board, error) {
 		turn = White
 	default:
 		return Board{}, fmt.Errorf("invalid board string %q: bad turn suffix", s)
+	}
+
+	return NewBoard(black, white, turn)
+}
+
+// Bytes returns the binary encoding of b: 8 bytes of black discs, 8 bytes of
+// white discs (both big-endian), then 1 byte for the turn (0 = black, 1 =
+// white). Suitable as a compact DB key.
+func (b Board) Bytes() []byte {
+	buf := make([]byte, BoardBytesLength)
+	binary.BigEndian.PutUint64(buf[0:8], b.black)
+	binary.BigEndian.PutUint64(buf[8:16], b.white)
+	if b.turn == White {
+		buf[16] = 1
+	}
+	return buf
+}
+
+// ParseBoardBytes parses the format produced by Board.Bytes.
+func ParseBoardBytes(buf []byte) (Board, error) {
+	if len(buf) != BoardBytesLength {
+		return Board{}, fmt.Errorf("invalid board bytes: want length %d, got %d", BoardBytesLength, len(buf))
+	}
+
+	black := binary.BigEndian.Uint64(buf[0:8])
+	white := binary.BigEndian.Uint64(buf[8:16])
+
+	var turn Color
+	switch buf[16] {
+	case 0:
+		turn = Black
+	case 1:
+		turn = White
+	default:
+		return Board{}, fmt.Errorf("invalid board bytes: bad turn byte %d", buf[16])
 	}
 
 	return NewBoard(black, white, turn)

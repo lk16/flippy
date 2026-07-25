@@ -24,10 +24,3 @@ repos:
         entry: golangci-lint run --fix ./cmd/... ./internal/...
         types: [go]
         pass_filenames: false
-
-      - id: gotestsum
-        name: run tests
-        language: system
-        entry: gotestsum -- -cover ./...
-        types: [go]
-        pass_filenames: false

@@ -192,3 +192,45 @@ func TestParseBoard_Overlap(t *testing.T) {
 	_, err := ParseBoard("ffffffffffffffffffffffffffffffff-b")
 	require.Error(t, err)
 }
+
+func TestBoard_Bytes_RoundTrip(t *testing.T) {
+	board, err := NewBoardStart().DoMove(19)
+	require.NoError(t, err)
+
+	buf := board.Bytes()
+	require.Len(t, buf, BoardBytesLength)
+
+	parsed, err := ParseBoardBytes(buf)
+	require.NoError(t, err)
+	require.Equal(t, board, parsed)
+}
+
+func TestBoard_Bytes_TurnByte(t *testing.T) {
+	black := NewBoardStart()
+	require.Equal(t, byte(0), black.Bytes()[16])
+
+	white, err := black.DoMove(19)
+	require.NoError(t, err)
+	require.Equal(t, byte(1), white.Bytes()[16])
+}
+
+func TestParseBoardBytes_InvalidLength(t *testing.T) {
+	_, err := ParseBoardBytes([]byte{1, 2, 3})
+	require.Error(t, err)
+}
+
+func TestParseBoardBytes_InvalidTurnByte(t *testing.T) {
+	buf := make([]byte, BoardBytesLength)
+	buf[16] = 2
+	_, err := ParseBoardBytes(buf)
+	require.Error(t, err)
+}
+
+func TestParseBoardBytes_Overlap(t *testing.T) {
+	buf := make([]byte, BoardBytesLength)
+	for i := range 16 {
+		buf[i] = 0xff
+	}
+	_, err := ParseBoardBytes(buf)
+	require.Error(t, err)
+}
