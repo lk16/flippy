@@ -40,10 +40,14 @@ Work through phases in order. Check off each item after it's done and merged.
 - [x] unit tests for normalization symmetry, move gen, pass detection
 
 ## Phase 2 — Game/file format loaders (`internal/othello` or `internal/loader`)
-- [ ] wtb (Wthor) file parser → `Game` (port logic from old Go code)
-- [ ] pgn file parser → `Game` (use `old/pgn` samples as fixtures)
-- [ ] Othello Quest move-string parser (e.g. `A3B4C5`) → `Game`
-- [ ] unit tests per format using fixture files
+- [x] wtb (Wthor) file parser → `Game` (there was no Go wtb parser to port;
+      ported from the Python implementation instead, the only one that
+      existed)
+- [x] pgn file parser → `Game` (fixtures copied from the curated Go test
+      samples, not the personal `old/pgn` archive, which is unfixtureable
+      raw data)
+- [x] Othello Quest move-string parser (e.g. `A3B4C5`) → `Game`
+- [x] unit tests per format using fixture files
 
 ## Phase 3 — Precomputed board set
 - [ ] Generate/verify the full list of 67 245 `NormalizedBoard`s (positions

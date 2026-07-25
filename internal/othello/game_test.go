@@ -11,6 +11,8 @@ func TestNewGame(t *testing.T) {
 
 	require.Equal(t, NewBoardStart(), game.Board())
 	require.Empty(t, game.Moves())
+	require.Empty(t, game.Filename())
+	require.Nil(t, game.Metadata())
 }
 
 func TestGame_PushMove(t *testing.T) {

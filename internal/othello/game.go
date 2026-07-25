@@ -7,8 +7,10 @@ import "fmt"
 // board after the first i moves, and boards[0] is the start board. Passes
 // are usually inserted automatically by PushMove; see there for details.
 type Game struct {
-	moves  []int
-	boards []Board
+	moves    []int
+	boards   []Board
+	filename string
+	metadata *GameMetadata
 }
 
 // NewGame returns a new game starting from the standard Othello position.
@@ -55,6 +57,23 @@ func (g *Game) BoardAt(moveIndex int) Board {
 // board, inclusive.
 func (g *Game) Boards() []Board {
 	return append([]Board(nil), g.boards...)
+}
+
+// Filename returns the path of the file the game was loaded from, or "" if
+// it wasn't loaded from a file.
+func (g *Game) Filename() string {
+	return g.filename
+}
+
+// Metadata returns the game's metadata, or nil if it has none (e.g. a game
+// that wasn't loaded from a PGN file).
+func (g *Game) Metadata() *GameMetadata {
+	if g.metadata == nil {
+		return nil
+	}
+
+	metadata := *g.metadata
+	return &metadata
 }
 
 // PushMove plays move on the current board. If the resulting board has no

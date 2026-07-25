@@ -20,3 +20,8 @@ func (c Color) String() string {
 	}
 	return "black"
 }
+
+// newColor returns a pointer to c, for building optional-color fields.
+func newColor(c Color) *Color {
+	return &c
+}
