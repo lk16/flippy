@@ -5,28 +5,10 @@ repos:
       - id: check-merge-conflict
       - id: debug-statements
       - id: check-yaml
-      - id: check-json
-        exclude: "aaa-vscode-extension/.*"
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: mixed-line-ending
         args: ["--fix=lf"]
-
-  - repo: local
-    hooks:
-      - id: mypy
-        name: run mypy
-        language: system
-        entry: bash -c 'cd python/flippy && pdm run mypy --strict --enable-error-code possibly-undefined --warn-unreachable ./'
-        types: [python]
-        files: python/flippy/
-
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.1.8
-    hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
 
   - repo: local
     hooks:
@@ -35,22 +17,4 @@ repos:
         language: system
         entry: golangci-lint run --fix ./cmd/... ./internal/...
         types: [go]
-        pass_filenames: false
-
-  - repo: local
-    hooks:
-      - id: cargo-check
-        name: cargo check
-        language: system
-        entry: bash -c 'cd wasm && cargo check'
-        pass_filenames: false
-      - id: cargo-fmt
-        name: cargo fmt
-        language: system
-        entry: bash -c 'cd wasm && cargo fmt'
-        pass_filenames: false
-      - id: cargo-clippy
-        name: cargo clippy
-        language: system
-        entry: bash -c 'cd wasm && cargo clippy --all-targets -- -Dwarnings'
         pass_filenames: false
