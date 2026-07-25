@@ -50,9 +50,9 @@ Work through phases in order. Check off each item after it's done and merged.
 - [x] unit tests per format using fixture files
 
 ## Phase 3 — Precomputed board set
-- [ ] Generate/verify the full list of 67 245 `NormalizedBoard`s (positions
+- [x] Generate/verify the full list of 67 245 `NormalizedBoard`s (positions
       not learned: <12 discs) and embed in source
-- [ ] unit test asserting the count and uniqueness
+- [x] unit test asserting the count and uniqueness
 
 ## Phase 4 — DB layer (`internal/db` or similar)
 - [ ] Schema: Board (disc count, search level, evaluation), no best-move

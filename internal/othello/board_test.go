@@ -158,3 +158,37 @@ func TestBoard_String(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "-w", next.String()[32:])
 }
+
+func TestParseBoard_RoundTrip(t *testing.T) {
+	board, err := NewBoardStart().DoMove(19)
+	require.NoError(t, err)
+
+	parsed, err := ParseBoard(board.String())
+	require.NoError(t, err)
+	require.Equal(t, board, parsed)
+}
+
+func TestParseBoard_InvalidLength(t *testing.T) {
+	_, err := ParseBoard("too-short")
+	require.Error(t, err)
+}
+
+func TestParseBoard_InvalidBlackHex(t *testing.T) {
+	_, err := ParseBoard("zzzzzzzzzzzzzzzz0000000000000000-b")
+	require.Error(t, err)
+}
+
+func TestParseBoard_InvalidWhiteHex(t *testing.T) {
+	_, err := ParseBoard("0000000000000000zzzzzzzzzzzzzzzz-b")
+	require.Error(t, err)
+}
+
+func TestParseBoard_InvalidTurnSuffix(t *testing.T) {
+	_, err := ParseBoard("00000000000000000000000000000000-x")
+	require.Error(t, err)
+}
+
+func TestParseBoard_Overlap(t *testing.T) {
+	_, err := ParseBoard("ffffffffffffffffffffffffffffffff-b")
+	require.Error(t, err)
+}

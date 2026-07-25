@@ -3,6 +3,7 @@ package othello
 import (
 	"fmt"
 	"math/bits"
+	"strconv"
 )
 
 // PassMove is the sentinel move value representing a pass.
@@ -199,4 +200,34 @@ func (b Board) String() string {
 		turnSuffix = "-w"
 	}
 	return fmt.Sprintf("%016x%016x%s", b.black, b.white, turnSuffix)
+}
+
+// ParseBoard parses the format produced by Board.String(): 16 hex digits of
+// black discs, 16 hex digits of white discs, then "-b" or "-w" for the turn.
+func ParseBoard(s string) (Board, error) {
+	if len(s) != 34 {
+		return Board{}, fmt.Errorf("invalid board string %q: want length 34, got %d", s, len(s))
+	}
+
+	black, err := strconv.ParseUint(s[:16], 16, 64)
+	if err != nil {
+		return Board{}, fmt.Errorf("invalid board string %q: bad black discs: %w", s, err)
+	}
+
+	white, err := strconv.ParseUint(s[16:32], 16, 64)
+	if err != nil {
+		return Board{}, fmt.Errorf("invalid board string %q: bad white discs: %w", s, err)
+	}
+
+	var turn Color
+	switch s[32:] {
+	case "-b":
+		turn = Black
+	case "-w":
+		turn = White
+	default:
+		return Board{}, fmt.Errorf("invalid board string %q: bad turn suffix", s)
+	}
+
+	return NewBoard(black, white, turn)
 }
