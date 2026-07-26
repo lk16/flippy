@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Runs the local dev stack: brings up docker-compose.yml (Postgres + Redis,
-# with Postgres persisted to db_data/ on disk), waits for it to be healthy,
-# applies migrations, seeds the precomputed 12-disc board set, then runs the
-# webserver in the foreground. Everything started here is torn down when the
-# script exits or is killed.
+# with Postgres persisted to a named Docker volume across runs), waits for
+# it to be healthy, applies migrations, seeds the precomputed 12-disc board
+# set, then runs the webserver in the foreground. Everything started here is
+# torn down when the script exits or is killed — except the volume itself,
+# which `docker compose down` (no `--volumes`) leaves intact.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"

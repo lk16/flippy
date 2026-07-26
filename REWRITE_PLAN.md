@@ -30,6 +30,21 @@ Work through phases in order. Check off each item after it's done and merged.
 - [x] pre-commit config (fmt, vet/lint, gotestsum)
 - [x] CI (if desired) mirroring old `.github/workflows`
 
+`docker-compose.yml`'s Postgres service originally bind-mounted `./db_data`
+on the host so dev data survived restarts. Switched to a named Docker
+volume (`pgdata`) instead: Postgres in the container still initializes it
+`0700` owned by its own uid (999), but since the volume lives in Docker's
+own storage rather than the repo tree, that ownership is no longer the
+host user's problem — `go build ./...`/`go vet ./...`/`go test ./...` all
+recursively walk every directory under the module root to resolve the
+`...` pattern, and previously choked with a fatal `permission denied` the
+moment that walk reached the root-owned `db_data/`, since Go's tooling
+isn't git-aware and doesn't skip arbitrary ignored directories. The named
+volume still persists across plain `docker compose down` (no `--volumes`,
+what `local.sh` uses on exit) exactly like the bind mount did — verified by
+seeding boards, restarting the stack, and confirming the row count
+survived. `db_data/` dropped from `.gitignore` since it's never created.
+
 ## Phase 1 — Othello core types (`internal/othello`)
 - [x] `Board`: white/black bitsets (uint64) + color to move
 - [x] move generation / legal moves / apply move / pass handling
