@@ -44,7 +44,21 @@ func TestExplore_FromStart_MatchesPrecomputedCount(t *testing.T) {
 	found := make(map[string]struct{})
 	explore(othello.NewBoardStart(), make(map[othello.Board]bool), found)
 
-	require.Len(t, found, 67245)
+	require.Len(t, found, 67239)
+}
+
+func TestExplore_SkipsTargetDiscBoardWithNoLegalMove(t *testing.T) {
+	// A real 12-disc board reached by legal play from start where black
+	// (to move) has no legal move, only white does after a pass.
+	board, err := othello.ParseBoard("0000001c183000800000000000c04020-b")
+	require.NoError(t, err)
+	require.Equal(t, targetDiscs, board.CountDiscs())
+	require.False(t, board.HasMoves(), "test board must have no legal move for this test to be meaningful")
+
+	found := make(map[string]struct{})
+	explore(board, make(map[othello.Board]bool), found)
+
+	require.Empty(t, found)
 }
 
 // boardWithDiscs returns any legal board with exactly n discs, reached by

@@ -69,6 +69,18 @@ survived. `db_data/` dropped from `.gitignore` since it's never created.
       not learned: <12 discs) and embed in source
 - [x] unit test asserting the count and uniqueness
 
+Later found to include 6 boards where the player to move has no legal move
+(must pass) — `internal/api`'s job claiming permanently skips these (edax
+crashes on a no-legal-move position), so once seeded they sat at level 0
+forever, unfixable by any worker. Confirmed against both `old/` Go
+(`NormalizedPosition.IsDBSavable`) and Python (`Position.is_db_savable`)
+that neither ever saved such a position in the first place — matching what
+`internal/loader.ExtractBoards` (Phase 10) already does — so
+`internal/othello/gen`'s `explore` was updated to skip them too, and the
+embedded set regenerated: 67 245 → 67 239. The 6 already-seeded rows were
+deleted from the local dev DB by exact position match (not a bulk/level-based
+condition), verified against before/after row counts.
+
 ## Phase 4 — DB layer (`internal/db` or similar)
 - [x] Schema: Board (disc count, search level, evaluation), no best-move
       stored

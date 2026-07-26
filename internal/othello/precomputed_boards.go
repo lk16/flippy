@@ -18,7 +18,10 @@ var (
 )
 
 // PrecomputedBoards12 returns the full set of NormalizedBoards with exactly
-// 12 discs reachable by legal play from the standard starting position.
+// 12 discs reachable by legal play from the standard starting position,
+// excluding any where the player to move has no legal move (edax can't
+// evaluate those, and their value is trivially the negation of whatever
+// they pass into, so they'd never do anything but sit unlearned).
 // Positions with fewer discs are never learned directly; they're backfilled
 // by minimaxing this set instead.
 func PrecomputedBoards12() []NormalizedBoard {

@@ -9,12 +9,13 @@ import (
 func TestPrecomputedBoards12(t *testing.T) {
 	boards := PrecomputedBoards12()
 
-	require.Len(t, boards, 67245)
+	require.Len(t, boards, 67239)
 
 	seen := make(map[string]bool, len(boards))
 	for _, board := range boards {
 		require.Equal(t, 12, board.CountDiscs())
 		require.True(t, board.Board().IsNormalized())
+		require.True(t, board.HasMoves(), "board with no legal move should never be db-savable")
 
 		key := board.String()
 		require.False(t, seen[key], "duplicate board: %s", key)
