@@ -31,7 +31,7 @@ docker compose -f "$COMPOSE_FILE" up -d --wait
 
 migrate -path migrations -database "$FLIPPY_POSTGRES_URL" up
 
-gotestsum -- -cover -coverprofile="$COVERPROFILE" ./...
+gotestsum -- -p 1 -cover -coverprofile="$COVERPROFILE" ./...
 
 echo
 go tool cover -func="$COVERPROFILE"

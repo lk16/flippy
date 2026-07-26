@@ -231,11 +231,39 @@ Decisions made with the user during implementation (none spelled out in
   flag if one is wanted before relying on this further.
 
 ## Phase 10 — Loader (`cmd/loader`)
-- [ ] Command to import files (wtb/pgn/move-string) as `Game`s and extract
+- [x] Command to import files (wtb/pgn/move-string) as `Game`s and extract
       `NormalizedBoard`s to add to DB
-- [ ] Adding boards never updates/removes existing DB rows; learning only
+- [x] Adding boards never updates/removes existing DB rows; learning only
       updates existing rows, never adds/removes
-- [ ] unit tests for the extraction logic (I/O-free)
+- [x] unit tests for the extraction logic (I/O-free)
+
+`internal/loader.ExtractBoards` takes every board on each imported game's
+played line and, since `old/`'s two implementations diverge here (Python
+`load_pgn.py` adds one-ply children of played-line boards, `load_wthor.py`
+doesn't, and `prompt.md` doesn't mention children at all), also adds every
+legal one-ply child of those boards — confirmed with the user. A board is
+kept only if it has a legal move and its disc count is in
+`[book.LeafDiscs, book.MaxSavableDiscs]` (12-30), the same range
+`ListLearnable`/job-claiming and the Phase 7 cache already care about;
+`book.MaxSavableDiscs` (30) was pulled out of `internal/api`'s previously
+unexported `maxLearnableDiscs` into `internal/book` so both packages (and
+now `internal/loader`) share one constant instead of the bound being
+duplicated. `AddBoards` itself (Phase 4) already provides the
+never-updates/never-removes semantics; the loader just calls it.
+
+`cmd/loader` gained three subcommands alongside `seed`: `load-wtb
+<files...>`, `load-pgn <files...>`, `load-oq <moves>`. This is scoped
+smaller than `old/`'s incremental PGN importer (`.flippy/pgn.json`
+last-processed-file tracking, folder scanning) — that's listed under
+"CLI tools" below for a Phase 11 port/drop decision, not part of this
+phase's checklist.
+
+While testing this phase, `./test.sh` (and CI's `go test ./...`)
+intermittently hit Postgres deadlocks from concurrent packages calling
+`AddBoards` against the same test DB at once (`go test`'s default
+cross-package parallelism). Fixed by adding `-p 1` to both `test.sh`'s
+`gotestsum` invocation and the CI workflow's `go test`, serializing
+packages; within a package, tests already isolate via one transaction each.
 
 ## Phase 11 — Final pass
 - [ ] Full `pre-commit run -a` + full test suite green

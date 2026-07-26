@@ -13,6 +13,10 @@ import (
 // internal/db). Cache backfills evaluations for every board below it.
 const LeafDiscs = 12
 
+// MaxSavableDiscs is the highest disc count worth a row in the boards
+// table: beyond it, a position is too specific to be worth pre-computing.
+const MaxSavableDiscs = 30
+
 // Cache holds minimax-derived evaluations for boards with fewer than
 // LeafDiscs discs, backfilled from the currently-learned LeafDiscs-disc
 // evaluations in the DB. It's rebuilt from scratch on demand rather than

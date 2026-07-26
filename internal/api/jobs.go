@@ -4,17 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/othello"
 )
 
 const (
-	// minLearnableDiscs and maxLearnableDiscs bound which boards are ever
-	// handed out as jobs. Below minLearnableDiscs, positions are backfilled
-	// by minimax rather than learned directly; above maxLearnableDiscs, the
-	// board is no longer worth storing in the book.
-	minLearnableDiscs = 12
-	maxLearnableDiscs = 30
-
 	// jobCandidateBatch is how many candidate boards are fetched per claim
 	// attempt. It must be large enough that, even with several workers
 	// racing for jobs, at least one candidate in the batch is still free.
@@ -32,7 +26,7 @@ type Job struct {
 // already claimed by another worker. It reports false, with no error, if no
 // job is currently available.
 func (s *Server) claimJob(ctx context.Context, workerID string) (Job, bool, error) {
-	candidates, err := s.repo.ListLearnable(ctx, minLearnableDiscs, maxLearnableDiscs, jobCandidateBatch)
+	candidates, err := s.repo.ListLearnable(ctx, book.LeafDiscs, book.MaxSavableDiscs, jobCandidateBatch)
 	if err != nil {
 		return Job{}, false, fmt.Errorf("failed to list candidate boards: %w", err)
 	}
