@@ -1,0 +1,128 @@
+// Package worker implements the job loop that claims boards from the API,
+// evaluates them with edax, and submits the results back.
+package worker
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+
+	"github.com/lk16/flippy/internal/edax"
+)
+
+// Job is a board to evaluate, and the level to search it at.
+type Job struct {
+	Board string
+	Level int
+}
+
+// Client talks to the flippy API server on behalf of a single worker
+// identity.
+type Client struct {
+	baseURL    string
+	workerID   string
+	httpClient *http.Client
+}
+
+// NewClient returns a Client that talks to the API server at baseURL (e.g.
+// "http://localhost:8080") as workerID.
+func NewClient(baseURL, workerID string) *Client {
+	return &Client{baseURL: baseURL, workerID: workerID, httpClient: http.DefaultClient}
+}
+
+// jobResponse is the JSON shape of GET /api/jobs's response body.
+type jobResponse struct {
+	Board string `json:"board"`
+	Level int    `json:"level"`
+}
+
+// GetJob claims the next available job, if any.
+func (c *Client) GetJob(ctx context.Context) (Job, bool, error) {
+	target := fmt.Sprintf("%s/api/jobs?worker_id=%s", c.baseURL, url.QueryEscape(c.workerID))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return Job{}, false, fmt.Errorf("failed to build request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return Job{}, false, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	switch resp.StatusCode {
+	case http.StatusNoContent:
+		return Job{}, false, nil
+	case http.StatusOK:
+		var jr jobResponse
+		if err := json.NewDecoder(resp.Body).Decode(&jr); err != nil {
+			return Job{}, false, fmt.Errorf("failed to decode job response: %w", err)
+		}
+		return Job(jr), true, nil
+	default:
+		return Job{}, false, fmt.Errorf("unexpected status %d from GET /api/jobs", resp.StatusCode)
+	}
+}
+
+// jobResultRequest is the JSON body POSTed to /api/jobs/result.
+type jobResultRequest struct {
+	WorkerID   string `json:"worker_id"`
+	Board      string `json:"board"`
+	Level      int    `json:"level"`
+	Depth      int    `json:"depth"`
+	Confidence int    `json:"confidence"`
+	Score      int    `json:"score"`
+}
+
+// SubmitJobResult submits eval, computed at level, for board.
+func (c *Client) SubmitJobResult(ctx context.Context, board string, level int, eval edax.Evaluation) error {
+	body := jobResultRequest{
+		WorkerID:   c.workerID,
+		Board:      board,
+		Level:      level,
+		Depth:      eval.Depth,
+		Confidence: eval.Confidence,
+		Score:      eval.Score,
+	}
+	return c.post(ctx, "/api/jobs/result", body)
+}
+
+// heartbeatRequest is the JSON body POSTed to /api/workers/heartbeat.
+type heartbeatRequest struct {
+	WorkerID string `json:"worker_id"`
+}
+
+// Heartbeat refreshes this worker's job claim, if it has one.
+func (c *Client) Heartbeat(ctx context.Context) error {
+	return c.post(ctx, "/api/workers/heartbeat", heartbeatRequest{WorkerID: c.workerID})
+}
+
+// post sends body as JSON to path and reports an error unless the server
+// responds 200 OK.
+func (c *Client) post(ctx context.Context, path string, body any) error {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("failed to build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status %d from POST %s", resp.StatusCode, path)
+	}
+	return nil
+}

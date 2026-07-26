@@ -137,12 +137,30 @@ direct DB result) — not a Phase 7 checklist item as written, but confirmed
 with the user as in-scope, since otherwise the cache would have had no
 external consumer yet.
 
-## Phase 8 — Worker (`cmd/worker`)
-- [ ] Loop: fetch Job (Board + level) from API → hand to long-running edax →
+## Phase 8 — Worker (`cmd/worker`, `internal/worker`)
+- [x] Loop: fetch Job (Board + level) from API → hand to long-running edax →
       await evaluation → POST Job+result back to API
-- [ ] Periodic heartbeat to server
-- [ ] Clean shutdown (edax process + in-flight job handling)
-- [ ] unit tests with a fake API client and fake edax
+- [x] Periodic heartbeat to server
+- [x] Clean shutdown (edax process + in-flight job handling)
+- [x] unit tests with a fake API client and fake edax
+
+`internal/worker.Client` talks to the Phase 6 API (own JSON wire types,
+matching but not sharing `internal/api`'s unexported ones); `Worker` depends
+on small `apiClient`/`evaluator` interfaces so `internal/worker/worker_test.go`
+can inject hand-rolled fakes per the checklist, while
+`internal/worker/client_test.go` separately verifies `Client` against a real
+`api.Server` (via `httptest`) so the wire format itself is checked, not just
+an assumed contract.
+
+Clean shutdown: canceling the worker's context can't interrupt a blocked
+edax evaluation (edax's process I/O doesn't take a context), so
+`cmd/worker` also closes the edax process directly, concurrently, on
+`ctx.Done()` — verified manually against the real edax binary: `SIGTERM`
+sent to the worker mid-search killed the edax subprocess within ~200ms.
+(An earlier scare during this manual testing — an edax process apparently
+outliving its worker — turned out to be `go run`'s wrapper process not
+forwarding `SIGTERM` to the binary it execs, not a bug in this code; the
+compiled binary shuts down its edax subprocess correctly.)
 
 ## Phase 9 — Frontend (`internal/web`, `static/`)
 - [ ] Go `html/template`-based admin site, left sidebar for page nav
