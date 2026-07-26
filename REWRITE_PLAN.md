@@ -86,16 +86,38 @@ low bug surface. Run `EDAX_PATH=... ./test.sh` locally for full coverage of
 this package.
 
 ## Phase 6 — API server (`cmd/server`, `internal/api`)
-- [ ] JSON REST API prefixed `api/`
-- [ ] `GET` job endpoint: atomic job claim (lowest disc count, then lowest
+- [x] JSON REST API prefixed `api/`
+- [x] `GET` job endpoint: atomic job claim (lowest disc count, then lowest
       learn level; skip <12 discs and >30 empties)
-- [ ] `POST` job result endpoint
-- [ ] `GET` evaluation-by-(non-normalized)-Board endpoint
-- [ ] Worker heartbeat endpoint + reaping: jobs from dead workers become
+- [x] `POST` job result endpoint
+- [x] `GET` evaluation-by-(non-normalized)-Board endpoint
+- [x] Worker heartbeat endpoint + reaping: jobs from dead workers become
       claimable again
-- [ ] Stats endpoint: single response with move-counts per (level, disc
+- [x] Stats endpoint: single response with move-counts per (level, disc
       count) cell, indexed appropriately for a large Board table
-- [ ] unit tests per handler; integration tests against dockerized Postgres
+- [x] unit tests per handler; integration tests against dockerized Postgres
+
+Notes on decisions made along the way (none spelled out in `prompt.md`;
+confirmed with the user during implementation):
+- The "skip <12 discs and >30 empties" bound resolves, against `old/`'s
+  `MaxBookSavableDiscs`/`MAX_SAVABLE_DISCS` (both `30`), to a plain
+  disc-count range: boards are only learnable with 12-30 discs.
+- `api.TargetLevel(discCount)` is the single place deciding what level a
+  board should be learned to. It always returns 24 today regardless of
+  discCount — a placeholder kept as a real function (not a constant) so a
+  future per-disc-count scheme is a one-function change.
+- Job claims and worker identity are **not** stored in the `boards` table or
+  a new Postgres table — extra columns/rows were rejected for a table
+  expected to grow large. Instead Redis holds this ephemeral state: a
+  `claim:<board string>` key (worker ID, TTL) per in-flight job, and a
+  `worker:<id>` key (board string, same TTL) so a worker's periodic
+  heartbeat can find and refresh its own claim. Expiry alone does the
+  reaping — no sweep/cron needed. This adds a new dependency
+  (`redis/go-redis`) and a `redis` service in both docker-compose files and
+  CI.
+- There's no worker registration endpoint. A worker mints its own ID at
+  startup and sends it on every request; the heartbeat endpoint is a no-op
+  for a worker with no active claim rather than an error.
 
 ## Phase 7 — Startup minimax cache
 - [ ] On server start, minimax all positions with <11 discs from the set of

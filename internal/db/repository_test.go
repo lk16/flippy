@@ -59,6 +59,43 @@ func testBoard(t *testing.T, discs int) othello.NormalizedBoard {
 	return board.Normalize()
 }
 
+// testDistinctBoards returns n distinct NormalizedBoards with exactly discs
+// discs, found via breadth-first search from the starting position.
+func testDistinctBoards(t *testing.T, discs, n int) []othello.NormalizedBoard {
+	t.Helper()
+
+	seen := make(map[othello.Board]bool)
+	var result []othello.NormalizedBoard
+
+	frontier := []othello.Board{othello.NewBoardStart()}
+	for len(frontier) > 0 && len(result) < n {
+		var next []othello.Board
+		for _, board := range frontier {
+			if board.CountDiscs() == discs {
+				norm := board.Normalize()
+				if key := norm.Board(); !seen[key] {
+					seen[key] = true
+					result = append(result, norm)
+				}
+				continue
+			}
+
+			if !board.HasMoves() {
+				passed, err := board.DoMove(othello.PassMove)
+				require.NoError(t, err)
+				next = append(next, passed)
+				continue
+			}
+
+			next = append(next, board.Children()...)
+		}
+		frontier = next
+	}
+
+	require.GreaterOrEqual(t, len(result), n)
+	return result[:n]
+}
+
 func TestRepository_AddBoards_GetBoard(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
@@ -188,6 +225,81 @@ func TestRepository_SaveEvaluation_NoOpWhenNotBetter(t *testing.T) {
 	got, err := repo.GetBoard(ctx, board.Board())
 	require.NoError(t, err)
 	require.Equal(t, first, got)
+}
+
+func TestRepository_ListLearnable_OrdersByDiscCountThenLevel(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	board12 := testBoard(t, 12)
+	board13s := testDistinctBoards(t, 13, 2)
+	board13, board13Other := board13s[0], board13s[1]
+
+	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board12, board13, board13Other}))
+	require.NoError(t, repo.SaveEvaluation(ctx, board13, Evaluation{Level: 10, Depth: 10, Confidence: 100, Score: 0}))
+	require.NoError(t, repo.SaveEvaluation(ctx, board13Other, Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 0}))
+
+	results, err := repo.ListLearnable(ctx, 12, 30, 10)
+	require.NoError(t, err)
+	require.Len(t, results, 3)
+
+	require.Equal(t, board12, results[0].Board)
+	require.Equal(t, board13, results[1].Board)
+	require.Equal(t, board13Other, results[2].Board)
+}
+
+func TestRepository_ListLearnable_FiltersByDiscCountRange(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	board12 := testBoard(t, 12)
+	board35 := testBoard(t, 35)
+
+	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board12, board35}))
+
+	results, err := repo.ListLearnable(ctx, 12, 30, 10)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, board12, results[0].Board)
+}
+
+func TestRepository_ListLearnable_RespectsLimit(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	boards := othello.PrecomputedBoards12()[:5]
+	require.NoError(t, repo.AddBoards(ctx, boards))
+
+	results, err := repo.ListLearnable(ctx, 12, 30, 3)
+	require.NoError(t, err)
+	require.Len(t, results, 3)
+}
+
+func TestRepository_ListLearnable_Empty(t *testing.T) {
+	repo := testRepository(t)
+
+	results, err := repo.ListLearnable(context.Background(), 12, 30, 10)
+	require.NoError(t, err)
+	require.Empty(t, results)
+}
+
+func TestRepository_Stats(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	board12s := testDistinctBoards(t, 12, 2)
+	board12a, board12b := board12s[0], board12s[1]
+	board13 := testBoard(t, 13)
+
+	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board12a, board12b, board13}))
+	require.NoError(t, repo.SaveEvaluation(ctx, board12a, Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 0}))
+
+	stats, err := repo.Stats(ctx)
+	require.NoError(t, err)
+
+	require.Contains(t, stats, LevelStat{DiscCount: 12, Level: 0, Count: 1})
+	require.Contains(t, stats, LevelStat{DiscCount: 12, Level: 20, Count: 1})
+	require.Contains(t, stats, LevelStat{DiscCount: 13, Level: 0, Count: 1})
 }
 
 func TestRepository_SaveEvaluation_NoOpWhenLevelLowerDespiteHigherConfidence(t *testing.T) {

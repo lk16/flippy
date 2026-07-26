@@ -8,6 +8,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 COMPOSE_FILE="docker-compose.test.yml"
 export FLIPPY_POSTGRES_URL="postgres://flippy_test:flippy_test@localhost:12322/flippy_test?sslmode=disable"
+export FLIPPY_REDIS_URL="redis://localhost:12324/0"
 COVERPROFILE="$(mktemp)"
 
 cleanup() {

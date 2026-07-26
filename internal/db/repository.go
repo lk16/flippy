@@ -17,6 +17,7 @@ import (
 type querier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
 // Evaluation is the current edax evaluation state stored for a Board. A
@@ -130,4 +131,92 @@ func (r *Repository) SaveEvaluation(ctx context.Context, board othello.Normalize
 	}
 
 	return nil
+}
+
+// BoardEvaluation pairs a NormalizedBoard with its current evaluation, for
+// bulk queries that need both.
+type BoardEvaluation struct {
+	Board      othello.NormalizedBoard
+	Evaluation Evaluation
+}
+
+// ListLearnable returns up to limit boards with disc counts in
+// [minDiscs, maxDiscs], ordered by disc count then level (both ascending) —
+// the order in which job assignment should offer them out.
+func (r *Repository) ListLearnable(ctx context.Context, minDiscs, maxDiscs, limit int) ([]BoardEvaluation, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT position, level, depth, confidence, score
+		 FROM boards
+		 WHERE disc_count BETWEEN $1 AND $2
+		 ORDER BY disc_count, level
+		 LIMIT $3`,
+		minDiscs, maxDiscs, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list learnable boards: %w", err)
+	}
+	defer rows.Close()
+
+	var results []BoardEvaluation
+	for rows.Next() {
+		var position []byte
+		var eval Evaluation
+		if err := rows.Scan(&position, &eval.Level, &eval.Depth, &eval.Confidence, &eval.Score); err != nil {
+			return nil, fmt.Errorf("failed to scan learnable board: %w", err)
+		}
+
+		board, err := othello.ParseBoardBytes(position)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse stored board: %w", err)
+		}
+
+		normalized, err := othello.NewNormalizedBoard(board)
+		if err != nil {
+			return nil, fmt.Errorf("stored board is not normalized: %w", err)
+		}
+
+		results = append(results, BoardEvaluation{Board: normalized, Evaluation: eval})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to list learnable boards: %w", err)
+	}
+
+	return results, nil
+}
+
+// LevelStat is the count of boards at a given (disc count, level) pair.
+type LevelStat struct {
+	DiscCount int
+	Level     int
+	Count     int
+}
+
+// Stats returns, for every (disc count, level) pair that has at least one
+// board, how many boards are at that pair. Pairs with no boards are omitted
+// rather than returned with a zero count.
+func (r *Repository) Stats(ctx context.Context) ([]LevelStat, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT disc_count, level, count(*)
+		 FROM boards
+		 GROUP BY disc_count, level
+		 ORDER BY disc_count, level`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stats: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []LevelStat
+	for rows.Next() {
+		var stat LevelStat
+		if err := rows.Scan(&stat.DiscCount, &stat.Level, &stat.Count); err != nil {
+			return nil, fmt.Errorf("failed to scan stat: %w", err)
+		}
+		stats = append(stats, stat)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to get stats: %w", err)
+	}
+
+	return stats, nil
 }
