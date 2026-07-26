@@ -6,6 +6,16 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
+# Load local dev config (e.g. EDAX_PATH) so tests that need it aren't
+# skipped. The exports below still take precedence over any values .env
+# happens to set, keeping tests isolated from the local dev DB/Redis.
+if [ -f .env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
+fi
+
 COMPOSE_FILE="docker-compose.test.yml"
 export FLIPPY_POSTGRES_URL="postgres://flippy_test:flippy_test@localhost:12322/flippy_test?sslmode=disable"
 export FLIPPY_REDIS_URL="redis://localhost:12324/0"

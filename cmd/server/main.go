@@ -12,6 +12,7 @@ import (
 
 	"github.com/lk16/flippy/internal/api"
 	"github.com/lk16/flippy/internal/db"
+	"github.com/lk16/flippy/internal/env"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -25,6 +26,10 @@ func requiredEnv(name string) string {
 }
 
 func main() {
+	if err := env.Load(); err != nil {
+		log.Fatalf("failed to load .env: %v", err)
+	}
+
 	postgresURL := requiredEnv("FLIPPY_POSTGRES_URL")
 	redisURL := requiredEnv("FLIPPY_REDIS_URL")
 
