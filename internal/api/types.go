@@ -1,5 +1,7 @@
 package api
 
+import "time"
+
 // jobResponse is the JSON shape of a Job returned by GET /api/jobs.
 type jobResponse struct {
 	Board string `json:"board"`
@@ -18,7 +20,9 @@ type jobResultRequest struct {
 
 // heartbeatRequest is the JSON body POSTed to /api/workers/heartbeat.
 type heartbeatRequest struct {
-	WorkerID string `json:"worker_id"`
+	WorkerID  string `json:"worker_id"`
+	Hostname  string `json:"hostname"`
+	GitCommit string `json:"git_commit"`
 }
 
 // evaluationSourceEdax marks an evaluationResponse as a directly-learned
@@ -46,4 +50,13 @@ type statEntry struct {
 	DiscCount int `json:"disc_count"`
 	Level     int `json:"level"`
 	Count     int `json:"count"`
+}
+
+// workerResponse is one entry of the GET /api/workers response.
+type workerResponse struct {
+	ID                string    `json:"id"`
+	Hostname          string    `json:"hostname"`
+	GitCommit         string    `json:"git_commit"`
+	PositionsComputed int       `json:"positions_computed"`
+	LastActive        time.Time `json:"last_active"`
 }

@@ -1,0 +1,86 @@
+:root {
+    --bg: #1a1a1a;
+    --bg-panel: #242424;
+    --text: #ecf0f1;
+    --text-dim: #888888;
+    --accent: #4caf50;
+    --border: #3a3a3a;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: Arial, sans-serif;
+    display: flex;
+    min-height: 100vh;
+}
+
+.sidebar {
+    width: 180px;
+    flex-shrink: 0;
+    background-color: var(--bg-panel);
+    border-right: 1px solid var(--border);
+    padding: 20px 0;
+}
+
+.sidebar h1 {
+    font-size: 1.2em;
+    margin: 0 20px 20px;
+    color: var(--accent);
+}
+
+.sidebar nav {
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar nav a {
+    padding: 10px 20px;
+    color: var(--text);
+    text-decoration: none;
+}
+
+.sidebar nav a:hover {
+    background-color: #333333;
+}
+
+.sidebar nav a.active {
+    background-color: var(--accent);
+    color: #111111;
+    font-weight: bold;
+}
+
+main {
+    flex: 1;
+    padding: 20px;
+    min-width: 0;
+}
+
+table {
+    border-collapse: collapse;
+    background-color: var(--bg-panel);
+}
+
+th,
+td {
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    text-align: left;
+}
+
+th {
+    background-color: #333333;
+}
+
+tr:nth-child(even) {
+    background-color: #2a2a2a;
+}
+
+tr:hover {
+    background-color: #3a3a3a;
+}

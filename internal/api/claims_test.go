@@ -34,6 +34,19 @@ func TestServer_TryClaim_DistinctBoardsBothSucceed(t *testing.T) {
 	require.True(t, ok)
 }
 
+func TestServer_TryClaim_RecordsClaimedBoardOnWorker(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	ok, err := s.tryClaim(ctx, "board-a", "worker-1")
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	board, err := s.redis.HGet(ctx, workerKey("worker-1"), workerFieldClaimedBoard).Result()
+	require.NoError(t, err)
+	require.Equal(t, "board-a", board)
+}
+
 func TestServer_ReleaseClaim_AllowsReclaim(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
@@ -49,9 +62,36 @@ func TestServer_ReleaseClaim_AllowsReclaim(t *testing.T) {
 	require.True(t, ok)
 }
 
+func TestServer_ReleaseClaim_ClearsClaimedBoardOnWorker(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	ok, err := s.tryClaim(ctx, "board-a", "worker-1")
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	require.NoError(t, s.releaseClaim(ctx, "board-a", "worker-1"))
+
+	board, err := s.redis.HGet(ctx, workerKey("worker-1"), workerFieldClaimedBoard).Result()
+	require.NoError(t, err)
+	require.Empty(t, board)
+}
+
 func TestServer_ReleaseClaim_NoActiveClaimIsNoop(t *testing.T) {
 	s := testServer(t)
 	require.NoError(t, s.releaseClaim(context.Background(), "board-a", "worker-1"))
+}
+
+func TestServer_RecordJobCompletion_IncrementsCounter(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.recordJobCompletion(ctx, "worker-1"))
+	require.NoError(t, s.recordJobCompletion(ctx, "worker-1"))
+
+	count, err := s.redis.HGet(ctx, workerKey("worker-1"), workerFieldPositionsComputed).Result()
+	require.NoError(t, err)
+	require.Equal(t, "2", count)
 }
 
 func TestServer_Heartbeat_RefreshesClaimTTL(t *testing.T) {
@@ -64,14 +104,66 @@ func TestServer_Heartbeat_RefreshesClaimTTL(t *testing.T) {
 
 	require.NoError(t, s.redis.Expire(ctx, claimKey("board-a"), time.Second).Err())
 
-	require.NoError(t, s.heartbeat(ctx, "worker-1"))
+	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1"))
 
 	ttl, err := s.redis.TTL(ctx, claimKey("board-a")).Result()
 	require.NoError(t, err)
 	require.Greater(t, ttl, time.Second)
 }
 
-func TestServer_Heartbeat_IdleWorkerIsNoop(t *testing.T) {
+func TestServer_Heartbeat_RecordsHostnameAndGitCommit(t *testing.T) {
 	s := testServer(t)
-	require.NoError(t, s.heartbeat(context.Background(), "worker-unknown"))
+	ctx := context.Background()
+
+	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1"))
+
+	values, err := s.redis.HGetAll(ctx, workerKey("worker-1")).Result()
+	require.NoError(t, err)
+	require.Equal(t, "host-1", values[workerFieldHostname])
+	require.Equal(t, "commit-1", values[workerFieldGitCommit])
+	require.NotEmpty(t, values[workerFieldLastActive])
+}
+
+func TestServer_Heartbeat_IdleWorkerIsNotAnError(t *testing.T) {
+	s := testServer(t)
+	require.NoError(t, s.heartbeat(context.Background(), "worker-unknown", "host-1", "commit-1"))
+}
+
+func TestServer_ListWorkers_Empty(t *testing.T) {
+	s := testServer(t)
+
+	workers, err := s.listWorkers(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, workers)
+}
+
+func TestServer_ListWorkers_OrdersByMostRecentlyActive(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1"))
+	require.NoError(t, s.heartbeat(ctx, "worker-2", "host-2", "commit-2"))
+
+	workers, err := s.listWorkers(ctx)
+	require.NoError(t, err)
+	require.Len(t, workers, 2)
+	require.Equal(t, "worker-2", workers[0].ID)
+	require.Equal(t, "worker-1", workers[1].ID)
+}
+
+func TestServer_ListWorkers_IncludesClaimAndPositionsComputed(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1"))
+	require.NoError(t, s.recordJobCompletion(ctx, "worker-1"))
+
+	workers, err := s.listWorkers(ctx)
+	require.NoError(t, err)
+	require.Len(t, workers, 1)
+	require.Equal(t, "worker-1", workers[0].ID)
+	require.Equal(t, "host-1", workers[0].Hostname)
+	require.Equal(t, "commit-1", workers[0].GitCommit)
+	require.Equal(t, 1, workers[0].PositionsComputed)
+	require.False(t, workers[0].LastActive.IsZero())
 }

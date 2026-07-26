@@ -4,7 +4,9 @@ import (
 	"context"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/lk16/flippy/internal/edax"
@@ -18,6 +20,18 @@ func requiredEnv(name string) string {
 		log.Fatalf("%s environment variable is not set", name)
 	}
 	return value
+}
+
+// gitCommit best-effort determines the commit this binary was built from,
+// for display on the API's worker listing. It's purely informational, so a
+// deployed binary without a .git directory falls back to "unknown" rather
+// than failing to start.
+func gitCommit() string {
+	out, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	if err != nil {
+		return "unknown"
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func main() {
@@ -38,8 +52,13 @@ func main() {
 	}
 	log.Printf("worker id: %s", workerID)
 
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown"
+	}
+
 	edaxProcess := edax.NewProcess(edaxPath)
-	client := worker.NewClient(serverURL, workerID)
+	client := worker.NewClient(serverURL, workerID, hostname, gitCommit())
 	w := worker.New(client, edaxProcess)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

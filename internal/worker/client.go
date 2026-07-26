@@ -24,13 +24,22 @@ type Job struct {
 type Client struct {
 	baseURL    string
 	workerID   string
+	hostname   string
+	gitCommit  string
 	httpClient *http.Client
 }
 
 // NewClient returns a Client that talks to the API server at baseURL (e.g.
-// "http://localhost:8080") as workerID.
-func NewClient(baseURL, workerID string) *Client {
-	return &Client{baseURL: baseURL, workerID: workerID, httpClient: http.DefaultClient}
+// "http://localhost:8080") as workerID. hostname and gitCommit are reported
+// on every heartbeat, for display on the API's worker listing.
+func NewClient(baseURL, workerID, hostname, gitCommit string) *Client {
+	return &Client{
+		baseURL:    baseURL,
+		workerID:   workerID,
+		hostname:   hostname,
+		gitCommit:  gitCommit,
+		httpClient: http.DefaultClient,
+	}
 }
 
 // jobResponse is the JSON shape of GET /api/jobs's response body.
@@ -93,12 +102,19 @@ func (c *Client) SubmitJobResult(ctx context.Context, board string, level int, e
 
 // heartbeatRequest is the JSON body POSTed to /api/workers/heartbeat.
 type heartbeatRequest struct {
-	WorkerID string `json:"worker_id"`
+	WorkerID  string `json:"worker_id"`
+	Hostname  string `json:"hostname"`
+	GitCommit string `json:"git_commit"`
 }
 
-// Heartbeat refreshes this worker's job claim, if it has one.
+// Heartbeat reports this worker as active, and refreshes its job claim, if
+// it has one.
 func (c *Client) Heartbeat(ctx context.Context) error {
-	return c.post(ctx, "/api/workers/heartbeat", heartbeatRequest{WorkerID: c.workerID})
+	return c.post(ctx, "/api/workers/heartbeat", heartbeatRequest{
+		WorkerID:  c.workerID,
+		Hostname:  c.hostname,
+		GitCommit: c.gitCommit,
+	})
 }
 
 // post sends body as JSON to path and reports an error unless the server

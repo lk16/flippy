@@ -74,9 +74,15 @@ func (w *Worker) Run(ctx context.Context) {
 	wg.Wait()
 }
 
-// runHeartbeat sends a heartbeat every heartbeatInterval until ctx is
-// canceled.
+// runHeartbeat sends a heartbeat immediately, then every heartbeatInterval,
+// until ctx is canceled. Sending one immediately (rather than waiting for
+// the first tick) means the worker shows up on the API's worker listing as
+// soon as it starts, not up to a full interval later.
 func (w *Worker) runHeartbeat(ctx context.Context) {
+	if err := w.api.Heartbeat(ctx); err != nil {
+		slog.Error("failed to send heartbeat", "error", err)
+	}
+
 	ticker := time.NewTicker(w.heartbeatInterval)
 	defer ticker.Stop()
 

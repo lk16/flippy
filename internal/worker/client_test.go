@@ -61,7 +61,7 @@ func testClient(t *testing.T, workerID string) (*Client, *db.Repository) {
 	httpServer := httptest.NewServer(server.Handler())
 	t.Cleanup(httpServer.Close)
 
-	return NewClient(httpServer.URL, workerID), repo
+	return NewClient(httpServer.URL, workerID, "test-host", "test-commit"), repo
 }
 
 // testBoard returns a NormalizedBoard reached by playing the first available
@@ -113,7 +113,7 @@ func TestClient_GetJob_TwoWorkersGetDistinctJobs(t *testing.T) {
 	// Same server/DB as client1, different worker identity: testClient
 	// gives each caller its own isolated Postgres transaction, which two
 	// separate calls would put on different, mutually-invisible snapshots.
-	client2 := NewClient(client1.baseURL, "w2")
+	client2 := NewClient(client1.baseURL, "w2", "test-host", "test-commit")
 	ctx := context.Background()
 
 	boards := testDistinctClientBoards(t, 12, 2)

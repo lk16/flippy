@@ -14,6 +14,7 @@ import (
 	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
 	"github.com/lk16/flippy/internal/env"
+	"github.com/lk16/flippy/internal/web"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -62,8 +63,19 @@ func main() {
 	}
 	log.Printf("minimax cache built: %d boards", cache.Len())
 
-	server := api.NewServer(repo, redisClient, cache)
-	httpServer := &http.Server{Addr: addr, Handler: server.Handler()}
+	apiServer := api.NewServer(repo, redisClient, cache)
+
+	webServer, err := web.NewServer()
+	if err != nil {
+		log.Fatalf("failed to build web server: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("/api/", apiServer.Handler())
+	mux.Handle("/ws", apiServer.Handler())
+	mux.Handle("/", webServer.Handler())
+
+	httpServer := &http.Server{Addr: addr, Handler: mux}
 
 	go func() {
 		<-ctx.Done()

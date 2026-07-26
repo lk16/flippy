@@ -1,0 +1,20 @@
+{{define "head"}}
+<link rel="stylesheet" href="/static/clients.css">
+{{end}}
+
+{{define "content"}}
+<h1>Active Workers</h1>
+<table>
+    <thead>
+        <tr>
+            <th>Worker ID</th>
+            <th>Hostname</th>
+            <th>Git Commit</th>
+            <th>Positions Computed</th>
+            <th>Last Active</th>
+        </tr>
+    </thead>
+    <tbody id="worker-table-body"></tbody>
+</table>
+<script src="/static/clients.js"></script>
+{{end}}

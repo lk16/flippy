@@ -163,15 +163,72 @@ forwarding `SIGTERM` to the binary it execs, not a bug in this code; the
 compiled binary shuts down its edax subprocess correctly.)
 
 ## Phase 9 — Frontend (`internal/web`, `static/`)
-- [ ] Go `html/template`-based admin site, left sidebar for page nav
-- [ ] Main page: board rendering with per-square evaluation; small colored
+- [x] Go `html/template`-based admin site, left sidebar for page nav
+- [x] Main page: board rendering with per-square evaluation; small colored
       dot (color = side to move) when evaluation missing; evaluation number
       (same color convention) when present; pass handling; right-click on
       board undoes last move
-- [ ] Stats page: table of move-counts, rows = disc count, cols = level;
+- [x] Stats page: table of move-counts, rows = disc count, cols = level;
       zero-count cells render empty; backed by the Phase 6 stats endpoint
-- [ ] websocket wiring (confirm what it's used for against old code)
-- [ ] unit tests for handlers/template rendering where practical
+- [x] websocket wiring (confirm what it's used for against old code)
+- [x] unit tests for handlers/template rendering where practical
+
+Decisions made with the user during implementation (none spelled out in
+`prompt.md`):
+- **WASM fallback evaluator skipped.** Old code ran a bundled Rust→WASM
+  Othello engine client-side to show an instant approximate score (styled
+  grey) for child positions while waiting on the real edax/DB evaluation.
+  `prompt.md`'s own description of the main page doesn't mention this — dot
+  when missing, number when present — so it was left out to avoid a
+  Rust/wasm-pack build pipeline for a cosmetic feature. **Revisit later**:
+  worth reconsidering if the plain "dot until the real evaluation arrives"
+  UX feels too slow in practice.
+- **Clients page included**, even though it's a 3rd page not in `prompt.md`
+  (which only anticipates "other pages may be added later"). This required
+  two additions beyond the old worker-registration model established in
+  Phase 6 (workers still don't register — no `POST /api/workers/register`):
+  - Worker heartbeats now carry `hostname` and `git_commit`; a worker
+    determines its own hostname (`os.Hostname`) and best-effort git commit
+    (`git rev-parse HEAD`, falling back to `"unknown"` for a deployed binary
+    without a `.git` checkout) rather than the server assigning identity.
+  - `worker:<id>`'s Redis value changed from a plain string (the claimed
+    board, for claim-TTL refresh) to a hash, adding `hostname`,
+    `git_commit`, `positions_computed` (via `HINCRBY` on each submitted job
+    result), and `last_active` (nanosecond-precision RFC3339, so two
+    heartbeats landing in the same wall-clock second still sort correctly)
+    alongside the existing `claimed_board` field. New `GET /api/workers`
+    scans and returns these, most-recently-active first.
+- **Websocket** (`GET /ws`, in `internal/api` since it shares the same
+  repo/cache/redis dependencies as the REST handlers, not a separate
+  package) is confirmed to be exactly what old code used it for: batched,
+  low-latency evaluation lookups for the children of whatever board is on
+  screen, not live/on-demand edax computation. Old code's
+  `lookupPositions` behind the websocket was already just a DB batch
+  `SELECT`; this port does the same DB lookup plus the Phase 7 minimax
+  cache fallback that `GET /api/boards` also uses.
+- Best-move circle highlighting (border around the best child once *all*
+  of a position's children have a known evaluation) isn't in `prompt.md`
+  either, but was kept as a small, cheap port of existing UX rather than a
+  scope question worth asking about.
+- The client-side board (`static/board.js`) reimplements
+  `internal/othello`'s bitboard move generation and normalization in
+  JavaScript, since the browser needs to simulate moves locally for
+  instant feedback without a server round trip per click — this mirrors
+  what old `game.js` already did. Verified byte-for-byte against the real
+  Go implementation (not just old code): the starting position's
+  `toString()` output and a first-move child's normalized form were
+  checked against actual `internal/othello` output captured earlier in
+  this phase's work.
+- No browser was available for a literal visual/click-through smoke test
+  (the `claude-in-chrome` skill invocation was declined). Verified instead
+  via: a live server + worker + real edax computing actual evaluations
+  end-to-end; `node --check` on all three JS files; the board bitboard/
+  normalization logic run for real in Node and compared against known-good
+  Go output; the websocket protocol driven from Node's native `WebSocket`
+  against the live server using the exact message shape `board.js` sends;
+  and every page/static-asset route checked for correct status and
+  content-type. This is not a substitute for an actual visual check —
+  flag if one is wanted before relying on this further.
 
 ## Phase 10 — Loader (`cmd/loader`)
 - [ ] Command to import files (wtb/pgn/move-string) as `Game`s and extract

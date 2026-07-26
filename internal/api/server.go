@@ -25,7 +25,7 @@ func NewServer(repo *db.Repository, redisClient *redis.Client, cache *book.Cache
 }
 
 // Handler returns the HTTP handler serving the JSON REST API, prefixed
-// "/api/".
+// "/api/", plus the "/ws" websocket endpoint.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
@@ -33,7 +33,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/jobs/result", s.handleSubmitJobResult)
 	mux.HandleFunc("GET /api/boards", s.handleGetBoard)
 	mux.HandleFunc("POST /api/workers/heartbeat", s.handleHeartbeat)
+	mux.HandleFunc("GET /api/workers", s.handleListWorkers)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
+	mux.HandleFunc("GET /ws", s.handleWebSocket)
 
 	return mux
 }

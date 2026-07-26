@@ -281,3 +281,25 @@ func TestHandleStats_ReturnsCounts(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &entries))
 	require.Contains(t, entries, statEntry{DiscCount: 12, Level: 0, Count: 1})
 }
+
+func TestHandleListWorkers_Empty(t *testing.T) {
+	s := testServer(t)
+	w := doRequest(t, s, http.MethodGet, "/api/workers", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.JSONEq(t, `[]`, w.Body.String())
+}
+
+func TestHandleListWorkers_ReturnsActiveWorkers(t *testing.T) {
+	s := testServer(t)
+	require.NoError(t, s.heartbeat(context.Background(), "w1", "host-1", "commit-1"))
+
+	w := doRequest(t, s, http.MethodGet, "/api/workers", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var workers []workerResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &workers))
+	require.Len(t, workers, 1)
+	require.Equal(t, "w1", workers[0].ID)
+	require.Equal(t, "host-1", workers[0].Hostname)
+	require.Equal(t, "commit-1", workers[0].GitCommit)
+}

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -112,12 +113,42 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if err := s.recordJobCompletion(r.Context(), req.WorkerID); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
 	if err := s.releaseClaim(r.Context(), normalized.String(), req.WorkerID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// lookupEvaluation returns the evaluation for board: a direct DB result if
+// one exists, otherwise a minimax-derived one from the cache. ok is false
+// if neither has it.
+func (s *Server) lookupEvaluation(ctx context.Context, board othello.Board) (evaluationResponse, bool, error) {
+	eval, err := s.repo.GetBoard(ctx, board)
+	if err == nil {
+		return evaluationResponse{
+			Level:      eval.Level,
+			Depth:      eval.Depth,
+			Confidence: eval.Confidence,
+			Score:      eval.Score,
+			Source:     evaluationSourceEdax,
+		}, true, nil
+	}
+	if !errors.Is(err, db.ErrBoardNotFound) {
+		return evaluationResponse{}, false, err
+	}
+
+	if score, ok := s.cache.Get(board); ok {
+		return evaluationResponse{Score: score, Source: evaluationSourceMinimax}, true, nil
+	}
+
+	return evaluationResponse{}, false, nil
 }
 
 // handleGetBoard handles GET /api/boards?board=<board string>: looks up the
@@ -135,33 +166,23 @@ func (s *Server) handleGetBoard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	eval, err := s.repo.GetBoard(r.Context(), board)
-	if err == nil {
-		writeJSON(w, http.StatusOK, evaluationResponse{
-			Level:      eval.Level,
-			Depth:      eval.Depth,
-			Confidence: eval.Confidence,
-			Score:      eval.Score,
-			Source:     evaluationSourceEdax,
-		})
-		return
-	}
-	if !errors.Is(err, db.ErrBoardNotFound) {
+	eval, ok, err := s.lookupEvaluation(r.Context(), board)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-
-	if score, ok := s.cache.Get(board); ok {
-		writeJSON(w, http.StatusOK, evaluationResponse{Score: score, Source: evaluationSourceMinimax})
+	if !ok {
+		writeError(w, http.StatusNotFound, db.ErrBoardNotFound)
 		return
 	}
 
-	writeError(w, http.StatusNotFound, err)
+	writeJSON(w, http.StatusOK, eval)
 }
 
-// handleHeartbeat handles POST /api/workers/heartbeat: refreshes the TTL of
-// the requesting worker's job claim, if it has one, keeping it from being
-// reaped and reassigned to another worker.
+// handleHeartbeat handles POST /api/workers/heartbeat: records the
+// requesting worker as active, and refreshes the TTL of its job claim, if
+// it has one, keeping it from being reaped and reassigned to another
+// worker.
 func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	var req heartbeatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -174,12 +195,29 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.heartbeat(r.Context(), req.WorkerID); err != nil {
+	if err := s.heartbeat(r.Context(), req.WorkerID, req.Hostname, req.GitCommit); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// handleListWorkers handles GET /api/workers: returns every currently
+// active worker, most recently active first.
+func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
+	workers, err := s.listWorkers(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	entries := make([]workerResponse, len(workers))
+	for i, wk := range workers {
+		entries[i] = workerResponse(wk)
+	}
+
+	writeJSON(w, http.StatusOK, entries)
 }
 
 // handleStats handles GET /api/stats: returns move-counts per (disc count,

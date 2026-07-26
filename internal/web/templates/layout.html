@@ -1,0 +1,28 @@
+{{define "layout"}}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>{{.Title}} - Flippy</title>
+    <link rel="stylesheet" href="/static/base.css">
+    {{block "head" .}}{{end}}
+</head>
+
+<body>
+    <div class="sidebar">
+        <h1>Flippy</h1>
+        <nav>
+            {{range .Pages}}
+            <a href="{{.Path}}"{{if eq .ID $.Active}} class="active"{{end}}>{{.Title}}</a>
+            {{end}}
+        </nav>
+    </div>
+    <main>
+        {{block "content" .}}{{end}}
+    </main>
+</body>
+
+</html>
+{{end}}
