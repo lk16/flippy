@@ -283,6 +283,49 @@ func TestRepository_ListLearnable_Empty(t *testing.T) {
 	require.Empty(t, results)
 }
 
+func TestRepository_EvaluatedBoards_OnlyReturnsLearnedBoards(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	boards := othello.PrecomputedBoards12()[:2]
+	learned, unlearned := boards[0], boards[1]
+
+	require.NoError(t, repo.AddBoards(ctx, boards))
+	require.NoError(t, repo.SaveEvaluation(ctx, learned, Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 5}))
+
+	results, err := repo.EvaluatedBoards(ctx, 12)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, learned, results[0].Board)
+	require.Equal(t, Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 5}, results[0].Evaluation)
+
+	require.NotContains(t, results, BoardEvaluation{Board: unlearned})
+}
+
+func TestRepository_EvaluatedBoards_FiltersByDiscCount(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	board12 := testBoard(t, 12)
+	board13 := testBoard(t, 13)
+	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board12, board13}))
+	require.NoError(t, repo.SaveEvaluation(ctx, board12, Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 0}))
+	require.NoError(t, repo.SaveEvaluation(ctx, board13, Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 0}))
+
+	results, err := repo.EvaluatedBoards(ctx, 12)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, board12, results[0].Board)
+}
+
+func TestRepository_EvaluatedBoards_Empty(t *testing.T) {
+	repo := testRepository(t)
+
+	results, err := repo.EvaluatedBoards(context.Background(), 12)
+	require.NoError(t, err)
+	require.Empty(t, results)
+}
+
 func TestRepository_Stats(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()

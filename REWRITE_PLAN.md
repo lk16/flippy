@@ -119,11 +119,23 @@ confirmed with the user during implementation):
   startup and sends it on every request; the heartbeat endpoint is a no-op
   for a worker with no active claim rather than an error.
 
-## Phase 7 — Startup minimax cache
-- [ ] On server start, minimax all positions with <11 discs from the set of
+## Phase 7 — Startup minimax cache (`internal/book`)
+- [x] On server start, minimax all positions with <12 discs from the set of
       12-disc evaluations, build in-memory map
-- [ ] Recompute this map whenever a 12-disc evaluation is saved
-- [ ] unit tests for the minimax/backfill logic
+- [x] Recompute this map whenever a 12-disc evaluation is saved
+- [x] unit tests for the minimax/backfill logic
+
+Note: this header originally said "<11 discs", which would have left
+exactly-11-disc boards uncovered by both the DB (which only ever stores
+>=12 discs) and this cache. Confirmed with the user: the cache covers every
+disc count below the DB's own floor, i.e. 4-11 discs, matching Phase 3's
+framing ("positions not learned: <12 discs").
+
+`internal/api`'s `GET /api/boards` now falls back to this cache when a
+board isn't in the DB, returning `"source": "minimax"` (vs `"edax"` for a
+direct DB result) — not a Phase 7 checklist item as written, but confirmed
+with the user as in-scope, since otherwise the cache would have had no
+external consumer yet.
 
 ## Phase 8 — Worker (`cmd/worker`)
 - [ ] Loop: fetch Job (Board + level) from API → hand to long-running edax →

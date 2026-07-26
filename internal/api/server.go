@@ -7,6 +7,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
 )
 
@@ -14,11 +15,13 @@ import (
 type Server struct {
 	repo  *db.Repository
 	redis *redis.Client
+	cache *book.Cache
 }
 
-// NewServer returns a Server backed by repo and redisClient.
-func NewServer(repo *db.Repository, redisClient *redis.Client) *Server {
-	return &Server{repo: repo, redis: redisClient}
+// NewServer returns a Server backed by repo, redisClient, and cache (the
+// minimax backfill for boards below the learnable disc-count floor).
+func NewServer(repo *db.Repository, redisClient *redis.Client, cache *book.Cache) *Server {
+	return &Server{repo: repo, redis: redisClient, cache: cache}
 }
 
 // Handler returns the HTTP handler serving the JSON REST API, prefixed

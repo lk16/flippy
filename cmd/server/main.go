@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lk16/flippy/internal/api"
+	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
 	"github.com/lk16/flippy/internal/env"
 )
@@ -53,7 +54,15 @@ func main() {
 	}
 	defer func() { _ = redisClient.Close() }()
 
-	server := api.NewServer(db.NewRepository(pool), redisClient)
+	repo := db.NewRepository(pool)
+
+	cache := book.NewCache(repo)
+	if err := cache.Rebuild(ctx); err != nil {
+		log.Fatalf("failed to build minimax cache: %v", err)
+	}
+	log.Printf("minimax cache built: %d boards", cache.Len())
+
+	server := api.NewServer(repo, redisClient, cache)
 	httpServer := &http.Server{Addr: addr, Handler: server.Handler()}
 
 	go func() {

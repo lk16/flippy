@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
 	"github.com/lk16/flippy/internal/othello"
 )
@@ -49,7 +50,8 @@ func testServer(t *testing.T) *Server {
 		_ = redisClient.Close()
 	})
 
-	return NewServer(db.NewRepository(tx), redisClient)
+	repo := db.NewRepository(tx)
+	return NewServer(repo, redisClient, book.NewCache(repo))
 }
 
 // testBoard returns a NormalizedBoard reached by playing the first available

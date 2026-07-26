@@ -21,13 +21,24 @@ type heartbeatRequest struct {
 	WorkerID string `json:"worker_id"`
 }
 
+// evaluationSourceEdax marks an evaluationResponse as a directly-learned
+// edax result, backed by a DB row.
+const evaluationSourceEdax = "edax"
+
+// evaluationSourceMinimax marks an evaluationResponse as backfilled by
+// minimaxing learned boards below the learnable disc-count floor (see
+// internal/book) — it has no depth/confidence of its own.
+const evaluationSourceMinimax = "minimax"
+
 // evaluationResponse is the JSON shape of an evaluation, returned by GET
-// /api/boards.
+// /api/boards. Source distinguishes a direct edax result (Level, Depth, and
+// Confidence all meaningful) from a minimax-derived one (only Score is).
 type evaluationResponse struct {
-	Level      int `json:"level"`
-	Depth      int `json:"depth"`
-	Confidence int `json:"confidence"`
-	Score      int `json:"score"`
+	Level      int    `json:"level"`
+	Depth      int    `json:"depth"`
+	Confidence int    `json:"confidence"`
+	Score      int    `json:"score"`
+	Source     string `json:"source"`
 }
 
 // statEntry is one row of the GET /api/stats response.

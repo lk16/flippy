@@ -157,12 +157,47 @@ func (r *Repository) ListLearnable(ctx context.Context, minDiscs, maxDiscs, limi
 	}
 	defer rows.Close()
 
+	results, err := scanBoardEvaluations(rows)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list learnable boards: %w", err)
+	}
+
+	return results, nil
+}
+
+// EvaluatedBoards returns every board with exactly discCount discs that has
+// been learned at least once (level > 0), for backfilling the evaluations
+// of boards below the disc count that's ever learned directly.
+func (r *Repository) EvaluatedBoards(ctx context.Context, discCount int) ([]BoardEvaluation, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT position, level, depth, confidence, score
+		 FROM boards
+		 WHERE disc_count = $1 AND level > 0`,
+		discCount,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list evaluated boards: %w", err)
+	}
+	defer rows.Close()
+
+	results, err := scanBoardEvaluations(rows)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list evaluated boards: %w", err)
+	}
+
+	return results, nil
+}
+
+// scanBoardEvaluations scans rows of (position, level, depth, confidence,
+// score) into BoardEvaluations, as produced by ListLearnable and
+// EvaluatedBoards.
+func scanBoardEvaluations(rows pgx.Rows) ([]BoardEvaluation, error) {
 	var results []BoardEvaluation
 	for rows.Next() {
 		var position []byte
 		var eval Evaluation
 		if err := rows.Scan(&position, &eval.Level, &eval.Depth, &eval.Confidence, &eval.Score); err != nil {
-			return nil, fmt.Errorf("failed to scan learnable board: %w", err)
+			return nil, fmt.Errorf("failed to scan board: %w", err)
 		}
 
 		board, err := othello.ParseBoardBytes(position)
@@ -178,7 +213,7 @@ func (r *Repository) ListLearnable(ctx context.Context, minDiscs, maxDiscs, limi
 		results = append(results, BoardEvaluation{Board: normalized, Evaluation: eval})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed to list learnable boards: %w", err)
+		return nil, fmt.Errorf("failed to read board rows: %w", err)
 	}
 
 	return results, nil

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
 	"github.com/lk16/flippy/internal/othello"
 )
@@ -102,6 +103,15 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The minimax backfill only depends on leaf-disc-count evaluations, so
+	// only a save at that disc count can change it.
+	if normalized.CountDiscs() == book.LeafDiscs {
+		if err := s.cache.Rebuild(r.Context()); err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+
 	if err := s.releaseClaim(r.Context(), normalized.String(), req.WorkerID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -126,21 +136,27 @@ func (s *Server) handleGetBoard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	eval, err := s.repo.GetBoard(r.Context(), board)
-	if err != nil {
-		if errors.Is(err, db.ErrBoardNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
+	if err == nil {
+		writeJSON(w, http.StatusOK, evaluationResponse{
+			Level:      eval.Level,
+			Depth:      eval.Depth,
+			Confidence: eval.Confidence,
+			Score:      eval.Score,
+			Source:     evaluationSourceEdax,
+		})
+		return
+	}
+	if !errors.Is(err, db.ErrBoardNotFound) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, evaluationResponse{
-		Level:      eval.Level,
-		Depth:      eval.Depth,
-		Confidence: eval.Confidence,
-		Score:      eval.Score,
-	})
+	if score, ok := s.cache.Get(board); ok {
+		writeJSON(w, http.StatusOK, evaluationResponse{Score: score, Source: evaluationSourceMinimax})
+		return
+	}
+
+	writeError(w, http.StatusNotFound, err)
 }
 
 // handleHeartbeat handles POST /api/workers/heartbeat: refreshes the TTL of

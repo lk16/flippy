@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
 	"github.com/lk16/flippy/internal/othello"
 )
@@ -83,6 +84,38 @@ func TestHandleSubmitJobResult_Success(t *testing.T) {
 	claimed, err = s.tryClaim(ctx, board.String(), "w2")
 	require.NoError(t, err)
 	require.True(t, claimed)
+}
+
+func TestHandleSubmitJobResult_RebuildsMinimaxCache(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	board11 := testBoard(t, book.LeafDiscs-1)
+	children := board11.Board().Children()
+	require.NotEmpty(t, children)
+
+	normalizedChildren := make([]othello.NormalizedBoard, len(children))
+	for i, child := range children {
+		normalizedChildren[i] = child.Normalize()
+	}
+	require.NoError(t, s.repo.AddBoards(ctx, normalizedChildren))
+
+	_, ok := s.cache.Get(board11.Board())
+	require.False(t, ok)
+
+	// Submitting each child's result via the HTTP endpoint (not calling
+	// Rebuild directly) must be what makes board11 resolve, once the last
+	// leaf it depends on is learned.
+	for _, child := range normalizedChildren {
+		reqBody := jobResultRequest{
+			WorkerID: "w1", Board: child.String(), Level: 24, Depth: 24, Confidence: 100, Score: 1,
+		}
+		w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
+		require.Equal(t, http.StatusOK, w.Code)
+	}
+
+	_, ok = s.cache.Get(board11.Board())
+	require.True(t, ok)
 }
 
 func TestHandleSubmitJobResult_InvalidBody(t *testing.T) {
@@ -183,7 +216,37 @@ func TestHandleGetBoard_Success(t *testing.T) {
 
 	var resp evaluationResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	require.Equal(t, evaluationResponse{Level: 20, Depth: 20, Confidence: 98, Score: 2}, resp)
+	require.Equal(t, evaluationResponse{Level: 20, Depth: 20, Confidence: 98, Score: 2, Source: evaluationSourceEdax}, resp)
+}
+
+func TestHandleGetBoard_FallsBackToMinimaxCache(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	board11 := testBoard(t, book.LeafDiscs-1)
+	children := board11.Board().Children()
+	require.NotEmpty(t, children)
+
+	normalizedChildren := make([]othello.NormalizedBoard, len(children))
+	for i, child := range children {
+		normalizedChildren[i] = child.Normalize()
+	}
+	require.NoError(t, s.repo.AddBoards(ctx, normalizedChildren))
+	for _, child := range normalizedChildren {
+		require.NoError(t, s.repo.SaveEvaluation(ctx, child, db.Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 1}))
+	}
+	require.NoError(t, s.cache.Rebuild(ctx))
+
+	target := "/api/boards?board=" + url.QueryEscape(board11.Board().String())
+	w := doRequest(t, s, http.MethodGet, target, nil)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp evaluationResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, evaluationSourceMinimax, resp.Source)
+	score, ok := s.cache.Get(board11.Board())
+	require.True(t, ok)
+	require.Equal(t, score, resp.Score)
 }
 
 func TestHandleHeartbeat_MissingWorkerID(t *testing.T) {
