@@ -22,10 +22,9 @@ func requiredEnv(name string) string {
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: loader <command>")
 	fmt.Fprintln(os.Stderr, "commands:")
-	fmt.Fprintln(os.Stderr, "  seed                 add the precomputed 12-disc board set to the DB")
-	fmt.Fprintln(os.Stderr, "  load-wtb <files...>  import boards from WTHOR (.wtb) archives")
-	fmt.Fprintln(os.Stderr, "  load-pgn <files...>  import boards from PGN files")
-	fmt.Fprintln(os.Stderr, "  load-oq <moves>      import boards from an Othello Quest move string")
+	fmt.Fprintln(os.Stderr, "  seed                       add the precomputed 12-disc board set to the DB")
+	fmt.Fprintln(os.Stderr, "  load <files/folders...>    import boards from .wtb/.pgn files, searching folders recursively")
+	fmt.Fprintln(os.Stderr, "  load-oq <moves>            import boards from an Othello Quest move string")
 	os.Exit(1)
 }
 
@@ -54,20 +53,13 @@ func main() {
 			log.Fatalf("failed to seed boards: %v", err)
 		}
 		log.Println("seeded the precomputed 12-disc board set (existing rows left untouched)")
-	case "load-wtb":
-		filenames := requireFiles("load-wtb")
-		count, err := loader.ImportWTBFiles(ctx, repo, filenames)
+	case "load":
+		paths := requireFiles("load")
+		count, err := loader.ImportPaths(ctx, repo, paths)
 		if err != nil {
-			log.Fatalf("failed to import wtb files: %v", err)
+			log.Fatalf("failed to import: %v", err)
 		}
-		log.Printf("added %d boards from %d wtb file(s)", count, len(filenames))
-	case "load-pgn":
-		filenames := requireFiles("load-pgn")
-		count, err := loader.ImportPGNFiles(ctx, repo, filenames)
-		if err != nil {
-			log.Fatalf("failed to import pgn files: %v", err)
-		}
-		log.Printf("added %d boards from %d pgn file(s)", count, len(filenames))
+		log.Printf("added %d boards from %d path(s)", count, len(paths))
 	case "load-oq":
 		if len(os.Args) != 3 {
 			fmt.Fprintln(os.Stderr, "usage: loader load-oq <moves>")

@@ -25,14 +25,9 @@ func ImportGames(ctx context.Context, repo *db.Repository, games []*othello.Game
 // ImportWTBFiles parses each file as a WTHOR (.wtb) archive and imports the
 // games it contains.
 func ImportWTBFiles(ctx context.Context, repo *db.Repository, filenames []string) (int, error) {
-	var games []*othello.Game
-
-	for _, filename := range filenames {
-		parsed, err := othello.ParseWTBFile(filename)
-		if err != nil {
-			return 0, fmt.Errorf("failed to parse %s: %w", filename, err)
-		}
-		games = append(games, parsed...)
+	games, err := parseWTBFiles(filenames)
+	if err != nil {
+		return 0, err
 	}
 
 	return ImportGames(ctx, repo, games)
@@ -40,17 +35,68 @@ func ImportWTBFiles(ctx context.Context, repo *db.Repository, filenames []string
 
 // ImportPGNFiles parses each file as one or more PGN games and imports them.
 func ImportPGNFiles(ctx context.Context, repo *db.Repository, filenames []string) (int, error) {
+	games, err := parsePGNFiles(filenames)
+	if err != nil {
+		return 0, err
+	}
+
+	return ImportGames(ctx, repo, games)
+}
+
+// ImportPaths imports boards from files and/or folders. Each folder is
+// searched recursively for *.wtb and *.pgn files; each individual file must
+// itself have a .wtb or .pgn extension (see ResolvePaths). All games found
+// are extracted and imported together, so a board reached from both a WTB
+// and a PGN file is only counted once.
+func ImportPaths(ctx context.Context, repo *db.Repository, paths []string) (int, error) {
+	wtbFiles, pgnFiles, err := ResolvePaths(paths)
+	if err != nil {
+		return 0, err
+	}
+
+	wtbGames, err := parseWTBFiles(wtbFiles)
+	if err != nil {
+		return 0, err
+	}
+
+	pgnGames, err := parsePGNFiles(pgnFiles)
+	if err != nil {
+		return 0, err
+	}
+
+	games := make([]*othello.Game, 0, len(wtbGames)+len(pgnGames))
+	games = append(games, wtbGames...)
+	games = append(games, pgnGames...)
+
+	return ImportGames(ctx, repo, games)
+}
+
+func parseWTBFiles(filenames []string) ([]*othello.Game, error) {
+	var games []*othello.Game
+
+	for _, filename := range filenames {
+		parsed, err := othello.ParseWTBFile(filename)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse %s: %w", filename, err)
+		}
+		games = append(games, parsed...)
+	}
+
+	return games, nil
+}
+
+func parsePGNFiles(filenames []string) ([]*othello.Game, error) {
 	var games []*othello.Game
 
 	for _, filename := range filenames {
 		parsed, err := othello.ParsePGNFile(filename)
 		if err != nil {
-			return 0, fmt.Errorf("failed to parse %s: %w", filename, err)
+			return nil, fmt.Errorf("failed to parse %s: %w", filename, err)
 		}
 		games = append(games, parsed...)
 	}
 
-	return ImportGames(ctx, repo, games)
+	return games, nil
 }
 
 // ImportOthelloQuestMoves parses moveString as a single Othello Quest move

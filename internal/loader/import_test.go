@@ -155,3 +155,51 @@ func TestImportWTBFiles_MissingFile(t *testing.T) {
 	_, err := ImportWTBFiles(ctx, repo, []string{"testdata/does-not-exist.wtb"})
 	require.Error(t, err)
 }
+
+func TestImportPaths_AddsBoardsFromFilesAndFolders(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	dir := t.TempDir()
+
+	wtbData := encodeWTB([][]int{{19, 18, 17, 9, 1, 0, 37, 43, 51, 2}})
+	wtbPath := filepath.Join(dir, "games.wtb")
+	require.NoError(t, os.WriteFile(wtbPath, wtbData, 0o644))
+
+	pgn := `[Site "Test"]
+[Date "2024.01.01"]
+[Black "A"]
+[White "B"]
+[Result "34-30"]
+[BlackElo "1000"]
+[WhiteElo "1000"]
+
+1. f5 d6 2. c4 d3 3. c3 f4 4. c5 b3 5. c2 e3 6. d2 c6 7. b4 b5 8. f2 e2
+`
+	nested := filepath.Join(dir, "nested")
+	require.NoError(t, os.MkdirAll(nested, 0o755))
+	pgnPath := filepath.Join(nested, "game.pgn")
+	require.NoError(t, os.WriteFile(pgnPath, []byte(pgn), 0o644))
+
+	count, err := ImportPaths(ctx, repo, []string{dir})
+	require.NoError(t, err)
+	require.Positive(t, count)
+}
+
+func TestImportPaths_RejectsUnknownExtensionWithoutImporting(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	dir := t.TempDir()
+
+	wtbData := encodeWTB([][]int{{19, 18, 17, 9, 1, 0, 37, 43, 51, 2}})
+	wtbPath := filepath.Join(dir, "games.wtb")
+	require.NoError(t, os.WriteFile(wtbPath, wtbData, 0o644))
+
+	badPath := filepath.Join(dir, "notes.txt")
+	require.NoError(t, os.WriteFile(badPath, []byte("notes"), 0o644))
+
+	count, err := ImportPaths(ctx, repo, []string{wtbPath, badPath})
+	require.Error(t, err)
+	require.Zero(t, count)
+}
