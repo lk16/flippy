@@ -4,7 +4,7 @@ import "fmt"
 
 // ParseOthelloQuestMoves parses a compact Othello Quest move string, e.g.
 // "e6f4e3d6", into a Game. The string is a sequence of 2-character fields
-// (see parseField); there is no separate representation for a pass beyond
+// (see ParseField); there is no separate representation for a pass beyond
 // the "--"/"ps"/"pa" field aliases.
 func ParseOthelloQuestMoves(s string) (*Game, error) {
 	if len(s)%fieldLength != 0 {
@@ -16,7 +16,7 @@ func ParseOthelloQuestMoves(s string) (*Game, error) {
 	for i := 0; i < len(s); i += fieldLength {
 		field := s[i : i+fieldLength]
 
-		move, err := parseField(field)
+		move, err := ParseField(field)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse move %q: %w", field, err)
 		}

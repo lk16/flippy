@@ -64,13 +64,26 @@ Work through phases in order. Check off each item after it's done and merged.
       docker, isolated from local dev DB)
 
 ## Phase 5 — Edax integration (`internal/edax`)
-- [ ] Long-running edax subprocess per worker (not one process per position)
-- [ ] Path to edax binary from env
-- [ ] Send position + search level, parse evaluation from output
-- [ ] Confirm edax invocation details (flags, book usage, output format)
-      against old python/go integration code before implementing
-- [ ] Graceful shutdown: kill edax process when worker shuts down
-- [ ] unit tests around request/response parsing (mock the process I/O)
+- [x] Long-running edax subprocess per worker (not one process per position)
+- [x] Path to edax binary from env
+- [x] Send position + search level, parse evaluation from output
+- [x] Confirm edax invocation details (flags, book usage, output format)
+      against old python/go integration code before implementing (also
+      verified directly against the real edax-reversi binary; book usage
+      is a non-issue since `-solve` mode never loads the book at all)
+- [x] Graceful shutdown: kill edax process when worker shuts down
+- [x] unit tests around request/response parsing (mock the process I/O)
+
+Note: `internal/edax`'s parser/problem-format tests use mocked I/O (fixtures
+captured from the real binary) and always run, including in CI. Its
+`Process` tests (subprocess spawn/restart/kill) additionally need a real
+edax binary via `EDAX_PATH` and skip themselves when it's unset — true
+locally, not in CI, which has no edax binary. This is a deliberate choice
+(see chat history): CI doesn't build or fetch edax, since the parsing logic
+most likely to silently break is already covered by the mocked tests, and
+the subprocess plumbing left uncovered in CI is thin `os/exec` code with
+low bug surface. Run `EDAX_PATH=... ./test.sh` locally for full coverage of
+this package.
 
 ## Phase 6 — API server (`cmd/server`, `internal/api`)
 - [ ] JSON REST API prefixed `api/`

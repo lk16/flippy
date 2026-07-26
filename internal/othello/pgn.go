@@ -106,7 +106,7 @@ func parsePGNMoves(lines []string) ([]int, error) {
 				continue
 			}
 
-			move, err := parseField(word)
+			move, err := ParseField(word)
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse move %q: %w", word, err)
 			}

@@ -30,7 +30,7 @@ func TestParseField(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.field, func(t *testing.T) {
-			got, err := parseField(tt.field)
+			got, err := ParseField(tt.field)
 			if tt.wantErr {
 				require.Error(t, err)
 				return
