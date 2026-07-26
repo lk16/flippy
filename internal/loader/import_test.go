@@ -95,6 +95,30 @@ func TestImportPGNFiles_AddsBoards(t *testing.T) {
 	require.Positive(t, count)
 }
 
+// TestImportPGNFiles_NoResultField covers PGN exports (some older
+// OthelloQuest files) that omit the Result field entirely; ImportPGNFiles
+// must still import them rather than erroring.
+func TestImportPGNFiles_NoResultField(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	pgn := `[Site "OthelloQuest"]
+[Date "2021.10.19"]
+[Black "A"]
+[White "B"]
+[BlackElo "1000"]
+[WhiteElo "1000"]
+
+1. f5 d6 2. c4 d3 3. c3 f4 4. c5 b3 5. c2 e3 6. d2 c6 7. b4 b5 8. f2 e2
+`
+	path := filepath.Join(t.TempDir(), "game.pgn")
+	require.NoError(t, os.WriteFile(path, []byte(pgn), 0o644))
+
+	count, err := ImportPGNFiles(ctx, repo, []string{path})
+	require.NoError(t, err)
+	require.Positive(t, count)
+}
+
 func TestImportPGNFiles_MissingFile(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()

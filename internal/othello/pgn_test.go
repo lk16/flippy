@@ -184,10 +184,6 @@ func TestParsePGN_Errors(t *testing.T) {
 			content: pgnBase(map[string]string{"Black": ""}, "1. e6 f4"),
 		},
 		{
-			name:    "missing result",
-			content: pgnBase(map[string]string{"Result": ""}, "1. e6 f4"),
-		},
-		{
 			name:    "missing white rating",
 			content: pgnBase(map[string]string{"WhiteElo": ""}, "1. e6 f4"),
 		},
@@ -206,10 +202,6 @@ func TestParsePGN_Errors(t *testing.T) {
 		{
 			name:    "malformed date",
 			content: pgnBase(map[string]string{"Date": "not-a-date"}, "1. e6 f4"),
-		},
-		{
-			name:    "malformed result",
-			content: pgnBase(map[string]string{"Result": "not-a-result"}, "1. e6 f4"),
 		},
 		{
 			name:    "unknown variant",
@@ -238,6 +230,40 @@ func TestParsePGN_DrawResult(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, games, 1)
 	require.Nil(t, games[0].Metadata().Winner)
+}
+
+// TestParsePGN_UnknownWinner covers Result values seen in the wild that
+// don't fit the "<black>-<white>" disc count format: absent entirely (some
+// older exports), PGN's own draw notation, and a malformed/placeholder
+// value questgames.net writes for at least one unfinished game. None of
+// these should fail parsing, since nothing downstream relies on Winner.
+func TestParsePGN_UnknownWinner(t *testing.T) {
+	tests := []struct {
+		name   string
+		result string
+	}{
+		{name: "missing", result: ""},
+		{name: "pgn draw notation", result: "1/2-1/2"},
+		{name: "malformed", result: "-2"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			games, err := ParsePGN(pgnBase(map[string]string{"Result": tt.result}, "1. e6 f4"), "")
+			require.NoError(t, err)
+			require.Len(t, games, 1)
+			require.Nil(t, games[0].Metadata().Winner)
+		})
+	}
+}
+
+// TestParsePGN_ProvisionalRating covers flyordie.com's convention of
+// prefixing a provisional rating with "?" (e.g. "?144").
+func TestParsePGN_ProvisionalRating(t *testing.T) {
+	games, err := ParsePGN(pgnBase(map[string]string{"WhiteElo": "?144"}, "1. e6 f4"), "")
+	require.NoError(t, err)
+	require.Len(t, games, 1)
+	require.Equal(t, 144, games[0].Metadata().Players[White].Rating)
 }
 
 func TestParsePGN_MalformedMetadataLine(t *testing.T) {

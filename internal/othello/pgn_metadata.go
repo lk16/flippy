@@ -113,10 +113,7 @@ func (p pgnMetadataParser) parse() (*GameMetadata, error) {
 		return nil, fmt.Errorf("failed to parse date: %w", err)
 	}
 
-	metadata.Winner, err = p.parseWinner()
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse result: %w", err)
-	}
+	metadata.Winner = p.parseWinner()
 
 	return metadata, nil
 }
@@ -144,24 +141,30 @@ func (p pgnMetadataParser) parseDate() (time.Time, error) {
 	return date, nil
 }
 
-func (p pgnMetadataParser) parseWinner() (*Color, error) {
+// parseWinner reads the Result field, if present, as a "<black>-<white>"
+// disc count and returns the color with more discs, or nil for a draw.
+// Result is missing from some older exports, and some sources (e.g.
+// questgames.net) write non-numeric or otherwise malformed values for
+// unfinished games (e.g. "1/2-1/2", "-2"); since nothing downstream relies
+// on Winner, any of that is treated as "unknown" rather than a parse error.
+func (p pgnMetadataParser) parseWinner() *Color {
 	result, ok := p.fields["Result"]
 	if !ok {
-		return nil, errors.New("missing field Result in metadata")
+		return nil
 	}
 
 	var black, white int
 	if _, err := fmt.Sscanf(result, "%d-%d", &black, &white); err != nil {
-		return nil, fmt.Errorf("failed to parse result: %w", err)
+		return nil
 	}
 
 	switch {
 	case black > white:
-		return newColor(Black), nil
+		return newColor(Black)
 	case white > black:
-		return newColor(White), nil
+		return newColor(White)
 	default:
-		return nil, nil
+		return nil
 	}
 }
 
@@ -181,6 +184,9 @@ func (p pgnMetadataParser) parseRating(color Color) (int, error) {
 			return 0, fmt.Errorf("missing field %s or %s in metadata", ratingField, eloField)
 		}
 	}
+
+	// Some sources (e.g. flyordie.com) prefix a provisional rating with "?".
+	ratingString = strings.TrimPrefix(ratingString, "?")
 
 	rating, err := strconv.Atoi(ratingString)
 	if err != nil {
