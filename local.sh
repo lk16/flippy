@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Runs the local dev stack: brings up docker-compose.yml (Postgres + Redis,
 # with Postgres persisted to db_data/ on disk), waits for it to be healthy,
-# applies migrations, then runs the webserver in the foreground. Everything
-# started here is torn down when the script exits or is killed.
+# applies migrations, seeds the precomputed 12-disc board set, then runs the
+# webserver in the foreground. Everything started here is torn down when the
+# script exits or is killed.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -41,6 +42,10 @@ trap cleanup EXIT INT TERM
 docker compose -f "$COMPOSE_FILE" up -d --wait
 
 migrate -path migrations -database "$FLIPPY_POSTGRES_URL" up
+
+# Idempotent: only adds boards missing from the DB, never touches existing
+# rows (see internal/loader.SeedBoards).
+go run ./cmd/loader seed
 
 go build -o "$BIN" ./cmd/server
 

@@ -133,7 +133,10 @@ type workerInfo struct {
 }
 
 // listWorkers returns every worker with an active (non-expired) hash,
-// ordered most-recently-active first.
+// ordered by positions computed (most first); ties (e.g. two workers still
+// on their first job) break by most-recently-active. Sorting by last-active
+// alone would reorder the list on almost every poll, since heartbeats and
+// job completions land in a slightly different order each time.
 func (s *Server) listWorkers(ctx context.Context) ([]workerInfo, error) {
 	var workers []workerInfo
 
@@ -166,6 +169,9 @@ func (s *Server) listWorkers(ctx context.Context) ([]workerInfo, error) {
 	}
 
 	sort.Slice(workers, func(i, j int) bool {
+		if workers[i].PositionsComputed != workers[j].PositionsComputed {
+			return workers[i].PositionsComputed > workers[j].PositionsComputed
+		}
 		return workers[i].LastActive.After(workers[j].LastActive)
 	})
 

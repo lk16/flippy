@@ -137,7 +137,25 @@ func TestServer_ListWorkers_Empty(t *testing.T) {
 	require.Empty(t, workers)
 }
 
-func TestServer_ListWorkers_OrdersByMostRecentlyActive(t *testing.T) {
+func TestServer_ListWorkers_OrdersByPositionsComputedDescending(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1"))
+	require.NoError(t, s.recordJobCompletion(ctx, "worker-1"))
+
+	require.NoError(t, s.heartbeat(ctx, "worker-2", "host-2", "commit-2"))
+	require.NoError(t, s.recordJobCompletion(ctx, "worker-2"))
+	require.NoError(t, s.recordJobCompletion(ctx, "worker-2"))
+
+	workers, err := s.listWorkers(ctx)
+	require.NoError(t, err)
+	require.Len(t, workers, 2)
+	require.Equal(t, "worker-2", workers[0].ID)
+	require.Equal(t, "worker-1", workers[1].ID)
+}
+
+func TestServer_ListWorkers_TiesBreakByMostRecentlyActive(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 

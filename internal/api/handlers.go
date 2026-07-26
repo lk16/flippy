@@ -204,7 +204,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleListWorkers handles GET /api/workers: returns every currently
-// active worker, most recently active first.
+// active worker, ordered by positions computed (most first).
 func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
 	workers, err := s.listWorkers(r.Context())
 	if err != nil {
