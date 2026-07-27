@@ -96,6 +96,12 @@ func testDistinctBoards(t *testing.T, discs, n int) []othello.NormalizedBoard {
 	return result[:n]
 }
 
+func TestEvaluation_IsLearned(t *testing.T) {
+	require.False(t, Evaluation{}.IsLearned())
+	require.False(t, Evaluation{Depth: 5, Confidence: 50, Score: 2}.IsLearned())
+	require.True(t, Evaluation{Level: 16, Depth: 16, Confidence: 100, Score: 3}.IsLearned())
+}
+
 func TestRepository_AddBoards_GetBoard(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()

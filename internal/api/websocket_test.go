@@ -103,6 +103,31 @@ func TestHandleWebSocket_EvaluationRequest_FallsBackToMinimaxCache(t *testing.T)
 	require.Equal(t, evaluationSourceMinimax, entry["source"])
 }
 
+// TestHandleWebSocket_EvaluationRequest_OmitsUnlearnedBoards covers a board
+// that has a row but hasn't been learned yet (still the zero-valued
+// Evaluation): it must be omitted from the response just like a board with
+// no row at all, not returned as a real score of 0.
+func TestHandleWebSocket_EvaluationRequest_OmitsUnlearnedBoards(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	board := testBoard(t, 12)
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+
+	conn := testWebSocket(t, s)
+
+	require.NoError(t, wsjson.Write(ctx, conn, wsIncoming{
+		ID: 1, Event: "evaluation_request",
+		Data: mustMarshal(t, wsEvaluationRequest{Boards: []string{board.String()}}),
+	}))
+
+	var resp wsOutgoing
+	require.NoError(t, wsjson.Read(ctx, conn, &resp))
+
+	data := resp.Data.(map[string]any)
+	require.Nil(t, data["evaluations"])
+}
+
 func TestHandleWebSocket_EvaluationRequest_EmptyWhenNothingFound(t *testing.T) {
 	s := testServer(t)
 	conn := testWebSocket(t, s)

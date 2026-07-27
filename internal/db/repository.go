@@ -29,6 +29,14 @@ type Evaluation struct {
 	Score      int
 }
 
+// IsLearned reports whether e is an actual edax result rather than the
+// zero-valued placeholder a board gets when its row is added but not yet
+// learned. A real result always has a positive level, so that alone is
+// enough to tell the two apart.
+func (e Evaluation) IsLearned() bool {
+	return e.Level > 0
+}
+
 // ErrBoardNotFound is returned when a board has no row in the boards table.
 var ErrBoardNotFound = errors.New("board not found")
 

@@ -127,8 +127,10 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 }
 
 // lookupEvaluation returns the evaluation for board: a direct DB result if
-// one exists, otherwise a minimax-derived one from the cache. ok is false
-// if neither has it.
+// one exists and has actually been learned, otherwise a minimax-derived one
+// from the cache. ok is false if neither has it — including when board has
+// a row but it's still at its zero-valued, not-yet-learned state, so
+// callers don't render that as a real (and misleadingly draw-like) score.
 //
 // If the player to move has no legal move, board itself is never stored
 // (see loader.ExtractBoards/isSavable): only positions with a legal move
@@ -141,7 +143,7 @@ func (s *Server) lookupEvaluation(ctx context.Context, board othello.Board) (eva
 	}
 
 	eval, err := s.repo.GetBoard(ctx, board)
-	if err == nil {
+	if err == nil && eval.IsLearned() {
 		return evaluationResponse{
 			Level:      eval.Level,
 			Depth:      eval.Depth,
@@ -150,7 +152,7 @@ func (s *Server) lookupEvaluation(ctx context.Context, board othello.Board) (eva
 			Source:     evaluationSourceEdax,
 		}, true, nil
 	}
-	if !errors.Is(err, db.ErrBoardNotFound) {
+	if err != nil && !errors.Is(err, db.ErrBoardNotFound) {
 		return evaluationResponse{}, false, err
 	}
 

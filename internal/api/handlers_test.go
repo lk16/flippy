@@ -203,6 +203,22 @@ func TestHandleGetBoard_NotFound(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// TestHandleGetBoard_NotLearnedYet covers a board that has a row (e.g. from
+// a book import or the precomputed 12-disc set) but hasn't been learned by
+// a worker yet: its Evaluation is still the zero value, which must be
+// reported the same as "not found" rather than as a real (and misleadingly
+// draw-like) score of 0.
+func TestHandleGetBoard_NotLearnedYet(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+	board := testBoard(t, 12)
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+
+	target := "/api/boards?board=" + url.QueryEscape(board.Board().String())
+	w := doRequest(t, s, http.MethodGet, target, nil)
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
 func TestHandleGetBoard_Success(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
