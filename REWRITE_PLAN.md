@@ -130,9 +130,9 @@ confirmed with the user during implementation):
   `MaxBookSavableDiscs`/`MAX_SAVABLE_DISCS` (both `30`), to a plain
   disc-count range: boards are only learnable with 12-30 discs.
 - `api.TargetLevel(discCount)` is the single place deciding what level a
-  board should be learned to. It always returns 24 today regardless of
-  discCount — a placeholder kept as a real function (not a constant) so a
-  future per-disc-count scheme is a one-function change.
+  board should be learned to. The 12-disc leaves get level 24 (deepest,
+  since everything below is backfilled from them); boards beyond that get
+  level 16.
 - Job claims and worker identity are **not** stored in the `boards` table or
   a new Postgres table — extra columns/rows were rejected for a table
   expected to grow large. Instead Redis holds this ephemeral state: a
