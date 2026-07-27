@@ -5,11 +5,48 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/lk16/flippy/internal/db"
 	"github.com/lk16/flippy/internal/env"
 	"github.com/lk16/flippy/internal/loader"
 )
+
+// progressReportInterval is the minimum time between progress log lines, so
+// a large import doesn't spam a line per file.
+const progressReportInterval = 2 * time.Second
+
+// logProgress returns a loader.ImportPaths progress callback that logs
+// completion percentage and an ETA, at most once per progressReportInterval,
+// always logging the final (done == total) call.
+func logProgress() func(done, total int) {
+	start := time.Now()
+	var last time.Time
+
+	return func(done, total int) {
+		if total == 0 {
+			return
+		}
+
+		now := time.Now()
+		finished := done == total
+		if !finished && now.Sub(last) < progressReportInterval {
+			return
+		}
+		last = now
+
+		elapsed := now.Sub(start)
+
+		var eta time.Duration
+		if done > 0 {
+			eta = time.Duration(float64(elapsed) / float64(done) * float64(total-done))
+		}
+
+		log.Printf("parsed %d/%d files (%.1f%%), elapsed %s, ETA %s",
+			done, total, 100*float64(done)/float64(total),
+			elapsed.Round(time.Second), eta.Round(time.Second))
+	}
+}
 
 func requiredEnv(name string) string {
 	value := os.Getenv(name)
@@ -55,7 +92,7 @@ func main() {
 		log.Println("seeded the precomputed 12-disc board set (existing rows left untouched)")
 	case "load":
 		paths := requireFiles("load")
-		count, err := loader.ImportPaths(ctx, repo, paths)
+		count, err := loader.ImportPaths(ctx, repo, paths, logProgress())
 		if err != nil {
 			log.Fatalf("failed to import: %v", err)
 		}

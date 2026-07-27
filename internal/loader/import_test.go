@@ -205,9 +205,30 @@ func TestImportPaths_AddsBoardsFromFilesAndFolders(t *testing.T) {
 	pgnPath := filepath.Join(nested, "game.pgn")
 	require.NoError(t, os.WriteFile(pgnPath, []byte(pgn), 0o644))
 
-	count, err := ImportPaths(ctx, repo, []string{dir})
+	count, err := ImportPaths(ctx, repo, []string{dir}, nil)
 	require.NoError(t, err)
 	require.Positive(t, count)
+}
+
+func TestImportPaths_ReportsProgress(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	dir := t.TempDir()
+
+	wtbData := encodeWTB([][]int{{19, 18, 17, 9, 1, 0, 37, 43, 51, 2}})
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.wtb"), wtbData, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.wtb"), wtbData, 0o644))
+
+	var calls [][2]int
+	progress := func(done, total int) {
+		calls = append(calls, [2]int{done, total})
+	}
+
+	_, err := ImportPaths(ctx, repo, []string{dir}, progress)
+	require.NoError(t, err)
+
+	require.Equal(t, [][2]int{{1, 2}, {2, 2}}, calls)
 }
 
 func TestImportPaths_RejectsUnknownExtensionWithoutImporting(t *testing.T) {
@@ -223,7 +244,7 @@ func TestImportPaths_RejectsUnknownExtensionWithoutImporting(t *testing.T) {
 	badPath := filepath.Join(dir, "notes.txt")
 	require.NoError(t, os.WriteFile(badPath, []byte("notes"), 0o644))
 
-	count, err := ImportPaths(ctx, repo, []string{wtbPath, badPath})
+	count, err := ImportPaths(ctx, repo, []string{wtbPath, badPath}, nil)
 	require.Error(t, err)
 	require.Zero(t, count)
 }
