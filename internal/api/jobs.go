@@ -26,7 +26,11 @@ type Job struct {
 // already claimed by another worker. It reports false, with no error, if no
 // job is currently available.
 func (s *Server) claimJob(ctx context.Context, workerID string) (Job, bool, error) {
-	candidates, err := s.repo.ListLearnable(ctx, book.LeafDiscs, book.MaxSavableDiscs, jobCandidateBatch)
+	candidates, err := s.repo.ListLearnable(ctx,
+		book.LeafDiscs, book.MaxSavableDiscs,
+		TargetLevel(book.LeafDiscs), TargetLevel(book.LeafDiscs+1),
+		jobCandidateBatch,
+	)
 	if err != nil {
 		return Job{}, false, fmt.Errorf("failed to list candidate boards: %w", err)
 	}

@@ -141,16 +141,26 @@ type BoardEvaluation struct {
 }
 
 // ListLearnable returns up to limit boards with disc counts in
-// [minDiscs, maxDiscs], ordered by disc count then level (both ascending) —
-// the order in which job assignment should offer them out.
-func (r *Repository) ListLearnable(ctx context.Context, minDiscs, maxDiscs, limit int) ([]BoardEvaluation, error) {
+// [minDiscs, maxDiscs] that haven't yet reached the level they should be
+// learned to — leafLevel for the minDiscs boards (the leaves everything else
+// is backfilled from), deeperLevel for the rest — ordered by disc count then
+// level (both ascending), the order in which job assignment should offer
+// them out.
+//
+// The level cutoff is applied here, in SQL, rather than left for the caller
+// to filter out stale rows: minDiscs alone can have millions of boards, so
+// once they're all learned up to leafLevel, a plain "ORDER BY disc_count,
+// level LIMIT n" batch would consist entirely of those already-done rows —
+// they still sort first — starving out any real work at higher disc counts.
+func (r *Repository) ListLearnable(ctx context.Context, minDiscs, maxDiscs, leafLevel, deeperLevel, limit int) ([]BoardEvaluation, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT position, level, depth, confidence, score
 		 FROM boards
 		 WHERE disc_count BETWEEN $1 AND $2
+		   AND level < CASE WHEN disc_count = $1 THEN $3::smallint ELSE $4::smallint END
 		 ORDER BY disc_count, level
-		 LIMIT $3`,
-		minDiscs, maxDiscs, limit,
+		 LIMIT $5`,
+		minDiscs, maxDiscs, leafLevel, deeperLevel, limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list learnable boards: %w", err)
