@@ -8,6 +8,7 @@ import (
 
 func TestTargetLevel(t *testing.T) {
 	require.Equal(t, 24, TargetLevel(12))
-	require.Equal(t, 24, TargetLevel(20))
-	require.Equal(t, 24, TargetLevel(30))
+	require.Equal(t, 16, TargetLevel(13))
+	require.Equal(t, 16, TargetLevel(20))
+	require.Equal(t, 16, TargetLevel(30))
 }
