@@ -44,21 +44,28 @@ func TestExplore_FromStart_MatchesPrecomputedCount(t *testing.T) {
 	found := make(map[string]struct{})
 	explore(othello.NewBoardStart(), make(map[othello.Board]bool), found)
 
-	require.Len(t, found, 67239)
+	require.Len(t, found, 67245)
 }
 
-func TestExplore_SkipsTargetDiscBoardWithNoLegalMove(t *testing.T) {
+func TestExplore_FollowsForcedPassAtTargetDiscBoard(t *testing.T) {
 	// A real 12-disc board reached by legal play from start where black
-	// (to move) has no legal move, only white does after a pass.
+	// (to move) has no legal move, only white does after a pass. The board
+	// itself must be skipped (edax can't evaluate a no-legal-move
+	// position), but the position it passes into is still a genuine,
+	// evaluable targetDiscs board and must not be lost along with it.
 	board, err := othello.ParseBoard("0000001c183000800000000000c04020-b")
 	require.NoError(t, err)
 	require.Equal(t, targetDiscs, board.CountDiscs())
 	require.False(t, board.HasMoves(), "test board must have no legal move for this test to be meaningful")
 
+	passed, err := board.DoMove(othello.PassMove)
+	require.NoError(t, err)
+	require.True(t, passed.HasMoves(), "passed-into board must have a legal move for this test to be meaningful")
+
 	found := make(map[string]struct{})
 	explore(board, make(map[othello.Board]bool), found)
 
-	require.Empty(t, found)
+	require.Equal(t, map[string]struct{}{passed.Normalize().String(): {}}, found)
 }
 
 // boardWithDiscs returns any legal board with exactly n discs, reached by

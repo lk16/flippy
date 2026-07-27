@@ -48,22 +48,17 @@ func main() {
 // memoizes exact (non-normalized) boards already explored, since the same
 // board is commonly reached via multiple move orders.
 //
-// A targetDiscs board with no legal move for the player to move is skipped:
-// edax can't evaluate it directly, and its value is trivially the negation
-// of the position it passes into, so storing it would only ever leave a
-// permanently unlearnable row.
+// A board with no legal move for the player to move is always passed
+// through, even at exactly targetDiscs discs, rather than recorded: edax
+// can't evaluate it directly, and its value is trivially the negation of
+// the position it passes into, so storing it would only ever leave a
+// permanently unlearnable row. Passing doesn't change the disc count, so
+// the position it passes into is still explored for a targetDiscs match.
 func explore(b othello.Board, visited map[othello.Board]bool, found map[string]struct{}) {
 	if visited[b] {
 		return
 	}
 	visited[b] = true
-
-	if b.CountDiscs() == targetDiscs {
-		if b.HasMoves() {
-			found[b.Normalize().String()] = struct{}{}
-		}
-		return
-	}
 
 	if !b.HasMoves() {
 		next, err := b.DoMove(othello.PassMove)
@@ -73,6 +68,11 @@ func explore(b othello.Board, visited map[othello.Board]bool, found map[string]s
 			return
 		}
 		explore(next, visited, found)
+		return
+	}
+
+	if b.CountDiscs() == targetDiscs {
+		found[b.Normalize().String()] = struct{}{}
 		return
 	}
 

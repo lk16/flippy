@@ -9,7 +9,7 @@ import (
 func TestPrecomputedBoards12(t *testing.T) {
 	boards := PrecomputedBoards12()
 
-	require.Len(t, boards, 67239)
+	require.Len(t, boards, 67245)
 
 	seen := make(map[string]bool, len(boards))
 	for _, board := range boards {

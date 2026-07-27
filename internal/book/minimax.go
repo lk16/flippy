@@ -41,6 +41,15 @@ type cacheEntry struct {
 
 // minimaxValue returns board's value from the perspective of the player to
 // move, memoizing into memo (keyed by normalized board) as it goes.
+//
+// A board with no legal move is always resolved via minimaxPass first,
+// before the leafDiscs boundary is even considered: leaves only ever holds
+// boards with a legal move (see othello.PrecomputedBoards12/loader.
+// ExtractBoards — edax can't evaluate a no-legal-move position, and its
+// value is trivially the negation of whatever it passes into), so a board
+// at exactly leafDiscs discs with no legal move would otherwise always miss
+// leaves and be reported as undetermined, even though its value is
+// perfectly derivable from the position it passes into.
 func minimaxValue(
 	board othello.Board,
 	leafDiscs int,
@@ -54,13 +63,6 @@ func minimaxValue(
 		return entry
 	}
 
-	if board.CountDiscs() >= leafDiscs {
-		score, ok := leaves[normalized]
-		entry := cacheEntry{score: score, ok: ok}
-		memo[normalized] = entry
-		return entry
-	}
-
 	if visiting[normalized] {
 		panic("book: cycle detected while computing minimax value")
 	}
@@ -71,6 +73,9 @@ func minimaxValue(
 	switch {
 	case !board.HasMoves():
 		entry = minimaxPass(board, leafDiscs, leaves, memo, visiting)
+	case board.CountDiscs() >= leafDiscs:
+		score, ok := leaves[normalized]
+		entry = cacheEntry{score: score, ok: ok}
 	default:
 		entry = minimaxChildren(board, leafDiscs, leaves, memo, visiting)
 	}

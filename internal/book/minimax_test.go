@@ -160,6 +160,60 @@ func TestBuildCache_GameOver(t *testing.T) {
 	require.Equal(t, board.FinalScore(), got)
 }
 
+func TestMinimaxValue_ForcedPassAtLeafBoundary(t *testing.T) {
+	// The same forced-pass board as TestBuildCache_ForcedPass, but with
+	// leafDiscs set to the board's own disc count rather than one more: the
+	// board itself is now the leaf, exercising the boundary directly rather
+	// than through minimaxChildren one ply up. edax never evaluates a
+	// no-legal-move position, so leaves only has the passed-to board; the
+	// forced-pass board's value must still come out as its negation.
+	board, err := othello.ParseBoard("00000038180c00010000000000030204-b")
+	require.NoError(t, err)
+	require.False(t, board.HasMoves())
+
+	passed, err := board.DoMove(othello.PassMove)
+	require.NoError(t, err)
+	require.True(t, passed.HasMoves())
+
+	leaves := map[othello.Board]int{passed.Normalize().Board(): 9}
+
+	entry := minimaxValue(board, board.CountDiscs(), leaves, make(map[othello.Board]cacheEntry), make(map[othello.Board]bool))
+
+	require.True(t, entry.ok)
+	require.Equal(t, -9, entry.score)
+}
+
+func TestMinimaxValue_ForcedPassAtLeafBoundaryUnlearnedSuccessorIsUndetermined(t *testing.T) {
+	board, err := othello.ParseBoard("00000038180c00010000000000030204-b")
+	require.NoError(t, err)
+	require.False(t, board.HasMoves())
+
+	// The passed-to board isn't in leaves (unlearned), so the forced-pass
+	// board's value can't be determined either.
+	entry := minimaxValue(board, board.CountDiscs(), nil, make(map[othello.Board]cacheEntry), make(map[othello.Board]bool))
+
+	require.False(t, entry.ok)
+}
+
+func TestMinimaxValue_GameOverAtLeafBoundary(t *testing.T) {
+	// Same board as TestBuildCache_GameOver, but with leafDiscs set to the
+	// board's own disc count: the game-over short-circuit in minimaxPass
+	// must fire before the leafDiscs boundary lookup ever gets a chance to
+	// miss on a board that was never in leaves to begin with.
+	board, err := othello.ParseBoard("3fb0888090a0c080c04f777f6f5f3f7f-b")
+	require.NoError(t, err)
+	require.False(t, board.HasMoves())
+
+	passed, err := board.DoMove(othello.PassMove)
+	require.NoError(t, err)
+	require.False(t, passed.HasMoves())
+
+	entry := minimaxValue(board, board.CountDiscs(), nil, make(map[othello.Board]cacheEntry), make(map[othello.Board]bool))
+
+	require.True(t, entry.ok)
+	require.Equal(t, board.FinalScore(), entry.score)
+}
+
 func TestBuildCache_CycleDetectionPanics(t *testing.T) {
 	// minimaxValue must never be re-entered for a board it's still
 	// resolving; simulate that directly rather than trying to construct a
