@@ -76,6 +76,33 @@ func testBoard(t *testing.T, discs int) othello.NormalizedBoard {
 	return board.Normalize()
 }
 
+// testPassRequiredBoard returns a Board, reached by always playing the
+// first available move from the starting position, where the player to
+// move has no legal move but the opponent does after the forced pass (as
+// opposed to a game-ending double pass).
+func testPassRequiredBoard(t *testing.T) othello.Board {
+	t.Helper()
+
+	board := othello.NewBoardStart()
+	for range 200 {
+		if !board.HasMoves() {
+			passed, err := board.DoMove(othello.PassMove)
+			require.NoError(t, err)
+			if passed.HasMoves() {
+				return board
+			}
+			t.Fatal("hit a game-ending double pass before finding a single forced pass")
+		}
+
+		children := board.Children()
+		require.NotEmpty(t, children)
+		board = children[0]
+	}
+
+	t.Fatal("no forced-pass position found within ply bound")
+	return othello.Board{}
+}
+
 // testDistinctBoards returns n distinct NormalizedBoards with exactly discs
 // discs, found via breadth-first search from the starting position.
 func testDistinctBoards(t *testing.T, discs, n int) []othello.NormalizedBoard {

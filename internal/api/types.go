@@ -34,6 +34,11 @@ const evaluationSourceEdax = "edax"
 // internal/book) — it has no depth/confidence of its own.
 const evaluationSourceMinimax = "minimax"
 
+// evaluationSourceFinal marks an evaluationResponse as a board's actual
+// final score (see Board.FinalScore) rather than an edax/minimax estimate,
+// because the game is already over: neither player has a legal move.
+const evaluationSourceFinal = "final"
+
 // evaluationResponse is the JSON shape of an evaluation, returned by GET
 // /api/boards. Source distinguishes a direct edax result (Level, Depth, and
 // Confidence all meaningful) from a minimax-derived one (only Score is).

@@ -249,6 +249,62 @@ func TestHandleGetBoard_FallsBackToMinimaxCache(t *testing.T) {
 	require.Equal(t, score, resp.Score)
 }
 
+// TestHandleGetBoard_ResolvesForcedPass covers a board where the player to
+// move has no legal move: such a board is never stored directly (see
+// loader.ExtractBoards), so its evaluation must be derived from the stored
+// evaluation of the position after the forced pass, negated back to the
+// original player's perspective.
+func TestHandleGetBoard_ResolvesForcedPass(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	board := testPassRequiredBoard(t)
+	passed, err := board.DoMove(othello.PassMove)
+	require.NoError(t, err)
+	normalizedPassed := passed.Normalize()
+
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{normalizedPassed}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, normalizedPassed, db.Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 5}))
+
+	target := "/api/boards?board=" + url.QueryEscape(board.String())
+	w := doRequest(t, s, http.MethodGet, target, nil)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp evaluationResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, evaluationResponse{Level: 20, Depth: 20, Confidence: 100, Score: -5, Source: evaluationSourceEdax}, resp)
+}
+
+// TestHandleGetBoard_GameOver covers a board where neither player has a
+// legal move: the forced pass doesn't lead anywhere learnable either, so
+// the actual final score is returned instead of falling through to "not
+// found".
+func TestHandleGetBoard_GameOver(t *testing.T) {
+	s := testServer(t)
+
+	var black, white uint64
+	for i := range uint(40) {
+		black |= 1 << i
+	}
+	for i := uint(40); i < 64; i++ {
+		white |= 1 << i
+	}
+	board, err := othello.NewBoard(black, white, othello.Black)
+	require.NoError(t, err)
+	require.False(t, board.HasMoves())
+	passed, err := board.DoMove(othello.PassMove)
+	require.NoError(t, err)
+	require.False(t, passed.HasMoves())
+
+	target := "/api/boards?board=" + url.QueryEscape(board.String())
+	w := doRequest(t, s, http.MethodGet, target, nil)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp evaluationResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, evaluationResponse{Score: board.FinalScore(), Source: evaluationSourceFinal}, resp)
+}
+
 func TestHandleHeartbeat_MissingWorkerID(t *testing.T) {
 	s := testServer(t)
 	w := doRequest(t, s, http.MethodPost, "/api/workers/heartbeat", heartbeatRequest{})

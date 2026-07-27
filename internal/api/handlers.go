@@ -129,7 +129,17 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 // lookupEvaluation returns the evaluation for board: a direct DB result if
 // one exists, otherwise a minimax-derived one from the cache. ok is false
 // if neither has it.
+//
+// If the player to move has no legal move, board itself is never stored
+// (see loader.ExtractBoards/isSavable): only positions with a legal move
+// are. Its evaluation is defined instead as the negation of the evaluation
+// after the forced pass — the same position, just with the other player to
+// move — recursing at most once, since two passes in a row end the game.
 func (s *Server) lookupEvaluation(ctx context.Context, board othello.Board) (evaluationResponse, bool, error) {
+	if !board.HasMoves() {
+		return s.lookupPassEvaluation(ctx, board)
+	}
+
 	eval, err := s.repo.GetBoard(ctx, board)
 	if err == nil {
 		return evaluationResponse{
@@ -149,6 +159,30 @@ func (s *Server) lookupEvaluation(ctx context.Context, board othello.Board) (eva
 	}
 
 	return evaluationResponse{}, false, nil
+}
+
+// lookupPassEvaluation handles a board where the player to move has no
+// legal move. If the forced pass leaves the other player able to move, its
+// evaluation is looked up and negated back to board's perspective. If the
+// pass doesn't leave a legal move either, the game is over: board's actual
+// final score is returned rather than an edax/minimax estimate.
+func (s *Server) lookupPassEvaluation(ctx context.Context, board othello.Board) (evaluationResponse, bool, error) {
+	passed, err := board.DoMove(othello.PassMove)
+	if err != nil {
+		return evaluationResponse{}, false, err
+	}
+
+	if !passed.HasMoves() {
+		return evaluationResponse{Score: board.FinalScore(), Source: evaluationSourceFinal}, true, nil
+	}
+
+	eval, ok, err := s.lookupEvaluation(ctx, passed)
+	if err != nil || !ok {
+		return evaluationResponse{}, ok, err
+	}
+
+	eval.Score = -eval.Score
+	return eval, true, nil
 }
 
 // handleGetBoard handles GET /api/boards?board=<board string>: looks up the
