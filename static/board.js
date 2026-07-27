@@ -3,17 +3,31 @@ const BITBOARD_MASK = 0xFFFFFFFFFFFFFFFFn;
 // WebSocketClient batches evaluation lookups for the children of whatever
 // board is currently on screen, over a persistent connection rather than
 // one HTTP request per position. It auto-reconnects after a disconnect.
+//
+// A request made before the socket is open (e.g. the very first one, made
+// while the page is still loading) is kept as pendingBoards and flushed
+// once the connection opens, rather than silently dropped — only the most
+// recent such request is kept, since it's always for whatever's currently
+// on screen and supersedes anything queued earlier.
 class WebSocketClient {
     constructor(onEvaluations) {
         this.ws = null;
         this.messageId = 1;
         this.onEvaluations = onEvaluations;
+        this.pendingBoards = null;
         this.connect();
     }
 
     connect() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         this.ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+        this.ws.onopen = () => {
+            if (this.pendingBoards) {
+                this.send(this.pendingBoards);
+                this.pendingBoards = null;
+            }
+        };
 
         this.ws.onmessage = (event) => {
             try {
@@ -36,10 +50,19 @@ class WebSocketClient {
     }
 
     requestEvaluations(boards) {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN || boards.length === 0) {
+        if (boards.length === 0) {
             return;
         }
 
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            this.pendingBoards = boards;
+            return;
+        }
+
+        this.send(boards);
+    }
+
+    send(boards) {
         this.ws.send(JSON.stringify({
             id: this.messageId++,
             event: 'evaluation_request',
