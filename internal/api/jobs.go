@@ -8,12 +8,8 @@ import (
 	"github.com/lk16/flippy/internal/othello"
 )
 
-const (
-	// jobCandidateBatch is how many candidate boards are fetched per claim
-	// attempt. It must be large enough that, even with several workers
-	// racing for jobs, at least one candidate in the batch is still free.
-	jobCandidateBatch = 50
-)
+// jobCandidateBatch is how many candidate boards are fetched per claim attempt.
+const jobCandidateBatch = 50
 
 // Job is a board a worker should evaluate, and the level to search it at.
 type Job struct {
@@ -21,10 +17,7 @@ type Job struct {
 	Level int
 }
 
-// claimJob finds and atomically claims the next job for workerID: the
-// learnable board with the lowest disc count, then lowest level, that isn't
-// already claimed by another worker. It reports false, with no error, if no
-// job is currently available.
+// claimJob atomically claims the lowest disc-count/level learnable board not already claimed.
 func (s *Server) claimJob(ctx context.Context, workerID string) (Job, bool, error) {
 	candidates, err := s.repo.ListLearnable(ctx,
 		book.LeafDiscs, book.MaxSavableDiscs,
@@ -36,8 +29,7 @@ func (s *Server) claimJob(ctx context.Context, workerID string) (Job, bool, erro
 	}
 
 	for _, candidate := range candidates {
-		// edax crashes when asked to evaluate a position with no legal
-		// move; such boards are never valid jobs.
+		// edax crashes on a position with no legal move.
 		if !candidate.Board.HasMoves() {
 			continue
 		}

@@ -1,6 +1,5 @@
-// Package book backfills evaluations for boards below the disc count that's
-// ever learned directly (see internal/db), by minimaxing up from the
-// evaluations of boards at that disc count.
+// Package book backfills evaluations for boards below the disc count learned directly, by minimaxing
+// up from the evaluations of boards at that disc count.
 package book
 
 import "github.com/lk16/flippy/internal/othello"
@@ -9,14 +8,8 @@ import "github.com/lk16/flippy/internal/othello"
 // finding the best of a board's children.
 const noValue = -65
 
-// buildCache computes minimax scores, from the perspective of the player to
-// move, for every board reachable from root with fewer than leafDiscs
-// discs. leaves holds the known scores of normalized boards with exactly
-// leafDiscs discs — anything not in leaves is treated as not yet learned.
-//
-// A board's value is included in the result only if every leafDiscs-disc
-// descendant needed to determine it is present in leaves; branches through
-// an unlearned leaf are omitted rather than guessed at.
+// buildCache computes minimax scores for every board below leafDiscs reachable from root, omitting
+// any board with an unlearned leafDiscs-disc descendant rather than guessing at it.
 func buildCache(root othello.Board, leafDiscs int, leaves map[othello.Board]int) map[othello.Board]int {
 	memo := make(map[othello.Board]cacheEntry)
 	visiting := make(map[othello.Board]bool)
@@ -39,17 +32,8 @@ type cacheEntry struct {
 	ok    bool
 }
 
-// minimaxValue returns board's value from the perspective of the player to
-// move, memoizing into memo (keyed by normalized board) as it goes.
-//
-// A board with no legal move is always resolved via minimaxPass first,
-// before the leafDiscs boundary is even considered: leaves only ever holds
-// boards with a legal move (see othello.PrecomputedBoards12/loader.
-// ExtractBoards — edax can't evaluate a no-legal-move position, and its
-// value is trivially the negation of whatever it passes into), so a board
-// at exactly leafDiscs discs with no legal move would otherwise always miss
-// leaves and be reported as undetermined, even though its value is
-// perfectly derivable from the position it passes into.
+// minimaxValue returns board's value, memoizing into memo. A no-legal-move board is always resolved
+// via minimaxPass first since leaves never holds such boards (edax can't evaluate them).
 func minimaxValue(
 	board othello.Board,
 	leafDiscs int,
@@ -84,9 +68,7 @@ func minimaxValue(
 	return entry
 }
 
-// minimaxPass handles a board where the player to move has no legal move:
-// either the game is over (neither player has a move), or the value is the
-// negation of the passed-to position's value.
+// minimaxPass handles a forced pass: the game-over final score, or the negated passed-to value.
 func minimaxPass(
 	board othello.Board,
 	leafDiscs int,
@@ -110,9 +92,7 @@ func minimaxPass(
 	return cacheEntry{score: -sub.score, ok: true}
 }
 
-// minimaxChildren handles a board with legal moves: its value is the best
-// of its children's values, each negated since a child is from the
-// opponent's perspective.
+// minimaxChildren returns the best negated value among board's children.
 func minimaxChildren(
 	board othello.Board,
 	leafDiscs int,

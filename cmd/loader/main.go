@@ -12,13 +12,10 @@ import (
 	"github.com/lk16/flippy/internal/loader"
 )
 
-// progressReportInterval is the minimum time between progress log lines, so
-// a large import doesn't spam a line per file.
+// progressReportInterval caps log lines to one per interval so a large import doesn't spam a line per file.
 const progressReportInterval = 2 * time.Second
 
-// logProgress returns a loader.ImportPaths progress callback that logs
-// completion percentage and an ETA, at most once per progressReportInterval,
-// always logging the final (done == total) call.
+// logProgress returns a loader.ImportPaths progress callback that logs completion percentage and ETA.
 func logProgress() func(done, total int) {
 	start := time.Now()
 	var last time.Time
@@ -112,8 +109,7 @@ func main() {
 	}
 }
 
-// requireFiles returns the filenames passed after command, exiting with
-// usage if none were given.
+// requireFiles returns the filenames passed after command, exiting with usage if none were given.
 func requireFiles(command string) []string {
 	if len(os.Args) < 3 {
 		fmt.Fprintf(os.Stderr, "usage: loader %s <files...>\n", command)

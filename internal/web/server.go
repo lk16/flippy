@@ -1,7 +1,4 @@
-// Package web serves flippy's admin website: server-rendered HTML pages
-// (a board view, book statistics, active workers) plus their static
-// assets. All live data is fetched client-side from internal/api, so
-// handlers here only ever render the same static shell per page.
+// Package web serves flippy's admin website: static HTML page shells, with live data fetched client-side.
 package web
 
 import (
@@ -23,9 +20,7 @@ type page struct {
 	Path  string
 }
 
-// pages lists every page in sidebar order. The ID must match both the
-// template file name (templates/<ID>.html) and the route registered for it
-// in Handler.
+// pages lists every page in sidebar order; ID must match its template filename and route in Handler.
 var pages = []page{
 	{ID: "game", Title: "Board", Path: "/game"},
 	{ID: "stats", Title: "Stats", Path: "/stats"},

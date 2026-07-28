@@ -141,12 +141,7 @@ func (p pgnMetadataParser) parseDate() (time.Time, error) {
 	return date, nil
 }
 
-// parseWinner reads the Result field, if present, as a "<black>-<white>"
-// disc count and returns the color with more discs, or nil for a draw.
-// Result is missing from some older exports, and some sources (e.g.
-// questgames.net) write non-numeric or otherwise malformed values for
-// unfinished games (e.g. "1/2-1/2", "-2"); since nothing downstream relies
-// on Winner, any of that is treated as "unknown" rather than a parse error.
+// parseWinner reads Result as "<black>-<white>" discs; malformed or missing values are "unknown", not an error.
 func (p pgnMetadataParser) parseWinner() *Color {
 	result, ok := p.fields["Result"]
 	if !ok {

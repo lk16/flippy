@@ -2,10 +2,7 @@ package othello
 
 import "fmt"
 
-// ParseOthelloQuestMoves parses a compact Othello Quest move string, e.g.
-// "e6f4e3d6", into a Game. The string is a sequence of 2-character fields
-// (see ParseField); there is no separate representation for a pass beyond
-// the "--"/"ps"/"pa" field aliases.
+// ParseOthelloQuestMoves parses a compact move string, e.g. "e6f4e3d6", into a Game (see ParseField).
 func ParseOthelloQuestMoves(s string) (*Game, error) {
 	if len(s)%fieldLength != 0 {
 		return nil, fmt.Errorf("move string length %d is not a multiple of %d", len(s), fieldLength)

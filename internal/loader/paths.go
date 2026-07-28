@@ -8,12 +8,8 @@ import (
 	"strings"
 )
 
-// ResolvePaths splits paths into WTHOR (.wtb) and PGN (.pgn) filenames.
-// Directories are searched recursively for files with either extension;
-// other files found this way are ignored. Each path that names a file
-// directly, rather than a directory, must itself have a .wtb or .pgn
-// extension — anything else is an error, and no filenames are returned in
-// that case, so callers don't import a partial set.
+// ResolvePaths splits paths into WTHOR (.wtb) and PGN (.pgn) filenames, searching directories
+// recursively; a direct file path with neither extension is an error.
 func ResolvePaths(paths []string) (wtbFiles, pgnFiles []string, err error) {
 	for _, path := range paths {
 		info, err := os.Stat(path)

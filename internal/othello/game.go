@@ -2,10 +2,7 @@ package othello
 
 import "fmt"
 
-// Game is a sequence of boards produced by playing moves from a start
-// board. boards always has one more entry than moves: boards[i] is the
-// board after the first i moves, and boards[0] is the start board. Passes
-// are usually inserted automatically by PushMove; see there for details.
+// Game is a sequence of boards from a start position; boards always has one more entry than moves.
 type Game struct {
 	moves    []int
 	boards   []Board
@@ -23,8 +20,7 @@ func NewGameWithStart(start Board) *Game {
 	return &Game{boards: []Board{start}}
 }
 
-// NewGameFromMoves returns a new game starting from the standard position
-// with moves played on it in order.
+// NewGameFromMoves returns a new game starting from the standard position with moves played in order.
 func NewGameFromMoves(moves []int) (*Game, error) {
 	game := NewGame()
 
@@ -37,8 +33,7 @@ func NewGameFromMoves(moves []int) (*Game, error) {
 	return game, nil
 }
 
-// Moves returns the moves played so far, including automatically inserted
-// passes.
+// Moves returns the moves played so far, including automatically inserted passes.
 func (g *Game) Moves() []int {
 	return append([]int(nil), g.moves...)
 }
@@ -53,20 +48,17 @@ func (g *Game) BoardAt(moveIndex int) Board {
 	return g.boards[moveIndex]
 }
 
-// Boards returns the full sequence of boards from start to the current
-// board, inclusive.
+// Boards returns the full sequence of boards from start to the current board, inclusive.
 func (g *Game) Boards() []Board {
 	return append([]Board(nil), g.boards...)
 }
 
-// Filename returns the path of the file the game was loaded from, or "" if
-// it wasn't loaded from a file.
+// Filename returns the path of the file the game was loaded from, or "" if none.
 func (g *Game) Filename() string {
 	return g.filename
 }
 
-// Metadata returns the game's metadata, or nil if it has none (e.g. a game
-// that wasn't loaded from a PGN file).
+// Metadata returns the game's metadata, or nil if it has none.
 func (g *Game) Metadata() *GameMetadata {
 	if g.metadata == nil {
 		return nil
@@ -76,10 +68,7 @@ func (g *Game) Metadata() *GameMetadata {
 	return &metadata
 }
 
-// PushMove plays move on the current board. If the resulting board has no
-// legal move for the player to move but their opponent does, a pass is
-// appended automatically. Playing a pass right after another pass is a
-// no-op, since two passes in a row would mean the game already ended.
+// PushMove plays move, automatically appending a pass if the resulting board has no legal move.
 func (g *Game) PushMove(move int) error {
 	if n := len(g.moves); n > 0 && g.moves[n-1] == PassMove && move == PassMove {
 		return nil
@@ -107,9 +96,7 @@ func (g *Game) PushMove(move int) error {
 	return nil
 }
 
-// PopMove undoes the last move. If it was an automatically inserted pass,
-// the move before it is undone too, so the game never ends up on a board
-// with no legal move for the player to move.
+// PopMove undoes the last move, and the move before it too if it was an automatically inserted pass.
 func (g *Game) PopMove() {
 	if len(g.moves) == 0 {
 		return

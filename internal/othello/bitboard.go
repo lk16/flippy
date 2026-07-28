@@ -123,9 +123,7 @@ func legalMoves(mover, opponent uint64) uint64 {
 	return moves &^ (mover | opponent)
 }
 
-// flippedDiscs returns the bitboard of opponent discs that would be flipped
-// if the mover played on the given square. move must be an empty square;
-// callers are expected to check that via legalMoves first.
+// flippedDiscs returns the opponent discs that would flip if mover played on move (must be legal).
 func flippedDiscs(mover, opponent uint64, move int) uint64 {
 	directions := [8][2]int{
 		{-1, -1}, {-1, 0}, {-1, 1},
@@ -166,10 +164,7 @@ func flippedDiscs(mover, opponent uint64, move int) uint64 {
 	return flipped
 }
 
-// applyMove plays a move for the mover and returns the resulting (mover,
-// opponent) bitboards from the perspective of the player to move next. move
-// must be one of the bits set in legalMoves(mover, opponent); callers are
-// expected to check that first.
+// applyMove plays move (must be legal) and returns the resulting (mover, opponent) bitboards for the next player.
 func applyMove(mover, opponent uint64, move int) (newMover, newOpponent uint64) {
 	flipped := flippedDiscs(mover, opponent, move)
 	moveBit := uint64(1) << move

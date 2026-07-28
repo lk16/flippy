@@ -19,8 +19,7 @@ type Job struct {
 	Level int
 }
 
-// Client talks to the flippy API server on behalf of a single worker
-// identity.
+// Client talks to the flippy API server on behalf of a single worker identity.
 type Client struct {
 	baseURL    string
 	workerID   string
@@ -29,9 +28,7 @@ type Client struct {
 	httpClient *http.Client
 }
 
-// NewClient returns a Client that talks to the API server at baseURL (e.g.
-// "http://localhost:8080") as workerID. hostname and gitCommit are reported
-// on every heartbeat, for display on the API's worker listing.
+// NewClient returns a Client for the API server at baseURL, identifying as workerID.
 func NewClient(baseURL, workerID, hostname, gitCommit string) *Client {
 	return &Client{
 		baseURL:    baseURL,
@@ -107,8 +104,7 @@ type heartbeatRequest struct {
 	GitCommit string `json:"git_commit"`
 }
 
-// Heartbeat reports this worker as active, and refreshes its job claim, if
-// it has one.
+// Heartbeat reports this worker as active and refreshes its job claim, if it has one.
 func (c *Client) Heartbeat(ctx context.Context) error {
 	return c.post(ctx, "/api/workers/heartbeat", heartbeatRequest{
 		WorkerID:  c.workerID,
@@ -117,8 +113,7 @@ func (c *Client) Heartbeat(ctx context.Context) error {
 	})
 }
 
-// post sends body as JSON to path and reports an error unless the server
-// responds 200 OK.
+// post sends body as JSON to path, erroring unless the server responds 200 OK.
 func (c *Client) post(ctx context.Context, path string, body any) error {
 	data, err := json.Marshal(body)
 	if err != nil {

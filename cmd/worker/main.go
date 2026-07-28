@@ -22,10 +22,7 @@ func requiredEnv(name string) string {
 	return value
 }
 
-// gitCommit best-effort determines the commit this binary was built from,
-// for display on the API's worker listing. It's purely informational, so a
-// deployed binary without a .git directory falls back to "unknown" rather
-// than failing to start.
+// gitCommit best-effort determines the build commit, falling back to "unknown" without a .git directory.
 func gitCommit() string {
 	out, err := exec.Command("git", "rev-parse", "HEAD").Output()
 	if err != nil {
@@ -64,9 +61,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Canceling ctx alone can't interrupt a blocked edax evaluation — edax's
-	// process I/O doesn't take a context — so shutdown also closes the
-	// process directly, which unblocks it with an error.
+	// ctx cancellation alone can't interrupt a blocked edax evaluation, so close the process directly too.
 	go func() {
 		<-ctx.Done()
 		_ = edaxProcess.Close()

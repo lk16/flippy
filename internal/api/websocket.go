@@ -18,39 +18,30 @@ type wsIncoming struct {
 	Data  json.RawMessage `json:"data"`
 }
 
-// wsOutgoing is a message sent to a websocket client, correlated to the
-// wsIncoming.ID that prompted it.
+// wsOutgoing is a message sent to a websocket client, correlated by ID to the request that prompted it.
 type wsOutgoing struct {
 	ID   int `json:"id"`
 	Data any `json:"data"`
 }
 
-// wsEvaluationRequest is the wsIncoming.Data shape for an
-// "evaluation_request" event: a batch of (not necessarily normalized)
-// board strings to look up.
+// wsEvaluationRequest is the wsIncoming.Data shape for an "evaluation_request" event.
 type wsEvaluationRequest struct {
 	Boards []string `json:"boards"`
 }
 
-// wsEvaluation is one evaluation in a wsEvaluationResponse, alongside the
-// board string it's for (echoing the request, since it's a batch).
+// wsEvaluation is one evaluation in a wsEvaluationResponse, alongside the board string it's for.
 type wsEvaluation struct {
 	Board string `json:"board"`
 	evaluationResponse
 }
 
-// wsEvaluationResponse is the wsOutgoing.Data shape sent back for an
-// "evaluation_request" event. Boards with no available evaluation (neither
-// in the DB nor the minimax cache) are omitted rather than included with a
-// placeholder.
+// wsEvaluationResponse is the wsOutgoing.Data shape sent back for an "evaluation_request" event;
+// boards with no available evaluation are omitted rather than included with a placeholder.
 type wsEvaluationResponse struct {
 	Evaluations []wsEvaluation `json:"evaluations"`
 }
 
-// handleWebSocket handles GET /ws: a persistent connection for batched,
-// low-latency evaluation lookups, for interactively exploring the board
-// (e.g. every child of the position currently on screen) without a
-// round trip per position.
+// handleWebSocket handles GET /ws: a persistent connection for batched evaluation lookups.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
@@ -85,9 +76,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// lookupEvaluations looks up evaluations for a batch of (not necessarily
-// normalized) board strings, skipping any that are malformed or have no
-// available evaluation.
+// lookupEvaluations looks up evaluations for a batch of board strings, skipping malformed or unevaluated ones.
 func (s *Server) lookupEvaluations(ctx context.Context, boardStrings []string) []wsEvaluation {
 	var results []wsEvaluation
 

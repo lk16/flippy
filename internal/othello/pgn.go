@@ -6,8 +6,7 @@ import (
 	"strings"
 )
 
-// ParsePGNFile reads filename and parses it as a sequence of one or more PGN
-// games.
+// ParsePGNFile reads filename and parses it as a sequence of one or more PGN games.
 func ParsePGNFile(filename string) ([]*Game, error) {
 	content, err := os.ReadFile(filename)
 	if err != nil {
@@ -17,10 +16,7 @@ func ParsePGNFile(filename string) ([]*Game, error) {
 	return ParsePGN(string(content), filename)
 }
 
-// ParsePGN parses content as a sequence of one or more PGN games, each
-// consisting of a metadata block ("[Key \"Value\"]" lines) followed by move
-// text. filename is only used as a fallback source of a game's time when
-// its metadata has no explicit Time field; pass "" if not applicable.
+// ParsePGN parses content as PGN games; filename is a fallback time source when metadata has none.
 func ParsePGN(content string, filename string) ([]*Game, error) {
 	if strings.TrimSpace(content) == "" {
 		return nil, nil
@@ -33,10 +29,6 @@ func ParsePGN(content string, filename string) ([]*Game, error) {
 		inMetadata    = true
 	)
 
-	// flush is only called once at least one line has been accumulated into
-	// metadataLines or moveLines (guaranteed by the empty-content check
-	// above and by how the loop below drives inMetadata), so it never needs
-	// to guard against both being empty.
 	flush := func() error {
 		game, err := newGameFromPGNLines(metadataLines, moveLines, filename)
 		if err != nil {

@@ -7,9 +7,7 @@ import (
 
 const fieldLength = 2
 
-// ParseField parses a 2-character move field such as "e6" into a 0-based
-// board index. The case-insensitive fields "--", "ps", and "pa" parse to
-// PassMove.
+// ParseField parses a 2-character move field like "e6" into a 0-based board index; "--"/"ps"/"pa" parse to PassMove.
 func ParseField(field string) (int, error) {
 	if len(field) != fieldLength {
 		return 0, fmt.Errorf("invalid field length: %q", field)

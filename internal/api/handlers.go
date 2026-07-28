@@ -24,9 +24,7 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": err.Error()})
 }
 
-// handleGetJob handles GET /api/jobs: atomically claims and returns the
-// next available job for the requesting worker, or 204 No Content if none
-// is available right now.
+// handleGetJob handles GET /api/jobs: claims and returns the next available job, or 204 if none.
 func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	workerID := r.URL.Query().Get("worker_id")
 	if workerID == "" {
@@ -47,9 +45,7 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, jobResponse{Board: job.Board.String(), Level: job.Level})
 }
 
-// validateJobResult checks the bounds of an evaluation submitted for a job
-// result. It doesn't duplicate storage-layer concerns (e.g. whether it's an
-// improvement over what's stored) — only whether the values are sane.
+// validateJobResult checks that a submitted evaluation's values are within sane bounds.
 func validateJobResult(req jobResultRequest) error {
 	if req.Level <= 0 {
 		return errors.New("level must be positive")
@@ -63,8 +59,7 @@ func validateJobResult(req jobResultRequest) error {
 	return nil
 }
 
-// handleSubmitJobResult handles POST /api/jobs/result: stores a worker's
-// evaluation for a board and releases its job claim.
+// handleSubmitJobResult handles POST /api/jobs/result: stores a worker's evaluation and releases its claim.
 func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 	var req jobResultRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -104,8 +99,7 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The minimax backfill only depends on leaf-disc-count evaluations, so
-	// only a save at that disc count can change it.
+	// Only a leaf-disc-count save can change the minimax backfill.
 	if normalized.CountDiscs() == book.LeafDiscs {
 		if err := s.cache.Rebuild(r.Context()); err != nil {
 			writeError(w, http.StatusInternalServerError, err)
@@ -126,17 +120,8 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// lookupEvaluation returns the evaluation for board: a direct DB result if
-// one exists and has actually been learned, otherwise a minimax-derived one
-// from the cache. ok is false if neither has it — including when board has
-// a row but it's still at its zero-valued, not-yet-learned state, so
-// callers don't render that as a real (and misleadingly draw-like) score.
-//
-// If the player to move has no legal move, board itself is never stored
-// (see loader.ExtractBoards/isSavable): only positions with a legal move
-// are. Its evaluation is defined instead as the negation of the evaluation
-// after the forced pass — the same position, just with the other player to
-// move — recursing at most once, since two passes in a row end the game.
+// lookupEvaluation returns board's evaluation from the DB, falling back to the minimax cache; ok is
+// false if neither has a real (learned) result.
 func (s *Server) lookupEvaluation(ctx context.Context, board othello.Board) (evaluationResponse, bool, error) {
 	if !board.HasMoves() {
 		return s.lookupPassEvaluation(ctx, board)
@@ -163,11 +148,8 @@ func (s *Server) lookupEvaluation(ctx context.Context, board othello.Board) (eva
 	return evaluationResponse{}, false, nil
 }
 
-// lookupPassEvaluation handles a board where the player to move has no
-// legal move. If the forced pass leaves the other player able to move, its
-// evaluation is looked up and negated back to board's perspective. If the
-// pass doesn't leave a legal move either, the game is over: board's actual
-// final score is returned rather than an edax/minimax estimate.
+// lookupPassEvaluation handles a forced-pass board: negates the other player's evaluation, or returns
+// the final score if the pass ends the game.
 func (s *Server) lookupPassEvaluation(ctx context.Context, board othello.Board) (evaluationResponse, bool, error) {
 	passed, err := board.DoMove(othello.PassMove)
 	if err != nil {
@@ -187,8 +169,7 @@ func (s *Server) lookupPassEvaluation(ctx context.Context, board othello.Board) 
 	return eval, true, nil
 }
 
-// handleGetBoard handles GET /api/boards?board=<board string>: looks up the
-// stored evaluation for a (not necessarily normalized) board.
+// handleGetBoard handles GET /api/boards?board=<board string>: looks up a board's evaluation.
 func (s *Server) handleGetBoard(w http.ResponseWriter, r *http.Request) {
 	boardParam := r.URL.Query().Get("board")
 	if boardParam == "" {
@@ -215,10 +196,7 @@ func (s *Server) handleGetBoard(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, eval)
 }
 
-// handleHeartbeat handles POST /api/workers/heartbeat: records the
-// requesting worker as active, and refreshes the TTL of its job claim, if
-// it has one, keeping it from being reaped and reassigned to another
-// worker.
+// handleHeartbeat handles POST /api/workers/heartbeat: marks the worker active and refreshes its claim TTL.
 func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	var req heartbeatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -239,8 +217,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// handleListWorkers handles GET /api/workers: returns every currently
-// active worker, ordered by positions computed (most first).
+// handleListWorkers handles GET /api/workers: returns active workers, ordered by positions computed.
 func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
 	workers, err := s.listWorkers(r.Context())
 	if err != nil {
@@ -256,8 +233,7 @@ func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, entries)
 }
 
-// handleStats handles GET /api/stats: returns move-counts per (disc count,
-// level) cell.
+// handleStats handles GET /api/stats: returns move-counts per (disc count, level) cell.
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := s.repo.Stats(r.Context())
 	if err != nil {

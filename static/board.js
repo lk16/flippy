@@ -1,14 +1,7 @@
 const BITBOARD_MASK = 0xFFFFFFFFFFFFFFFFn;
 
-// WebSocketClient batches evaluation lookups for the children of whatever
-// board is currently on screen, over a persistent connection rather than
-// one HTTP request per position. It auto-reconnects after a disconnect.
-//
-// A request made before the socket is open (e.g. the very first one, made
-// while the page is still loading) is kept as pendingBoards and flushed
-// once the connection opens, rather than silently dropped — only the most
-// recent such request is kept, since it's always for whatever's currently
-// on screen and supersedes anything queued earlier.
+// WebSocketClient batches evaluation lookups over a persistent connection, auto-reconnecting on
+// disconnect; a request made before the socket opens is queued as pendingBoards (only the latest kept).
 class WebSocketClient {
     constructor(onEvaluations) {
         this.ws = null;
@@ -113,11 +106,7 @@ function rotateBits(x, rotation) {
     return x;
 }
 
-// OthelloBoard mirrors internal/othello.Board: playerBits/opponentBits are
-// relative to the side to move (blackTurn), matching the Go move
-// generation and normalization logic exactly. toString() converts to
-// absolute black/white bits to match Go's Board.String() wire format,
-// since that's what the server parses.
+// OthelloBoard mirrors internal/othello.Board: playerBits/opponentBits are relative to blackTurn.
 class OthelloBoard {
     constructor() {
         this.playerBits = 0n;
@@ -263,9 +252,7 @@ class OthelloBoard {
         return this.playerBits === other.playerBits && this.opponentBits < other.opponentBits;
     }
 
-    // normalize returns the canonical form among the 8 symmetries, the one
-    // whose (player, opponent) bit pair sorts lowest — matching Go's
-    // Board.Normalize exactly. Turn is carried through unchanged.
+    // normalize returns the canonical form among the 8 symmetries, matching Go's Board.Normalize.
     normalize() {
         let min = this.clone();
         for (let r = 1; r < 8; r++) {
@@ -275,8 +262,7 @@ class OthelloBoard {
         return min;
     }
 
-    // toString matches Go's Board.String(): 16 hex digits of black discs,
-    // 16 hex digits of white discs, then "-b"/"-w" for the turn.
+    // toString matches Go's Board.String(): 16 hex digits black, 16 hex digits white, then "-b"/"-w".
     toString() {
         const black = this.blackTurn ? this.playerBits : this.opponentBits;
         const white = this.blackTurn ? this.opponentBits : this.playerBits;
@@ -343,8 +329,7 @@ class OthelloGame {
         this.boardHistory.push(previousBoard);
         this.board = child;
 
-        // Resolve any forced passes (up to two: one per side) before
-        // handing control back to a human player.
+        // Resolve up to two forced passes before handing control back to the player.
         for (let i = 0; i < 2 && !this.board.hasValidMoves(); i++) {
             this.boardHistory.push(this.board.clone());
             this.board.passMove();
@@ -436,11 +421,7 @@ class OthelloGame {
         this.renderEvaluations();
     }
 
-    // renderEvaluations shows, per legal move, either nothing (handled by
-    // the .valid-move dot in CSS) or the resulting position's score from
-    // the current player's perspective. A move's evaluation is the
-    // negation of its child's stored score, since the child is evaluated
-    // from the opponent's perspective.
+    // renderEvaluations shows each legal move's score, the negation of its child's stored score.
     renderEvaluations() {
         let bestScore = -Infinity;
         const moveEvaluations = new Map();

@@ -9,10 +9,8 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// Load reads .env from the current working directory into the process
-// environment, without overriding variables already set. A missing .env
-// file is not an error — real deployments are expected to set environment
-// variables directly instead.
+// Load reads .env into the process environment without overriding variables already set; a missing
+// .env file is not an error.
 func Load() error {
 	if err := godotenv.Load(); err != nil {
 		if os.IsNotExist(err) {

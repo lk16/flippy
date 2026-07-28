@@ -5,16 +5,8 @@ import (
 	"github.com/lk16/flippy/internal/othello"
 )
 
-// ExtractBoards returns the deduplicated set of NormalizedBoards worth
-// adding to the DB from games: every board on each game's played line, plus
-// every one-ply legal child of those boards (so an import gives broader book
-// coverage than just the moves actually played, not only the played line
-// itself).
-//
-// A board is kept only if the player to move has a legal move and its disc
-// count is in [book.LeafDiscs, book.MaxSavableDiscs] — the same range
-// AddBoards' consumers (job claiming, the startup minimax cache) care
-// about; anything outside it would never be looked at again.
+// ExtractBoards returns the deduplicated, savable NormalizedBoards from games: every played-line board
+// plus its one-ply children, for broader book coverage than just the moves actually played.
 func ExtractBoards(games []*othello.Game) []othello.NormalizedBoard {
 	seen := make(map[othello.Board]struct{})
 	var boards []othello.NormalizedBoard

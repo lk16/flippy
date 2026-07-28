@@ -2,12 +2,8 @@ package edax
 
 import "github.com/lk16/flippy/internal/othello"
 
-// problemLine encodes board in edax's -solve problem-file format: 64
-// characters (black discs as 'X', white discs as 'O', empty squares as
-// '-'), a space, then "X" or "O" naming the actual color to move, then
-// ";\n". The color labels are fixed to the board's real colors — edax
-// evaluates a position differently depending on which color is to move, so
-// board.Turn() must be passed through as-is rather than always claiming X.
+// problemLine encodes board in edax's -solve format: 64 X/O/- squares, a space, and the real color to
+// move ("X"/"O") — edax evaluates differently per color to move, so this must not always claim X.
 func problemLine(board othello.Board) string {
 	squares := make([]byte, 64)
 	for i := range squares {

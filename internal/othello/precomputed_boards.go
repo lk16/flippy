@@ -17,13 +17,8 @@ var (
 	precomputedBoards12Once sync.Once
 )
 
-// PrecomputedBoards12 returns the full set of NormalizedBoards with exactly
-// 12 discs reachable by legal play from the standard starting position,
-// excluding any where the player to move has no legal move (edax can't
-// evaluate those, and their value is trivially the negation of whatever
-// they pass into, so they'd never do anything but sit unlearned).
-// Positions with fewer discs are never learned directly; they're backfilled
-// by minimaxing this set instead.
+// PrecomputedBoards12 returns every reachable 12-disc NormalizedBoard, excluding no-legal-move
+// positions since edax can't evaluate them.
 func PrecomputedBoards12() []NormalizedBoard {
 	precomputedBoards12Once.Do(func() {
 		boards, err := parseNormalizedBoards(precomputedBoards12Data)
@@ -36,8 +31,7 @@ func PrecomputedBoards12() []NormalizedBoard {
 	return append([]NormalizedBoard(nil), precomputedBoards12...)
 }
 
-// parseNormalizedBoards parses one Board.String() per line, in the format
-// produced by the internal/othello/gen command, into NormalizedBoards.
+// parseNormalizedBoards parses one Board.String() per line into NormalizedBoards.
 func parseNormalizedBoards(data string) ([]NormalizedBoard, error) {
 	lines := strings.Split(strings.TrimSpace(data), "\n")
 	boards := make([]NormalizedBoard, len(lines))

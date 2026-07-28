@@ -14,12 +14,10 @@ import (
 	"github.com/lk16/flippy/internal/othello"
 )
 
-// pathEnvVar is the environment variable holding the path to the edax
-// binary.
+// pathEnvVar is the environment variable holding the path to the edax binary.
 const pathEnvVar = "EDAX_PATH"
 
-// PathFromEnv reads the edax binary path from the EDAX_PATH environment
-// variable.
+// PathFromEnv reads the edax binary path from the EDAX_PATH environment variable.
 func PathFromEnv() (string, error) {
 	path := os.Getenv(pathEnvVar)
 	if path == "" {
@@ -28,10 +26,7 @@ func PathFromEnv() (string, error) {
 	return path, nil
 }
 
-// Process manages a single long-running edax subprocess. The same
-// subprocess handles every Evaluate call at a given level; it's only
-// restarted when the requested level changes, since edax's level is a
-// startup flag rather than something that can be changed mid-run.
+// Process manages a long-running edax subprocess, restarted only when the requested level changes.
 type Process struct {
 	path string
 
@@ -42,16 +37,12 @@ type Process struct {
 	stdout *bufio.Reader
 }
 
-// NewProcess returns a Process that launches the edax binary at path. No
-// subprocess is started until the first Evaluate call.
+// NewProcess returns a Process for the edax binary at path; no subprocess starts until the first Evaluate.
 func NewProcess(path string) *Process {
 	return &Process{path: path}
 }
 
-// Evaluate sends board to edax for a search at level and returns its final
-// evaluation. board must have at least one legal move for the player to
-// move — edax crashes on positions without one, so callers must resolve
-// passes and finished games before calling Evaluate.
+// Evaluate sends board to edax for a search at level; board must have a legal move (edax crashes otherwise).
 func (p *Process) Evaluate(board othello.Board, level int) (Evaluation, error) {
 	if level <= 0 {
 		return Evaluation{}, fmt.Errorf("invalid level: %d", level)
@@ -77,9 +68,7 @@ func (p *Process) Evaluate(board othello.Board, level int) (Evaluation, error) {
 	return eval, nil
 }
 
-// ensureStarted returns the current stdin/stdout of a running edax process
-// at level, restarting it first if it's not running or is at a different
-// level.
+// ensureStarted returns a running edax process's stdin/stdout at level, restarting it if needed.
 func (p *Process) ensureStarted(level int) (io.Writer, *bufio.Reader, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -118,8 +107,7 @@ func (p *Process) ensureStarted(level int) (io.Writer, *bufio.Reader, error) {
 	return p.stdin, p.stdout, nil
 }
 
-// Close kills the edax subprocess, if one is running. Any Evaluate call
-// blocked reading its output will return with an error.
+// Close kills the edax subprocess, if running; a blocked Evaluate call returns with an error.
 func (p *Process) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()

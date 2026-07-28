@@ -10,10 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// claimTTL is how long a job claim, and the worker hash backing it, survive
-// without being refreshed. A worker that goes silent for longer than this
-// loses its claim (which becomes claimable again) and disappears from the
-// worker listing.
+// claimTTL is how long a job claim or worker hash survives without a refresh.
 const claimTTL = 5 * time.Minute
 
 // Redis field names within a worker's hash (see workerKey).
@@ -25,22 +22,17 @@ const (
 	workerFieldClaimedBoard      = "claimed_board"
 )
 
-// claimKey is the redis key holding the worker ID that currently holds
-// board's job, if any.
+// claimKey is the redis key holding the worker ID that currently holds board's job, if any.
 func claimKey(board string) string {
 	return "claim:" + board
 }
 
-// workerKey is the redis key of the hash describing a worker: hostname,
-// git commit, positions computed, last active time, and the board it
-// currently has claimed (if any). It exists once a worker has sent at
-// least one heartbeat or claimed at least one job.
+// workerKey is the redis key of the hash describing a worker's hostname, git commit, stats, and claimed board.
 func workerKey(workerID string) string {
 	return "worker:" + workerID
 }
 
-// tryClaim attempts to atomically claim board for workerID. It reports
-// false, with no error, if board is already claimed by someone else.
+// tryClaim atomically claims board for workerID, reporting false with no error if already claimed.
 func (s *Server) tryClaim(ctx context.Context, board, workerID string) (bool, error) {
 	ok, err := s.redis.SetNX(ctx, claimKey(board), workerID, claimTTL).Result()
 	if err != nil {
@@ -63,9 +55,7 @@ func (s *Server) tryClaim(ctx context.Context, board, workerID string) (bool, er
 	return true, nil
 }
 
-// releaseClaim releases workerID's claim on board, if any. It's best-effort:
-// claims also expire on their own via claimTTL, so a failure to release
-// here only delays a job becoming reclaimable, it doesn't lose anything.
+// releaseClaim releases workerID's claim on board; best-effort since claims also expire via claimTTL.
 func (s *Server) releaseClaim(ctx context.Context, board, workerID string) error {
 	if err := s.redis.Del(ctx, claimKey(board)).Err(); err != nil {
 		return fmt.Errorf("failed to release claim: %w", err)
@@ -82,7 +72,6 @@ func (s *Server) releaseClaim(ctx context.Context, board, workerID string) error
 }
 
 // recordJobCompletion increments workerID's positions-computed counter.
-// It's called once a job result has been saved successfully.
 func (s *Server) recordJobCompletion(ctx context.Context, workerID string) error {
 	pipe := s.redis.TxPipeline()
 	pipe.HIncrBy(ctx, workerKey(workerID), workerFieldPositionsComputed, 1)
@@ -93,9 +82,7 @@ func (s *Server) recordJobCompletion(ctx context.Context, workerID string) error
 	return nil
 }
 
-// heartbeat records workerID as active (hostname, git commit, last active
-// time) and refreshes its claim, if it has one, so a long-running
-// evaluation doesn't lose it between heartbeats.
+// heartbeat records workerID as active and refreshes its claim, if it has one.
 func (s *Server) heartbeat(ctx context.Context, workerID, hostname, gitCommit string) error {
 	pipe := s.redis.TxPipeline()
 	pipe.HSet(ctx, workerKey(workerID),
@@ -132,11 +119,7 @@ type workerInfo struct {
 	LastActive        time.Time
 }
 
-// listWorkers returns every worker with an active (non-expired) hash,
-// ordered by positions computed (most first); ties (e.g. two workers still
-// on their first job) break by most-recently-active. Sorting by last-active
-// alone would reorder the list on almost every poll, since heartbeats and
-// job completions land in a slightly different order each time.
+// listWorkers returns active workers ordered by positions computed (most first), ties broken by last-active.
 func (s *Server) listWorkers(ctx context.Context) ([]workerInfo, error) {
 	var workers []workerInfo
 

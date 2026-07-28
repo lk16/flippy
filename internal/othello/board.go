@@ -7,8 +7,7 @@ import (
 	"strconv"
 )
 
-// BoardBytesLength is the length in bytes of the encoding produced by
-// Board.Bytes.
+// BoardBytesLength is the length in bytes of the encoding produced by Board.Bytes.
 const BoardBytesLength = 17
 
 // PassMove is the sentinel move value representing a pass.
@@ -42,8 +41,7 @@ func NewBoardEmpty() Board {
 	return Board{turn: Black}
 }
 
-// NewBoard returns a board with the given discs and turn. It returns an
-// error if a square is claimed by both colors.
+// NewBoard returns a board with the given discs and turn, or an error if a square is claimed by both.
 func NewBoard(black, white uint64, turn Color) (Board, error) {
 	if black&white != 0 {
 		return Board{}, fmt.Errorf("black and white discs overlap: %#x", black&white)
@@ -88,8 +86,7 @@ func (b Board) opponent() uint64 {
 	return b.black
 }
 
-// fromMoverOpponent rebuilds a board's black/white fields from bitboards
-// expressed relative to the player to move.
+// fromMoverOpponent rebuilds black/white fields from bitboards expressed relative to the mover.
 func fromMoverOpponent(mover, opponent uint64, turn Color) Board {
 	b := Board{turn: turn}
 	if turn == Black {
@@ -100,8 +97,7 @@ func fromMoverOpponent(mover, opponent uint64, turn Color) Board {
 	return b
 }
 
-// Moves returns a bitboard of the squares the player to move can legally
-// play on.
+// Moves returns a bitboard of the squares the player to move can legally play on.
 func (b Board) Moves() uint64 {
 	return legalMoves(b.mover(), b.opponent())
 }
@@ -111,8 +107,7 @@ func (b Board) HasMoves() bool {
 	return b.Moves() != 0
 }
 
-// IsValidMove reports whether move is legal for the player to move. PassMove
-// is only legal when the player to move has no other legal move.
+// IsValidMove reports whether move is legal; PassMove is only legal with no other legal move.
 func (b Board) IsValidMove(move int) bool {
 	if move == PassMove {
 		return !b.HasMoves()
@@ -123,8 +118,7 @@ func (b Board) IsValidMove(move int) bool {
 	return b.Moves()&(uint64(1)<<move) != 0
 }
 
-// DoMove plays move and returns the resulting board, with turn passed to the
-// opponent. It returns an error if move is not legal.
+// DoMove plays move and returns the resulting board, or an error if move is not legal.
 func (b Board) DoMove(move int) (Board, error) {
 	if !b.IsValidMove(move) {
 		return Board{}, fmt.Errorf("invalid move: %d", move)
@@ -138,8 +132,7 @@ func (b Board) DoMove(move int) (Board, error) {
 	return fromMoverOpponent(newMover, newOpponent, b.turn.Opponent()), nil
 }
 
-// Children returns the boards resulting from every legal move of the player
-// to move. It does not include a pass.
+// Children returns the boards resulting from every legal move; does not include a pass.
 func (b Board) Children() []Board {
 	moves := b.Moves()
 	children := make([]Board, 0, bits.OnesCount64(moves))
@@ -157,8 +150,7 @@ func (b Board) Children() []Board {
 	return children
 }
 
-// FinalScore returns the score from the perspective of the player to move:
-// positive if they have more discs, negative if fewer, zero if tied.
+// FinalScore returns the mover's score: positive if ahead, negative if behind, zero if tied.
 func (b Board) FinalScore() int {
 	moverCount := bits.OnesCount64(b.mover())
 	opponentCount := bits.OnesCount64(b.opponent())
@@ -173,10 +165,8 @@ func (b Board) FinalScore() int {
 	}
 }
 
-// Normalize returns the canonical NormalizedBoard for b: among the 8
-// symmetries (rotations/reflections) of the square, the one whose (mover,
-// opponent) bitboard pair sorts lowest. Turn is carried through unchanged,
-// rather than folded into the comparison.
+// Normalize returns the canonical NormalizedBoard for b: the symmetry whose (mover, opponent) bitboard
+// pair sorts lowest, with turn carried through unchanged.
 func (b Board) Normalize() NormalizedBoard {
 	bestMover, bestOpponent := b.mover(), b.opponent()
 
@@ -197,8 +187,7 @@ func (b Board) IsNormalized() bool {
 	return b.Normalize().Board() == b
 }
 
-// String returns a textual encoding of the board: 16 hex digits of black
-// discs, 16 hex digits of white discs, then "-b" or "-w" for the turn.
+// String returns a textual encoding: 16 hex digits of black discs, 16 of white discs, then "-b"/"-w".
 func (b Board) String() string {
 	turnSuffix := "-b"
 	if b.turn == White {
@@ -207,8 +196,7 @@ func (b Board) String() string {
 	return fmt.Sprintf("%016x%016x%s", b.black, b.white, turnSuffix)
 }
 
-// ParseBoard parses the format produced by Board.String(): 16 hex digits of
-// black discs, 16 hex digits of white discs, then "-b" or "-w" for the turn.
+// ParseBoard parses the format produced by Board.String().
 func ParseBoard(s string) (Board, error) {
 	if len(s) != 34 {
 		return Board{}, fmt.Errorf("invalid board string %q: want length 34, got %d", s, len(s))
@@ -237,9 +225,7 @@ func ParseBoard(s string) (Board, error) {
 	return NewBoard(black, white, turn)
 }
 
-// Bytes returns the binary encoding of b: 8 bytes of black discs, 8 bytes of
-// white discs (both big-endian), then 1 byte for the turn (0 = black, 1 =
-// white). Suitable as a compact DB key.
+// Bytes returns the binary encoding of b: 8 bytes black, 8 bytes white (big-endian), then 1 turn byte.
 func (b Board) Bytes() []byte {
 	buf := make([]byte, BoardBytesLength)
 	binary.BigEndian.PutUint64(buf[0:8], b.black)

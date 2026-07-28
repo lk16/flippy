@@ -6,9 +6,7 @@ import (
 	"fmt"
 )
 
-// NewID returns a random identifier a worker can use to identify itself to
-// the API server across its lifetime (job claims, heartbeats). Workers mint
-// their own ID rather than registering with the server for one.
+// NewID returns a random worker identifier; workers mint their own rather than registering with the server.
 func NewID() (string, error) {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {

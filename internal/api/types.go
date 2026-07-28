@@ -25,23 +25,16 @@ type heartbeatRequest struct {
 	GitCommit string `json:"git_commit"`
 }
 
-// evaluationSourceEdax marks an evaluationResponse as a directly-learned
-// edax result, backed by a DB row.
+// evaluationSourceEdax marks an evaluationResponse as a directly-learned edax result.
 const evaluationSourceEdax = "edax"
 
-// evaluationSourceMinimax marks an evaluationResponse as backfilled by
-// minimaxing learned boards below the learnable disc-count floor (see
-// internal/book) — it has no depth/confidence of its own.
+// evaluationSourceMinimax marks an evaluationResponse as backfilled from the internal/book cache.
 const evaluationSourceMinimax = "minimax"
 
-// evaluationSourceFinal marks an evaluationResponse as a board's actual
-// final score (see Board.FinalScore) rather than an edax/minimax estimate,
-// because the game is already over: neither player has a legal move.
+// evaluationSourceFinal marks an evaluationResponse as a board's actual final score.
 const evaluationSourceFinal = "final"
 
-// evaluationResponse is the JSON shape of an evaluation, returned by GET
-// /api/boards. Source distinguishes a direct edax result (Level, Depth, and
-// Confidence all meaningful) from a minimax-derived one (only Score is).
+// evaluationResponse is the JSON shape of an evaluation, returned by GET /api/boards.
 type evaluationResponse struct {
 	Level      int    `json:"level"`
 	Depth      int    `json:"depth"`

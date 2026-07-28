@@ -22,9 +22,7 @@ func ParseWTBFile(filename string) ([]*Game, error) {
 	return ParseWTB(data)
 }
 
-// ParseWTB parses data as a WTHOR (.wtb) archive: a 16-byte header (whose
-// only field we use is a 4-byte game count at offset 4) followed by one
-// 68-byte record per game.
+// ParseWTB parses data as a WTHOR archive: a 16-byte header (game count at offset 4) plus one 68-byte record per game.
 func ParseWTB(data []byte) ([]*Game, error) {
 	if len(data) < wtbHeaderSize {
 		return nil, fmt.Errorf("wtb data too short for header: %d bytes", len(data))
@@ -54,11 +52,8 @@ func ParseWTB(data []byte) ([]*Game, error) {
 	return games, nil
 }
 
-// newGameFromWTBRecord builds a Game from a 68-byte WTHOR game record. The
-// first 8 bytes (tournament/player ids, recorded scores) aren't needed to
-// reconstruct the game and are skipped. The remaining 60 bytes hold one move
-// per ply, encoded as row*10+col with row and col both 1-based; a zero byte
-// marks the end of the moves.
+// newGameFromWTBRecord builds a Game from a 68-byte WTHOR record: 8 skipped bytes, then one
+// row*10+col (1-based) move byte per ply, terminated by a zero byte.
 func newGameFromWTBRecord(record []byte) (*Game, error) {
 	moveBytes := record[wtbMoveBytesStart:wtbGameRecordSize]
 

@@ -1,7 +1,4 @@
-// Command gen generates the list of all NormalizedBoards with exactly
-// targetDiscs discs reachable by legal play from the standard Othello
-// starting position. Its output backs othello.PrecomputedBoards12; rerun via
-// `go generate ./...` from the internal/othello package.
+// Command gen generates the reachable targetDiscs-disc board list backing othello.PrecomputedBoards12.
 package main
 
 import (
@@ -43,17 +40,8 @@ func main() {
 	fmt.Fprintf(os.Stderr, "wrote %d boards to %s\n", len(lines), os.Args[1])
 }
 
-// explore walks every legal line of play from b, recording the normalized
-// form of every board it encounters with exactly targetDiscs discs. visited
-// memoizes exact (non-normalized) boards already explored, since the same
-// board is commonly reached via multiple move orders.
-//
-// A board with no legal move for the player to move is always passed
-// through, even at exactly targetDiscs discs, rather than recorded: edax
-// can't evaluate it directly, and its value is trivially the negation of
-// the position it passes into, so storing it would only ever leave a
-// permanently unlearnable row. Passing doesn't change the disc count, so
-// the position it passes into is still explored for a targetDiscs match.
+// explore walks every legal line from b, recording targetDiscs-disc boards; a no-legal-move board is
+// always passed through rather than recorded, since edax can't evaluate it.
 func explore(b othello.Board, visited map[othello.Board]bool, found map[string]struct{}) {
 	if visited[b] {
 		return

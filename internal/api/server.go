@@ -18,14 +18,12 @@ type Server struct {
 	cache *book.Cache
 }
 
-// NewServer returns a Server backed by repo, redisClient, and cache (the
-// minimax backfill for boards below the learnable disc-count floor).
+// NewServer returns a Server backed by repo, redisClient, and cache.
 func NewServer(repo *db.Repository, redisClient *redis.Client, cache *book.Cache) *Server {
 	return &Server{repo: repo, redis: redisClient, cache: cache}
 }
 
-// Handler returns the HTTP handler serving the JSON REST API, prefixed
-// "/api/", plus the "/ws" websocket endpoint.
+// Handler returns the HTTP handler serving the JSON REST API and the "/ws" websocket endpoint.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 

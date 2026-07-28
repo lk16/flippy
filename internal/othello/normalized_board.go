@@ -2,15 +2,12 @@ package othello
 
 import "fmt"
 
-// NormalizedBoard wraps a Board that is in canonical spatial form (see
-// Board.Normalize). The color to move is preserved rather than discarded.
+// NormalizedBoard wraps a Board in canonical spatial form (see Board.Normalize), turn preserved.
 type NormalizedBoard struct {
 	board Board
 }
 
-// NewNormalizedBoard wraps board, which must already be in canonical form.
-// Use Board.Normalize to construct a NormalizedBoard from an arbitrary
-// board.
+// NewNormalizedBoard wraps board, which must already be in canonical form (see Board.Normalize).
 func NewNormalizedBoard(board Board) (NormalizedBoard, error) {
 	if !board.IsNormalized() {
 		return NormalizedBoard{}, fmt.Errorf("board is not normalized: %s", board)

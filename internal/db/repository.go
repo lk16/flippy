@@ -11,17 +11,14 @@ import (
 	"github.com/lk16/flippy/internal/othello"
 )
 
-// querier is the subset of *pgxpool.Pool and pgx.Tx that Repository needs,
-// so it can run against either a pool or a transaction (the latter used by
-// tests for per-test isolation).
+// querier is the subset of *pgxpool.Pool and pgx.Tx that Repository needs, so it can run against either.
 type querier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
-// Evaluation is the current edax evaluation state stored for a Board. A
-// zero-valued Evaluation represents a board that hasn't been learned yet.
+// Evaluation is the current edax evaluation state stored for a Board; the zero value means unlearned.
 type Evaluation struct {
 	Level      int
 	Depth      int
@@ -29,10 +26,7 @@ type Evaluation struct {
 	Score      int
 }
 
-// IsLearned reports whether e is an actual edax result rather than the
-// zero-valued placeholder a board gets when its row is added but not yet
-// learned. A real result always has a positive level, so that alone is
-// enough to tell the two apart.
+// IsLearned reports whether e is an actual edax result rather than the not-yet-learned zero value.
 func (e Evaluation) IsLearned() bool {
 	return e.Level > 0
 }
@@ -45,19 +39,13 @@ type Repository struct {
 	db querier
 }
 
-// NewRepository returns a Repository backed by db, which may be a
-// *pgxpool.Pool or a pgx.Tx.
+// NewRepository returns a Repository backed by db, which may be a *pgxpool.Pool or a pgx.Tx.
 func NewRepository(db querier) *Repository {
 	return &Repository{db: db}
 }
 
-// AddBoards inserts boards that don't already have a row, each starting with
-// a zeroed (unlearned) evaluation. Boards that already exist are left
-// untouched: adding boards never updates or removes existing rows.
-//
-// All boards are sent as two array parameters (via UNNEST) rather than one
-// placeholder pair per board, so this stays well under Postgres's parameter
-// limit even when called with the full ~67k-board precomputed set.
+// AddBoards inserts boards that don't already have a row, leaving existing rows untouched. Boards are
+// sent via UNNEST rather than one placeholder pair each, to stay under Postgres's parameter limit.
 func (r *Repository) AddBoards(ctx context.Context, boards []othello.NormalizedBoard) error {
 	if len(boards) == 0 {
 		return nil
@@ -83,8 +71,7 @@ func (r *Repository) AddBoards(ctx context.Context, boards []othello.NormalizedB
 	return nil
 }
 
-// GetBoard returns the stored evaluation for board's normalized form, or
-// ErrBoardNotFound if it has no row.
+// GetBoard returns the stored evaluation for board's normalized form, or ErrBoardNotFound.
 func (r *Repository) GetBoard(ctx context.Context, board othello.Board) (Evaluation, error) {
 	normalized := board.Normalize()
 
@@ -104,21 +91,12 @@ func (r *Repository) GetBoard(ctx context.Context, board othello.Board) (Evaluat
 	return eval, nil
 }
 
-// SaveEvaluation updates an existing board's evaluation, but only if
-// (eval.Level, eval.Confidence) is lexicographically greater than the
-// stored (level, confidence) — i.e. a higher level, or an equal level with
-// higher confidence. Otherwise it's a silent no-op: not every learn result
-// improves on what's already stored, and that's not an error.
-//
-// It returns ErrBoardNotFound only if the board has no row at all: it never
-// inserts a new row, since adding boards and learning are separate
-// operations that must never implicitly perform each other's job.
+// SaveEvaluation updates an existing board's evaluation, but only if (level, confidence) improves on
+// what's stored; a non-improving result is a silent no-op. Never inserts a row: ErrBoardNotFound if none exists.
 func (r *Repository) SaveEvaluation(ctx context.Context, board othello.NormalizedBoard, eval Evaluation) error {
 	position := board.Board().Bytes()
 
-	// The UPDATE's own WHERE clause tells us whether it improved the row,
-	// but not whether the row exists at all when it didn't fire. The outer
-	// EXISTS, run in the same query, answers that in one round trip.
+	// The outer EXISTS tells whether the row exists at all when the UPDATE's WHERE doesn't fire.
 	var exists bool
 	err := r.db.QueryRow(ctx,
 		`WITH updated AS (
@@ -141,25 +119,14 @@ func (r *Repository) SaveEvaluation(ctx context.Context, board othello.Normalize
 	return nil
 }
 
-// BoardEvaluation pairs a NormalizedBoard with its current evaluation, for
-// bulk queries that need both.
+// BoardEvaluation pairs a NormalizedBoard with its current evaluation.
 type BoardEvaluation struct {
 	Board      othello.NormalizedBoard
 	Evaluation Evaluation
 }
 
-// ListLearnable returns up to limit boards with disc counts in
-// [minDiscs, maxDiscs] that haven't yet reached the level they should be
-// learned to — leafLevel for the minDiscs boards (the leaves everything else
-// is backfilled from), deeperLevel for the rest — ordered by disc count then
-// level (both ascending), the order in which job assignment should offer
-// them out.
-//
-// The level cutoff is applied here, in SQL, rather than left for the caller
-// to filter out stale rows: minDiscs alone can have millions of boards, so
-// once they're all learned up to leafLevel, a plain "ORDER BY disc_count,
-// level LIMIT n" batch would consist entirely of those already-done rows —
-// they still sort first — starving out any real work at higher disc counts.
+// ListLearnable returns up to limit boards in [minDiscs, maxDiscs] below their target level (leafLevel
+// for minDiscs, deeperLevel beyond); filtering in SQL keeps learned minDiscs rows from starving the rest.
 func (r *Repository) ListLearnable(ctx context.Context, minDiscs, maxDiscs, leafLevel, deeperLevel, limit int) ([]BoardEvaluation, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT position, level, depth, confidence, score
@@ -183,9 +150,7 @@ func (r *Repository) ListLearnable(ctx context.Context, minDiscs, maxDiscs, leaf
 	return results, nil
 }
 
-// EvaluatedBoards returns every board with exactly discCount discs that has
-// been learned at least once (level > 0), for backfilling the evaluations
-// of boards below the disc count that's ever learned directly.
+// EvaluatedBoards returns every learned (level > 0) board with exactly discCount discs.
 func (r *Repository) EvaluatedBoards(ctx context.Context, discCount int) ([]BoardEvaluation, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT position, level, depth, confidence, score
@@ -206,9 +171,7 @@ func (r *Repository) EvaluatedBoards(ctx context.Context, discCount int) ([]Boar
 	return results, nil
 }
 
-// scanBoardEvaluations scans rows of (position, level, depth, confidence,
-// score) into BoardEvaluations, as produced by ListLearnable and
-// EvaluatedBoards.
+// scanBoardEvaluations scans rows of (position, level, depth, confidence, score) into BoardEvaluations.
 func scanBoardEvaluations(rows pgx.Rows) ([]BoardEvaluation, error) {
 	var results []BoardEvaluation
 	for rows.Next() {
@@ -244,9 +207,7 @@ type LevelStat struct {
 	Count     int
 }
 
-// Stats returns, for every (disc count, level) pair that has at least one
-// board, how many boards are at that pair. Pairs with no boards are omitted
-// rather than returned with a zero count.
+// Stats returns board counts per (disc count, level) pair, omitting empty pairs.
 func (r *Repository) Stats(ctx context.Context) ([]LevelStat, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT disc_count, level, count(*)
