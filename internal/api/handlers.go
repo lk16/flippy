@@ -6,10 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
 	"github.com/lk16/flippy/internal/othello"
+)
+
+// minJobsPerRequest and maxJobsPerRequest bound the count param on GET /api/jobs.
+const (
+	minJobsPerRequest = 1
+	maxJobsPerRequest = 10
 )
 
 // writeJSON encodes v as the JSON response body with the given status code.
@@ -24,7 +31,8 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": err.Error()})
 }
 
-// handleGetJob handles GET /api/jobs: claims and returns the next available job, or 204 if none.
+// handleGetJob handles GET /api/jobs: claims and returns up to count available jobs as a JSON array,
+// or 204 if none.
 func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	workerID := r.URL.Query().Get("worker_id")
 	if workerID == "" {
@@ -32,17 +40,34 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, ok, err := s.claimJob(r.Context(), workerID)
+	countParam := r.URL.Query().Get("count")
+	if countParam == "" {
+		writeError(w, http.StatusBadRequest, errors.New("missing count"))
+		return
+	}
+	count, err := strconv.Atoi(countParam)
+	if err != nil || count < minJobsPerRequest || count > maxJobsPerRequest {
+		writeError(w, http.StatusBadRequest,
+			fmt.Errorf("count must be an integer between %d and %d", minJobsPerRequest, maxJobsPerRequest))
+		return
+	}
+
+	jobs, err := s.claimJobs(r.Context(), workerID, count)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if !ok {
+	if len(jobs) == 0 {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, jobResponse{Board: job.Board.String(), Level: job.Level})
+	responses := make([]jobResponse, len(jobs))
+	for i, job := range jobs {
+		responses[i] = jobResponse{Board: job.Board.String(), Level: job.Level}
+	}
+
+	writeJSON(w, http.StatusOK, responses)
 }
 
 // validateJobResult checks that a submitted evaluation's values are within sane bounds.

@@ -45,32 +45,36 @@ type jobResponse struct {
 	Level int    `json:"level"`
 }
 
-// GetJob claims the next available job, if any.
-func (c *Client) GetJob(ctx context.Context) (Job, bool, error) {
-	target := fmt.Sprintf("%s/api/jobs?worker_id=%s", c.baseURL, url.QueryEscape(c.workerID))
+// GetJobs claims up to count available jobs; it may return fewer than count, including none.
+func (c *Client) GetJobs(ctx context.Context, count int) ([]Job, error) {
+	target := fmt.Sprintf("%s/api/jobs?worker_id=%s&count=%d", c.baseURL, url.QueryEscape(c.workerID), count)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
-		return Job{}, false, fmt.Errorf("failed to build request: %w", err)
+		return nil, fmt.Errorf("failed to build request: %w", err)
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return Job{}, false, fmt.Errorf("failed to send request: %w", err)
+		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	switch resp.StatusCode {
 	case http.StatusNoContent:
-		return Job{}, false, nil
+		return nil, nil
 	case http.StatusOK:
-		var jr jobResponse
-		if err := json.NewDecoder(resp.Body).Decode(&jr); err != nil {
-			return Job{}, false, fmt.Errorf("failed to decode job response: %w", err)
+		var jrs []jobResponse
+		if err := json.NewDecoder(resp.Body).Decode(&jrs); err != nil {
+			return nil, fmt.Errorf("failed to decode jobs response: %w", err)
 		}
-		return Job(jr), true, nil
+		jobs := make([]Job, len(jrs))
+		for i, jr := range jrs {
+			jobs[i] = Job(jr)
+		}
+		return jobs, nil
 	default:
-		return Job{}, false, fmt.Errorf("unexpected status %d from GET /api/jobs", resp.StatusCode)
+		return nil, fmt.Errorf("unexpected status %d from GET /api/jobs", resp.StatusCode)
 	}
 }
 
