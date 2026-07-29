@@ -28,7 +28,8 @@ func PathFromEnv() (string, error) {
 
 // Process manages a long-running edax subprocess, restarted only when the requested level changes.
 type Process struct {
-	path string
+	path  string
+	tasks int
 
 	mu     sync.Mutex
 	level  int
@@ -37,9 +38,11 @@ type Process struct {
 	stdout *bufio.Reader
 }
 
-// NewProcess returns a Process for the edax binary at path; no subprocess starts until the first Evaluate.
-func NewProcess(path string) *Process {
-	return &Process{path: path}
+// NewProcess returns a Process for the edax binary at path; no subprocess starts until the first
+// Evaluate. tasks caps the number of parallel search threads edax uses (its -n-tasks flag); tasks <= 0
+// leaves it unset, so edax defaults to one thread per CPU on the machine.
+func NewProcess(path string, tasks int) *Process {
+	return &Process{path: path, tasks: tasks}
 }
 
 // Evaluate sends board to edax for a search at level; board must have a legal move (edax crashes otherwise).
@@ -68,6 +71,17 @@ func (p *Process) Evaluate(board othello.Board, level int) (Evaluation, error) {
 	return eval, nil
 }
 
+// buildArgs returns the edax command-line arguments for a -solve search at level; tasks caps parallel
+// search threads via -n-tasks when positive, and is omitted (edax defaults to one thread per CPU)
+// otherwise.
+func buildArgs(level, tasks int) []string {
+	args := []string{"-solve", "/dev/stdin", "-level", strconv.Itoa(level), "-verbose", "3"}
+	if tasks > 0 {
+		args = append(args, "-n-tasks", strconv.Itoa(tasks))
+	}
+	return args
+}
+
 // ensureStarted returns a running edax process's stdin/stdout at level, restarting it if needed.
 func (p *Process) ensureStarted(level int) (io.Writer, *bufio.Reader, error) {
 	p.mu.Lock()
@@ -82,7 +96,7 @@ func (p *Process) ensureStarted(level int) (io.Writer, *bufio.Reader, error) {
 		_ = p.cmd.Wait()
 	}
 
-	cmd := exec.Command(p.path, "-solve", "/dev/stdin", "-level", strconv.Itoa(level), "-verbose", "3")
+	cmd := exec.Command(p.path, buildArgs(level, p.tasks)...)
 	cmd.Dir = filepath.Join(filepath.Dir(p.path), "..")
 
 	stdin, err := cmd.StdinPipe()

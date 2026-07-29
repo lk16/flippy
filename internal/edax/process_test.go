@@ -2,6 +2,7 @@ package edax
 
 import (
 	"os"
+	"slices"
 	"syscall"
 	"testing"
 
@@ -9,6 +10,18 @@ import (
 
 	"github.com/lk16/flippy/internal/othello"
 )
+
+func TestBuildArgs_OmitsNTasksWhenUnset(t *testing.T) {
+	require.NotContains(t, buildArgs(16, 0), "-n-tasks")
+	require.NotContains(t, buildArgs(16, -1), "-n-tasks")
+}
+
+func TestBuildArgs_IncludesNTasksWhenPositive(t *testing.T) {
+	args := buildArgs(16, 4)
+	idx := slices.Index(args, "-n-tasks")
+	require.GreaterOrEqual(t, idx, 0)
+	require.Equal(t, "4", args[idx+1])
+}
 
 // testProcess returns a Process backed by the real edax binary at
 // EDAX_PATH, skipping the test if it's not set.
@@ -20,7 +33,7 @@ func testProcess(t *testing.T) *Process {
 		t.Skip("EDAX_PATH not set; skipping test requiring the real edax binary")
 	}
 
-	p := NewProcess(path)
+	p := NewProcess(path, 0)
 	t.Cleanup(func() { _ = p.Close() })
 
 	return p
@@ -50,7 +63,7 @@ func TestProcess_Evaluate(t *testing.T) {
 }
 
 func TestProcess_Evaluate_BinaryNotFound(t *testing.T) {
-	p := NewProcess("/does/not/exist/lEdax-x64")
+	p := NewProcess("/does/not/exist/lEdax-x64", 0)
 
 	_, err := p.Evaluate(othello.NewBoardStart(), 10)
 	require.Error(t, err)

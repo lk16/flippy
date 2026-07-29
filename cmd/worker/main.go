@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"os"
 	"os/exec"
@@ -32,6 +33,12 @@ func gitCommit() string {
 }
 
 func main() {
+	edaxTasks := flag.Int("edax-tasks", 0,
+		"cap edax's parallel search threads per process (its -n-tasks flag); 0 leaves it unset, so "+
+			"edax defaults to one thread per CPU. Set this to run multiple workers on one machine "+
+			"without them oversubscribing its CPUs.")
+	flag.Parse()
+
 	if err := env.Load(); err != nil {
 		log.Fatalf("failed to load .env: %v", err)
 	}
@@ -54,7 +61,7 @@ func main() {
 		hostname = "unknown"
 	}
 
-	edaxProcess := edax.NewProcess(edaxPath)
+	edaxProcess := edax.NewProcess(edaxPath, *edaxTasks)
 	client := worker.NewClient(serverURL, workerID, hostname, gitCommit())
 	w := worker.New(client, edaxProcess)
 
