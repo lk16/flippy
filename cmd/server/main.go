@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,6 +19,35 @@ import (
 )
 
 const shutdownTimeout = 10 * time.Second
+
+// statusRecorder wraps a http.ResponseWriter to capture the status code written, since
+// http.ResponseWriter doesn't expose it directly.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+// logRequests wraps next, logging method, path, status code, and duration for every request.
+func logRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+
+		next.ServeHTTP(rec, r)
+
+		slog.Info("http request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", rec.status,
+			"duration", time.Since(start),
+		)
+	})
+}
 
 func requiredEnv(name string) string {
 	value := os.Getenv(name)
@@ -75,7 +105,7 @@ func main() {
 	mux.Handle("/ws", apiServer.Handler())
 	mux.Handle("/", webServer.Handler())
 
-	httpServer := &http.Server{Addr: addr, Handler: mux}
+	httpServer := &http.Server{Addr: addr, Handler: logRequests(mux)}
 
 	go func() {
 		<-ctx.Done()

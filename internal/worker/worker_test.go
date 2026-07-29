@@ -89,6 +89,7 @@ func testWorker(api apiClient, eval evaluator) *Worker {
 		errorSleep:        time.Millisecond,
 		jobBatchSize:      3,
 		jobLowWater:       1,
+		statsInterval:     time.Hour,
 		jobs:              make(chan Job, 3),
 		refill:            make(chan struct{}, 1),
 	}
@@ -102,6 +103,7 @@ func TestNew_SetsDefaults(t *testing.T) {
 	require.Equal(t, defaultErrorSleep, w.errorSleep)
 	require.Equal(t, defaultJobBatchSize, w.jobBatchSize)
 	require.Equal(t, defaultJobLowWater, w.jobLowWater)
+	require.Equal(t, defaultStatsInterval, w.statsInterval)
 	require.Equal(t, defaultJobBatchSize, cap(w.jobs))
 }
 

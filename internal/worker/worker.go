@@ -2,8 +2,10 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lk16/flippy/internal/edax"
@@ -20,6 +22,9 @@ const (
 	// at which a top-up is triggered, so the queue is refilled before it actually runs dry.
 	defaultJobBatchSize = 10
 	defaultJobLowWater  = 3
+
+	// defaultStatsInterval is how often throughput (boards/sec, sec/board since start) is logged.
+	defaultStatsInterval = 10 * time.Second
 )
 
 // apiClient is the subset of Client's behavior Worker depends on, so tests can inject a fake.
@@ -48,9 +53,12 @@ type Worker struct {
 	errorSleep        time.Duration
 	jobBatchSize      int
 	jobLowWater       int
+	statsInterval     time.Duration
 
 	jobs   chan Job
 	refill chan struct{}
+
+	jobsCompleted atomic.Int64
 }
 
 // New returns a Worker that claims jobs via api and evaluates them via edax.
@@ -63,6 +71,7 @@ func New(api apiClient, edax evaluator) *Worker {
 		errorSleep:        defaultErrorSleep,
 		jobBatchSize:      defaultJobBatchSize,
 		jobLowWater:       defaultJobLowWater,
+		statsInterval:     defaultStatsInterval,
 		jobs:              make(chan Job, defaultJobBatchSize),
 		refill:            make(chan struct{}, 1),
 	}
@@ -72,7 +81,7 @@ func New(api apiClient, edax evaluator) *Worker {
 // the edax process separately to interrupt a blocked evaluation, since ctx cancellation alone can't.
 func (w *Worker) Run(ctx context.Context) {
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(4)
 
 	go func() {
 		defer wg.Done()
@@ -86,8 +95,51 @@ func (w *Worker) Run(ctx context.Context) {
 		defer wg.Done()
 		w.runJobs(ctx)
 	}()
+	go func() {
+		defer wg.Done()
+		w.runStats(ctx)
+	}()
 
 	wg.Wait()
+}
+
+// runStats logs cumulative throughput (boards/sec and sec/board since start) every statsInterval,
+// until ctx is canceled.
+func (w *Worker) runStats(ctx context.Context) {
+	start := time.Now()
+
+	ticker := time.NewTicker(w.statsInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			w.logStats(start)
+		}
+	}
+}
+
+// logStats logs boards processed and throughput since start, both boards/sec and sec/board formatted
+// to 2 decimals.
+func (w *Worker) logStats(start time.Time) {
+	elapsed := time.Since(start).Seconds()
+	count := w.jobsCompleted.Load()
+
+	var boardsPerSec, secPerBoard float64
+	if elapsed > 0 {
+		boardsPerSec = float64(count) / elapsed
+	}
+	if count > 0 {
+		secPerBoard = elapsed / float64(count)
+	}
+
+	slog.Info("throughput",
+		"boards", count,
+		"boards_per_sec", fmt.Sprintf("%.2f", boardsPerSec),
+		"sec_per_board", fmt.Sprintf("%.2f", secPerBoard),
+	)
 }
 
 // runHeartbeat sends a heartbeat immediately, then every heartbeatInterval, until ctx is canceled.
@@ -213,6 +265,8 @@ func (w *Worker) processJob(ctx context.Context, job Job) {
 		sleep(ctx, w.errorSleep)
 		return
 	}
+
+	w.jobsCompleted.Add(1)
 }
 
 // sleep waits for d or until ctx is canceled, whichever comes first.
