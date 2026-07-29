@@ -126,16 +126,18 @@ type BoardEvaluation struct {
 }
 
 // ListLearnable returns up to limit boards in [minDiscs, maxDiscs] below their target level (leafLevel
-// for minDiscs, deeperLevel beyond); filtering in SQL keeps learned minDiscs rows from starving the rest.
-func (r *Repository) ListLearnable(ctx context.Context, minDiscs, maxDiscs, leafLevel, deeperLevel, limit int) ([]BoardEvaluation, error) {
+// for leafDiscs, deeperLevel beyond); filtering in SQL keeps learned leafDiscs rows from starving the
+// rest. minDiscs and leafDiscs are independent: minDiscs may be raised above leafDiscs by a caller
+// skipping a prefix it already knows is fully learned, without changing which disc count counts as leaf.
+func (r *Repository) ListLearnable(ctx context.Context, minDiscs, maxDiscs, leafDiscs, leafLevel, deeperLevel, limit int) ([]BoardEvaluation, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT position, level, depth, confidence, score
 		 FROM boards
 		 WHERE disc_count BETWEEN $1 AND $2
-		   AND level < CASE WHEN disc_count = $1 THEN $3::smallint ELSE $4::smallint END
+		   AND level < CASE WHEN disc_count = $3 THEN $4::smallint ELSE $5::smallint END
 		 ORDER BY disc_count, level
-		 LIMIT $5`,
-		minDiscs, maxDiscs, leafLevel, deeperLevel, limit,
+		 LIMIT $6`,
+		minDiscs, maxDiscs, leafDiscs, leafLevel, deeperLevel, limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list learnable boards: %w", err)

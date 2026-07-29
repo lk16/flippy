@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/othello"
@@ -19,9 +20,14 @@ type Job struct {
 
 // claimJob atomically claims the lowest disc-count/level learnable board not already claimed.
 func (s *Server) claimJob(ctx context.Context, workerID string) (Job, bool, error) {
+	floor, err := s.getJobFloor(ctx, book.LeafDiscs)
+	if err != nil {
+		return Job{}, false, err
+	}
+
 	candidates, err := s.repo.ListLearnable(ctx,
-		book.LeafDiscs, book.MaxSavableDiscs,
-		TargetLevel(book.LeafDiscs), TargetLevel(book.LeafDiscs+1),
+		floor, book.MaxSavableDiscs,
+		book.LeafDiscs, TargetLevel(book.LeafDiscs), TargetLevel(book.LeafDiscs+1),
 		jobCandidateBatch,
 	)
 	if err != nil {
@@ -34,7 +40,8 @@ func (s *Server) claimJob(ctx context.Context, workerID string) (Job, bool, erro
 			continue
 		}
 
-		target := TargetLevel(candidate.Board.CountDiscs())
+		discCount := candidate.Board.CountDiscs()
+		target := TargetLevel(discCount)
 		if candidate.Evaluation.Level >= target {
 			continue
 		}
@@ -46,6 +53,14 @@ func (s *Server) claimJob(ctx context.Context, workerID string) (Job, bool, erro
 			return Job{}, false, err
 		}
 		if claimed {
+			// A claim strictly above floor is proof nothing claimable remains at floor in this batch,
+			// so it's safe to stop rescanning it; never lower the floor here (see getJobFloor/jobFloorTTL
+			// for how a floor stuck above newly-imported boards self-heals).
+			if discCount > floor {
+				if err := s.setJobFloor(ctx, discCount); err != nil {
+					slog.Warn("failed to advance job floor cache", "error", err)
+				}
+			}
 			return Job{Board: candidate.Board, Level: target}, true, nil
 		}
 	}

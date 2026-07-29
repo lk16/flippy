@@ -82,6 +82,37 @@ func TestServer_ReleaseClaim_NoActiveClaimIsNoop(t *testing.T) {
 	require.NoError(t, s.releaseClaim(context.Background(), "board-a", "worker-1"))
 }
 
+func TestServer_GetJobFloor_DefaultsWhenUnset(t *testing.T) {
+	s := testServer(t)
+
+	floor, err := s.getJobFloor(context.Background(), 12)
+	require.NoError(t, err)
+	require.Equal(t, 12, floor)
+}
+
+func TestServer_GetJobFloor_ReturnsCachedValue(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.setJobFloor(ctx, 18))
+
+	floor, err := s.getJobFloor(ctx, 12)
+	require.NoError(t, err)
+	require.Equal(t, 18, floor)
+}
+
+func TestServer_SetJobFloor_ExpiresWithinJobFloorTTL(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.setJobFloor(ctx, 18))
+
+	ttl, err := s.redis.TTL(ctx, jobFloorKey).Result()
+	require.NoError(t, err)
+	require.Greater(t, ttl, time.Duration(0))
+	require.LessOrEqual(t, ttl, jobFloorTTL)
+}
+
 func TestServer_RecordJobCompletion_IncrementsCounter(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()

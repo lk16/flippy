@@ -13,6 +13,14 @@ import (
 // claimTTL is how long a job claim or worker hash survives without a refresh.
 const claimTTL = 5 * time.Minute
 
+// jobFloorKey caches the lowest disc count that might still have unclaimed work, so claimJob can skip
+// re-scanning disc counts already known to be fully learned.
+const jobFloorKey = "job_floor_disc_count"
+
+// jobFloorTTL bounds how long the cached job floor is trusted before a claim re-derives it from
+// scratch, so boards an import (see internal/loader) adds below the floor are eventually rediscovered.
+const jobFloorTTL = 10 * time.Minute
+
 // Redis field names within a worker's hash (see workerKey).
 const (
 	workerFieldHostname          = "hostname"
@@ -68,6 +76,34 @@ func (s *Server) releaseClaim(ctx context.Context, board, workerID string) error
 		return fmt.Errorf("failed to clear worker claim: %w", err)
 	}
 
+	return nil
+}
+
+// getJobFloor returns the cached lowest disc count worth querying for a job, or fallback if the cache
+// is unset, expired, or holds an unreadable value.
+func (s *Server) getJobFloor(ctx context.Context, fallback int) (int, error) {
+	value, err := s.redis.Get(ctx, jobFloorKey).Result()
+	if err == redis.Nil {
+		return fallback, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("failed to get job floor: %w", err)
+	}
+
+	floor, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback, nil
+	}
+
+	return floor, nil
+}
+
+// setJobFloor caches floor as the lowest disc count worth querying for a job, expiring after
+// jobFloorTTL so boards later added below it (e.g. by an import) aren't skipped forever.
+func (s *Server) setJobFloor(ctx context.Context, floor int) error {
+	if err := s.redis.Set(ctx, jobFloorKey, floor, jobFloorTTL).Err(); err != nil {
+		return fmt.Errorf("failed to set job floor: %w", err)
+	}
 	return nil
 }
 

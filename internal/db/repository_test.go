@@ -245,7 +245,7 @@ func TestRepository_ListLearnable_OrdersByDiscCountThenLevel(t *testing.T) {
 	require.NoError(t, repo.SaveEvaluation(ctx, board13, Evaluation{Level: 10, Depth: 10, Confidence: 100, Score: 0}))
 	require.NoError(t, repo.SaveEvaluation(ctx, board13Other, Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 0}))
 
-	results, err := repo.ListLearnable(ctx, 12, 30, 24, 24, 10)
+	results, err := repo.ListLearnable(ctx, 12, 30, 12, 24, 24, 10)
 	require.NoError(t, err)
 	require.Len(t, results, 3)
 
@@ -274,10 +274,30 @@ func TestRepository_ListLearnable_LeafLevelDoesNotStarveDeeperCandidates(t *test
 
 	// A batch smaller than the number of fully-learned leaves: without the
 	// level filter, this would return only leaves and miss board13 entirely.
-	results, err := repo.ListLearnable(ctx, 12, 30, 24, 16, 3)
+	results, err := repo.ListLearnable(ctx, 12, 30, 12, 24, 16, 3)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	require.Equal(t, board13, results[0].Board)
+}
+
+// TestRepository_ListLearnable_MinDiscsAboveLeafDiscsKeepsLeafThreshold covers a caller raising minDiscs
+// above leafDiscs (e.g. a cached "already fully learned up to here" floor): the leaf-level threshold
+// must still apply only to leafDiscs, not to whatever minDiscs happens to be.
+func TestRepository_ListLearnable_MinDiscsAboveLeafDiscsKeepsLeafThreshold(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	board13 := testBoard(t, 13)
+	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board13}))
+	// Above deeperLevel (16) but below leafLevel (24): distinguishes the two thresholds.
+	require.NoError(t, repo.SaveEvaluation(ctx, board13, Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 0}))
+
+	// minDiscs (13) equals board13's disc count but leafDiscs is still 12, so board13 must be judged
+	// against deeperLevel (16), not leafLevel (24); a bug binding the leaf check to minDiscs instead of
+	// leafDiscs would misapply the leaf threshold here and wrongly still return board13 as needing level 24.
+	results, err := repo.ListLearnable(ctx, 13, 30, 12, 24, 16, 10)
+	require.NoError(t, err)
+	require.Empty(t, results)
 }
 
 func TestRepository_ListLearnable_FiltersByDiscCountRange(t *testing.T) {
@@ -289,7 +309,7 @@ func TestRepository_ListLearnable_FiltersByDiscCountRange(t *testing.T) {
 
 	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board12, board35}))
 
-	results, err := repo.ListLearnable(ctx, 12, 30, 24, 24, 10)
+	results, err := repo.ListLearnable(ctx, 12, 30, 12, 24, 24, 10)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	require.Equal(t, board12, results[0].Board)
@@ -302,7 +322,7 @@ func TestRepository_ListLearnable_RespectsLimit(t *testing.T) {
 	boards := othello.PrecomputedBoards12()[:5]
 	require.NoError(t, repo.AddBoards(ctx, boards))
 
-	results, err := repo.ListLearnable(ctx, 12, 30, 24, 24, 3)
+	results, err := repo.ListLearnable(ctx, 12, 30, 12, 24, 24, 3)
 	require.NoError(t, err)
 	require.Len(t, results, 3)
 }
@@ -310,7 +330,7 @@ func TestRepository_ListLearnable_RespectsLimit(t *testing.T) {
 func TestRepository_ListLearnable_Empty(t *testing.T) {
 	repo := testRepository(t)
 
-	results, err := repo.ListLearnable(context.Background(), 12, 30, 24, 24, 10)
+	results, err := repo.ListLearnable(context.Background(), 12, 30, 12, 24, 24, 10)
 	require.NoError(t, err)
 	require.Empty(t, results)
 }
