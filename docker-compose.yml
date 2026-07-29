@@ -27,5 +27,22 @@ services:
       timeout: 5s
       retries: 5
 
+  # Talks to the server started by local.sh (which runs on the host, not in
+  # compose). network_mode: host lets FLIPPY_SERVER_URL just say localhost.
+  # Scaled to 0 by default; run `docker compose up -d --scale worker=N` to
+  # start N of them.
+  worker:
+    build:
+      context: .
+      dockerfile: cmd/worker/Dockerfile
+    network_mode: host
+    environment:
+      FLIPPY_SERVER_URL: ${FLIPPY_SERVER_URL:-http://localhost:8080}
+      EDAX_PATH: /edax/bin/lEdax-x64
+    volumes:
+      - ${EDAX_HOST_DIR}:/edax:ro
+    deploy:
+      replicas: 0
+
 volumes:
   pgdata:
