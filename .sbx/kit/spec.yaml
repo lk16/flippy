@@ -1,0 +1,24 @@
+schemaVersion: "2"
+kind: mixin
+name: project-network-policy
+displayName: Project minimal network policy
+description: Minimal Anthropic API access + Docker Hub pulls for flippy's test.sh (personal-claude profile)
+
+caps:
+  network:
+    allow:
+      - api.anthropic.com:443            # personal-claude's actual API calls (not auto-included by the claude kit)
+      - download.docker.com:443          # base image's own background `apt-get update` at boot; leave blocked and it just retries
+      - registry-1.docker.io:443         # Docker Hub image pulls (postgres:17, redis:8 via docker-compose.test.yml)
+      - auth.docker.io:443               # Docker Hub auth token exchange
+      - production.cloudfront.docker.com:443   # Docker Hub blob CDN (NOT "cloudflare" -- easy typo)
+
+commands:
+  startup:
+    - command: ["sudo", "rm", "-f", "/usr/local/bin/clipboard-bridge", "/usr/local/bin/sbx-clipboard"]
+      description: Remove the clipboard bridge binaries (no documented off-switch exists)
+    # Docker-socket lockdown and passwordless-sudo removal are deliberately
+    # NOT applied here: test.sh needs a working `docker compose` with normal
+    # nested-Docker root access inside the VM (see sbx setup guide, "Docker
+    # Compose" section) -- locking those down breaks that without adding
+    # meaningful extra containment.
