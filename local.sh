@@ -40,7 +40,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-docker compose -f "$COMPOSE_FILE" up -d --wait
+# Named explicitly: `--wait` with no service names also waits on `worker`, which is
+# scaled to 0 replicas by default, and docker compose mishandles that as a missing
+# dependency rather than an intentionally-absent service.
+docker compose -f "$COMPOSE_FILE" up -d --wait postgres redis
 
 migrate -path migrations -database "$FLIPPY_POSTGRES_URL" up
 
