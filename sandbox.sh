@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# Runs Claude Code inside an sbx sandbox for this project: real Docker access
+# (so test.sh's docker-compose.test.yml works), network locked down to
+# .sbx/kit's allowlist, and CPU/memory/disk capped explicitly. Torn down via
+# `sbx rm` on exit (see cleanup trap below), so each run starts fresh.
+#
+# --clone: the agent works on a private in-container clone of this repo, not
+# the real working tree (which is mounted read-only instead). Commits land on
+# a `sandbox-<name>` git remote, fetched back out explicitly once reviewed.
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+# Load local dev config (e.g. EDAX_HOST_DIR), same pattern as local.sh/test.sh.
+if [ -f .env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
+fi
+
+: "${EDAX_HOST_DIR:?EDAX_HOST_DIR must be set in .env (path to the edax-reversi checkout)}"
+
+# Resolved dynamically rather than hardcoded, so this script stays portable
+# across machines with different usernames/homedirs.
+GOMODCACHE_HOST="$(go env GOMODCACHE)"
+LOCAL_BIN_HOST="$HOME/.local/bin"
+
+# Sets expectations the agent can't otherwise infer: nobody's watching this
+# session, so it should act on whatever the user's first message says instead
+# of pausing to ask; the git hook won't fire since pre-commit itself isn't
+# installed in the sandbox, so hooks from .pre-commit-config.yaml need running
+# by hand; and ./test.sh must pass before anything gets committed.
+SYSTEM_PROMPT="$(cat <<'EOF'
+You are running unattended in a network-restricted sandbox (see .sbx/kit/spec.yaml
+for the allowlist). Treat the next message as your only input from the user --
+nobody is available to answer follow-ups, so make reasonable assumptions and
+keep going rather than asking a question and waiting.
+
+pre-commit is not installed here, so its git hook won't run: before committing,
+run the checks from .pre-commit-config.yaml by hand (gofmt, golangci-lint, etc.),
+and make sure ./test.sh passes.
+
+If you can't reasonably finish the task, stop, state concisely what's blocking
+you, and suggest a solution -- don't keep flailing.
+
+Go module downloads are blocked here (proxy.golang.org isn't on the network
+allowlist), so go build/go test will 403 if a module isn't already cached --
+check with `ls $(go env GOPATH)/pkg/mod/github.com/` first. If modules are
+missing, verify Go correctness by reviewing the diff / go vet on unaffected
+packages instead of fighting the network block; only ask the user to run
+`sbx policy allow network proxy.golang.org,sum.golang.org` if a real build is
+required. Frontend-only changes (static/, templates) don't need a Go build --
+`node --check file.js` is enough for JS syntax. If go build 403s on an
+unmodified file too, that's a pre-existing sandbox limitation, not a
+regression from your change.
+EOF
+)"
+
+SBX_BASE_NAME="${SBX_NAME:-flippy}"
+SBX_MEMORY="${SBX_MEMORY:-4g}"
+SBX_CPUS="${SBX_CPUS:-4}"
+
+# Multiple sandboxes can run concurrently, so pick the lowest free
+# "$SBX_BASE_NAME-<n>" suffix instead of colliding on a shared name.
+existing_names="$(sbx ls -q 2>/dev/null || true)"
+n=1
+while echo "$existing_names" | grep -qx "$SBX_BASE_NAME-$n"; do
+    n=$((n + 1))
+done
+SBX_NAME="$SBX_BASE_NAME-$n"
+
+# Disk defaults to 20 GiB/sandbox and is uncapped across concurrently running
+# sandboxes otherwise -- tighten explicitly. See
+# work/notes/2026-07-29_sbx_isolation_findings.md for how this was verified.
+export DOCKER_SANDBOXES_ROOT_SIZE="${SBX_ROOT_SIZE:-10g}"
+export DOCKER_SANDBOXES_DOCKER_SIZE="${SBX_DOCKER_SIZE:-10g}"
+
+cleanup() {
+    git fetch "sandbox-$SBX_NAME" || true
+    sbx rm --force "$SBX_NAME"
+}
+trap cleanup EXIT
+
+sbx run claude \
+    . \
+    "$GOMODCACHE_HOST":ro \
+    "$LOCAL_BIN_HOST":ro \
+    "$EDAX_HOST_DIR":ro \
+    --clone \
+    --name "$SBX_NAME" \
+    --kit .sbx/kit \
+    --memory "$SBX_MEMORY" \
+    --cpus "$SBX_CPUS" \
+    -- --append-system-prompt "$SYSTEM_PROMPT"
