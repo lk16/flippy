@@ -10,6 +10,7 @@ import (
 
 	"github.com/lk16/flippy/internal/db"
 	"github.com/lk16/flippy/internal/othello"
+	"github.com/lk16/flippy/internal/othello/othellotest"
 )
 
 // testRepository returns a Repository backed by a transaction that's rolled
@@ -40,25 +41,7 @@ func testRepository(t *testing.T) *db.Repository {
 
 // testBoard returns a NormalizedBoard reached by playing the first available
 // legal move (or pass) from start until it has exactly discs discs.
-func testBoard(t *testing.T, discs int) othello.NormalizedBoard {
-	t.Helper()
-
-	board := othello.NewBoardStart()
-	for board.CountDiscs() < discs {
-		if !board.HasMoves() {
-			next, err := board.DoMove(othello.PassMove)
-			require.NoError(t, err)
-			board = next
-			continue
-		}
-
-		children := board.Children()
-		require.NotEmpty(t, children)
-		board = children[0]
-	}
-
-	return board.Normalize()
-}
+var testBoard = othellotest.Board
 
 func TestCache_Get_MissesBeforeRebuild(t *testing.T) {
 	repo := testRepository(t)

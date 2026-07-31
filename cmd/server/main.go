@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -30,6 +33,22 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(status int) {
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)
+}
+
+// Hijack lets the wrapped writer be used for connection upgrades (the "/ws"
+// WebSocket endpoint). Without it, embedding the http.ResponseWriter interface
+// hides the underlying Hijacker, so websocket.Accept fails with a 501.
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("underlying ResponseWriter does not support hijacking")
+	}
+	return hijacker.Hijack()
+}
+
+// Unwrap exposes the underlying writer to http.ResponseController (Flush, etc.).
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
 }
 
 // logRequests wraps next, logging method, path, status code, and duration for every request.

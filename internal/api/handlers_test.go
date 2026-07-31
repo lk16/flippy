@@ -200,6 +200,19 @@ func TestHandleSubmitJobResult_OutOfRangeValues(t *testing.T) {
 			name: "depth too high",
 			req:  jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: 61, Confidence: 100, Score: 0},
 		},
+		{
+			// Would overflow the smallint column and 500 without an upper bound.
+			name: "level above smallint-safe max",
+			req:  jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 100000, Depth: 24, Confidence: 100, Score: 0},
+		},
+		{
+			name: "confidence negative",
+			req:  jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: 24, Confidence: -1, Score: 0},
+		},
+		{
+			name: "confidence above 100",
+			req:  jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: 24, Confidence: 100000, Score: 0},
+		},
 	}
 
 	for _, tt := range tests {

@@ -44,11 +44,20 @@ func NewRepository(db querier) *Repository {
 	return &Repository{db: db}
 }
 
-// AddBoards inserts boards that don't already have a row, leaving existing rows untouched. Boards are
-// sent via UNNEST rather than one placeholder pair each, to stay under Postgres's parameter limit.
+// AddBoards inserts boards that don't already have a row, leaving existing rows untouched. Use
+// AddBoardsInserted instead when the number of rows actually inserted is needed.
 func (r *Repository) AddBoards(ctx context.Context, boards []othello.NormalizedBoard) error {
+	_, err := r.AddBoardsInserted(ctx, boards)
+	return err
+}
+
+// AddBoardsInserted inserts boards that don't already have a row, leaving existing rows untouched, and
+// returns the number of rows actually inserted (boards already present are skipped and not counted).
+// Boards are sent via UNNEST rather than one placeholder pair each, to stay under Postgres's parameter
+// limit.
+func (r *Repository) AddBoardsInserted(ctx context.Context, boards []othello.NormalizedBoard) (int, error) {
 	if len(boards) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	positions := make([][]byte, len(boards))
@@ -58,17 +67,17 @@ func (r *Repository) AddBoards(ctx context.Context, boards []othello.NormalizedB
 		discCounts[i] = int16(board.CountDiscs())
 	}
 
-	_, err := r.db.Exec(ctx,
+	tag, err := r.db.Exec(ctx,
 		`INSERT INTO boards (position, disc_count)
 		 SELECT * FROM UNNEST($1::bytea[], $2::smallint[])
 		 ON CONFLICT (position) DO NOTHING`,
 		positions, discCounts,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to add boards: %w", err)
+		return 0, fmt.Errorf("failed to add boards: %w", err)
 	}
 
-	return nil
+	return int(tag.RowsAffected()), nil
 }
 
 // GetBoard returns the stored evaluation for board's normalized form, or ErrBoardNotFound.

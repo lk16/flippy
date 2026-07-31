@@ -35,6 +35,29 @@ func TestImportGames_AddsExtractedBoards(t *testing.T) {
 	}
 }
 
+// TestImportGames_CountReflectsOnlyNewlyInserted covers the reported count:
+// re-importing the same games must report 0 added (every board already
+// exists), not the extracted board count again.
+func TestImportGames_CountReflectsOnlyNewlyInserted(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	game, err := othello.NewGameFromMoves([]int{19, 18, 17, 9, 1, 0, 37, 43, 51, 2})
+	require.NoError(t, err)
+
+	extracted := ExtractBoards([]*othello.Game{game})
+	require.NotEmpty(t, extracted)
+
+	first, err := ImportGames(ctx, repo, []*othello.Game{game})
+	require.NoError(t, err)
+	require.Equal(t, len(extracted), first)
+
+	// Second import inserts nothing new.
+	second, err := ImportGames(ctx, repo, []*othello.Game{game})
+	require.NoError(t, err)
+	require.Zero(t, second)
+}
+
 func TestImportGames_DoesNotOverwriteLearnedEvaluation(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()

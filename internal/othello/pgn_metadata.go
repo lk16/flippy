@@ -197,7 +197,8 @@ func (p pgnMetadataParser) parseVariant() (bool, error) {
 		return false, nil
 	}
 
-	if variant == "xot" {
+	// PGN tag values aren't case-normalized by writers, so match case-insensitively.
+	if strings.EqualFold(variant, "xot") {
 		return true, nil
 	}
 

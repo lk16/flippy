@@ -103,7 +103,7 @@ func (g *Game) PopMove() {
 	}
 
 	n := 1
-	if g.moves[len(g.moves)-1] == PassMove {
+	if len(g.moves) >= 2 && g.moves[len(g.moves)-1] == PassMove {
 		n = 2
 	}
 

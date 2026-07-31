@@ -14,6 +14,7 @@ import (
 	"github.com/lk16/flippy/internal/db"
 	"github.com/lk16/flippy/internal/edax"
 	"github.com/lk16/flippy/internal/othello"
+	"github.com/lk16/flippy/internal/othello/othellotest"
 )
 
 // testClient returns a Client wired up against a real api.Server (backed by
@@ -66,25 +67,7 @@ func testClient(t *testing.T, workerID string) (*Client, *db.Repository) {
 
 // testBoard returns a NormalizedBoard reached by playing the first available
 // legal move (or pass) from start until it has exactly discs discs.
-func testBoard(t *testing.T, discs int) othello.NormalizedBoard {
-	t.Helper()
-
-	board := othello.NewBoardStart()
-	for board.CountDiscs() < discs {
-		if !board.HasMoves() {
-			next, err := board.DoMove(othello.PassMove)
-			require.NoError(t, err)
-			board = next
-			continue
-		}
-
-		children := board.Children()
-		require.NotEmpty(t, children)
-		board = children[0]
-	}
-
-	return board.Normalize()
-}
+var testBoard = othellotest.Board
 
 func TestClient_GetJobs_NoJobAvailable(t *testing.T) {
 	client, _ := testClient(t, "w1")

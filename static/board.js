@@ -119,10 +119,19 @@ class OthelloBoard {
         this.setDisc(4 * 8 + 4, 'white');
     }
 
+    // fromBits builds a board directly from its field values, skipping the
+    // constructor's starting-position setup (which callers below would only
+    // overwrite anyway).
+    static fromBits(playerBits, opponentBits, blackTurn) {
+        const board = Object.create(OthelloBoard.prototype);
+        board.playerBits = playerBits;
+        board.opponentBits = opponentBits;
+        board.blackTurn = blackTurn;
+        return board;
+    }
+
     clone() {
-        const copy = new OthelloBoard();
-        Object.assign(copy, this);
-        return copy;
+        return OthelloBoard.fromBits(this.playerBits, this.opponentBits, this.blackTurn);
     }
 
     getDisc(index) {
@@ -227,12 +236,9 @@ class OthelloBoard {
         const flipped = this.getFlipped(index);
         if (flipped === 0n) return null;
 
-        const child = new OthelloBoard();
-        child.opponentBits = this.playerBits | flipped | (1n << BigInt(index));
-        child.playerBits = this.opponentBits & ~child.opponentBits;
-        child.blackTurn = !this.blackTurn;
-
-        return child;
+        const opponentBits = this.playerBits | flipped | (1n << BigInt(index));
+        const playerBits = this.opponentBits & ~opponentBits;
+        return OthelloBoard.fromBits(playerBits, opponentBits, !this.blackTurn);
     }
 
     getChildren() {
@@ -240,11 +246,7 @@ class OthelloBoard {
     }
 
     rotate(r) {
-        const rotated = new OthelloBoard();
-        rotated.playerBits = rotateBits(this.playerBits, r);
-        rotated.opponentBits = rotateBits(this.opponentBits, r);
-        rotated.blackTurn = this.blackTurn;
-        return rotated;
+        return OthelloBoard.fromBits(rotateBits(this.playerBits, r), rotateBits(this.opponentBits, r), this.blackTurn);
     }
 
     isLessThan(other) {

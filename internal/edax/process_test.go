@@ -1,7 +1,10 @@
 package edax
 
 import (
+	"bufio"
 	"os"
+	"os/exec"
+	"runtime"
 	"slices"
 	"syscall"
 	"testing"
@@ -67,6 +70,83 @@ func TestProcess_Evaluate_BinaryNotFound(t *testing.T) {
 
 	_, err := p.Evaluate(othello.NewBoardStart(), 10)
 	require.Error(t, err)
+}
+
+// TestProcess_Evaluate_FailedStartDoesNotLeakFDs guards the invariant that
+// repeated failing Evaluate calls don't accumulate open file descriptors.
+// (os/exec already closes the parent pipes when Start itself fails; the
+// explicit closes in ensureStarted additionally cover a StdoutPipe failure
+// after StdinPipe succeeded.)
+func TestProcess_Evaluate_FailedStartDoesNotLeakFDs(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("open-fd count is read from /proc, which is Linux-only")
+	}
+
+	p := NewProcess("/does/not/exist/lEdax-x64", 0)
+
+	// Warm up once so any one-time allocations aren't counted as a leak.
+	_, err := p.Evaluate(othello.NewBoardStart(), 10)
+	require.Error(t, err)
+
+	before := openFDCount(t)
+	for range 50 {
+		_, err := p.Evaluate(othello.NewBoardStart(), 10)
+		require.Error(t, err)
+	}
+	after := openFDCount(t)
+
+	// Allow a little slack for unrelated runtime activity, but 50 leaked calls
+	// (2 descriptors each) would blow well past this.
+	require.LessOrEqual(t, after-before, 5, "open file descriptors grew from %d to %d", before, after)
+}
+
+// openFDCount returns the number of file descriptors currently open by this
+// process, read from /proc/self/fd (Linux only).
+func openFDCount(t *testing.T) int {
+	t.Helper()
+	entries, err := os.ReadDir("/proc/self/fd")
+	require.NoError(t, err)
+	return len(entries)
+}
+
+// TestProcess_EnsureStarted_FailedRestartClearsStaleState covers the restart
+// path: when a level change kills the running process but starting the
+// replacement then fails, the Process must not keep pointing at the killed
+// process and its closed pipes (which the fast path would otherwise hand back
+// to the next same-level Evaluate, wedging it permanently).
+func TestProcess_EnsureStarted_FailedRestartClearsStaleState(t *testing.T) {
+	prev := exec.Command("sleep", "60")
+	require.NoError(t, prev.Start())
+	t.Cleanup(func() {
+		_ = prev.Process.Kill()
+		_ = prev.Wait()
+	})
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = r.Close()
+		_ = w.Close()
+	})
+
+	// Simulate a running edax at level 6.
+	p := NewProcess("/does/not/exist/lEdax-x64", 0)
+	p.cmd = prev
+	p.level = 6
+	p.stdin = w
+	p.stdout = bufio.NewReader(r)
+
+	// A different level forces a restart: prev is killed, then the bad path
+	// fails to start.
+	_, _, err = p.ensureStarted(8)
+	require.Error(t, err)
+
+	// State must be cleared so the next Evaluate starts fresh instead of reusing
+	// the dead process's pipes.
+	require.Nil(t, p.cmd)
+	require.Zero(t, p.level)
+	require.Nil(t, p.stdin)
+	require.Nil(t, p.stdout)
 }
 
 func TestProcess_Evaluate_InvalidLevel(t *testing.T) {

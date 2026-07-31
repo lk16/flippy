@@ -2,6 +2,7 @@ package othello
 
 import (
 	"encoding/binary"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -85,4 +86,16 @@ func TestParseWTBFile_RealArchive(t *testing.T) {
 	for _, game := range games {
 		require.NotEmpty(t, game.Moves())
 	}
+}
+
+// TestParseWTB_HugeGameCountDoesNotOverAllocate covers a corrupt/hostile header
+// claiming far more games than the data holds: parsing must fail cleanly on the
+// first missing record rather than pre-allocating a slice sized to the header's
+// count (which for MaxUint32 would attempt a many-gigabyte allocation).
+func TestParseWTB_HugeGameCountDoesNotOverAllocate(t *testing.T) {
+	data := make([]byte, wtbHeaderSize)
+	binary.LittleEndian.PutUint32(data[4:8], math.MaxUint32)
+
+	_, err := ParseWTB(data)
+	require.Error(t, err)
 }

@@ -108,6 +108,22 @@ func TestGame_PopMove(t *testing.T) {
 	require.Empty(t, game.Moves())
 }
 
+func TestGame_PopMove_LoneTrailingPass(t *testing.T) {
+	// A game that starts on a board with no legal move and whose only pushed
+	// move is a pass: popping it must remove just that one pass, not try to
+	// also remove a (nonexistent) preceding move and slice out of bounds.
+	board, err := NewBoard(0xFFFFFFFFFFFFFFFF, 0, Black)
+	require.NoError(t, err)
+
+	game := NewGameWithStart(board)
+	require.NoError(t, game.PushMove(PassMove))
+	require.Equal(t, []int{PassMove}, game.Moves())
+
+	require.NotPanics(t, game.PopMove)
+	require.Empty(t, game.Moves())
+	require.Equal(t, board, game.Board())
+}
+
 func TestGame_PopMove_RemovesTrailingPass(t *testing.T) {
 	// PopMove's trailing-pass handling only looks at move values and slice
 	// lengths, so the board cache content doesn't matter here as long as

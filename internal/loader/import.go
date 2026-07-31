@@ -8,15 +8,17 @@ import (
 	"github.com/lk16/flippy/internal/othello"
 )
 
-// ImportGames extracts NormalizedBoards from games and adds them to the DB, returning the count added.
+// ImportGames extracts NormalizedBoards from games and adds them to the DB, returning the number of
+// rows actually inserted (boards already present are not counted).
 func ImportGames(ctx context.Context, repo *db.Repository, games []*othello.Game) (int, error) {
 	boards := ExtractBoards(games)
 
-	if err := repo.AddBoards(ctx, boards); err != nil {
+	added, err := repo.AddBoardsInserted(ctx, boards)
+	if err != nil {
 		return 0, fmt.Errorf("failed to add extracted boards: %w", err)
 	}
 
-	return len(boards), nil
+	return added, nil
 }
 
 // ImportWTBFiles parses each file as a WTHOR (.wtb) archive and imports the
@@ -112,7 +114,7 @@ func parsePGNFiles(filenames []string, onFile func()) ([]*othello.Game, error) {
 }
 
 // ImportOthelloQuestMoves parses moveString as a single Othello Quest move
-// sequence (e.g. "A3B4C5") and imports it.
+// sequence (e.g. "f5d6c5") and imports it.
 func ImportOthelloQuestMoves(ctx context.Context, repo *db.Repository, moveString string) (int, error) {
 	game, err := othello.ParseOthelloQuestMoves(moveString)
 	if err != nil {

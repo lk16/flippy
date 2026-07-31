@@ -94,7 +94,13 @@ func parsePGNMoves(lines []string) ([]int, error) {
 		}
 
 		for _, word := range strings.Fields(line) {
+			// Skip move-number prefixes ("1.") and result tokens: the
+			// digit-based ones ("1-0", "0-1", "1/2-1/2") and PGN's "*"
+			// terminator for an unfinished or ongoing game.
 			if word[0] >= '0' && word[0] <= '9' {
+				continue
+			}
+			if word == "*" {
 				continue
 			}
 

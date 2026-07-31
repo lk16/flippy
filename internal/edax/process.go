@@ -94,6 +94,12 @@ func (p *Process) ensureStarted(level int) (io.Writer, *bufio.Reader, error) {
 	if p.cmd != nil {
 		_ = p.cmd.Process.Kill()
 		_ = p.cmd.Wait()
+		// Clear the fields now so that if starting the replacement below fails, we don't leave the
+		// killed process (and its closed pipes) in place for the next Evaluate to reuse.
+		p.cmd = nil
+		p.level = 0
+		p.stdin = nil
+		p.stdout = nil
 	}
 
 	cmd := exec.Command(p.path, buildArgs(level, p.tasks)...)
@@ -106,10 +112,14 @@ func (p *Process) ensureStarted(level int) (io.Writer, *bufio.Reader, error) {
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		_ = stdin.Close()
 		return nil, nil, fmt.Errorf("failed to get stdout pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
+		// Close the pipes we opened so a repeatedly-failing Start doesn't leak file descriptors.
+		_ = stdin.Close()
+		_ = stdout.Close()
 		return nil, nil, fmt.Errorf("failed to start edax process: %w", err)
 	}
 

@@ -266,6 +266,35 @@ func TestParsePGN_ProvisionalRating(t *testing.T) {
 	require.Equal(t, 144, games[0].Metadata().Players[White].Rating)
 }
 
+// TestParsePGN_StarTerminator covers PGN's "*" result token, written for an
+// unfinished or ongoing game: it must be skipped like the disc-count result
+// tokens rather than parsed as a move (which would fail).
+func TestParsePGN_StarTerminator(t *testing.T) {
+	games, err := ParsePGN(pgnBase(nil, "1. e6 f4 *"), "")
+	require.NoError(t, err)
+	require.Len(t, games, 1)
+
+	moves, err := ParseField("e6")
+	require.NoError(t, err)
+	f4, err := ParseField("f4")
+	require.NoError(t, err)
+	require.Equal(t, []int{moves, f4}, games[0].Moves())
+}
+
+// TestParsePGN_VariantCaseInsensitive covers XOT variant tags written in any
+// case (e.g. "XOT", "Xot"): they must be recognized rather than rejected as an
+// unknown variant.
+func TestParsePGN_VariantCaseInsensitive(t *testing.T) {
+	for _, variant := range []string{"xot", "XOT", "Xot"} {
+		t.Run(variant, func(t *testing.T) {
+			games, err := ParsePGN(pgnBase(map[string]string{"Variant": variant}, "1. e6 f4"), "")
+			require.NoError(t, err)
+			require.Len(t, games, 1)
+			require.True(t, games[0].Metadata().IsXot)
+		})
+	}
+}
+
 func TestParsePGN_MalformedMetadataLine(t *testing.T) {
 	_, err := ParsePGN("[not a valid metadata line]\n\n1. e6 f4\n", "")
 	require.Error(t, err)

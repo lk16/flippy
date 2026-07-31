@@ -7,29 +7,12 @@ import (
 
 	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/othello"
+	"github.com/lk16/flippy/internal/othello/othellotest"
 )
 
 // testBoard returns a NormalizedBoard reached by playing the first available
 // legal move (or pass) from start until it has exactly discs discs.
-func testBoard(t *testing.T, discs int) othello.NormalizedBoard {
-	t.Helper()
-
-	board := othello.NewBoardStart()
-	for board.CountDiscs() < discs {
-		if !board.HasMoves() {
-			next, err := board.DoMove(othello.PassMove)
-			require.NoError(t, err)
-			board = next
-			continue
-		}
-
-		children := board.Children()
-		require.NotEmpty(t, children)
-		board = children[0]
-	}
-
-	return board.Normalize()
-}
+var testBoard = othellotest.Board
 
 func TestExtractBoards_PlayedLineWithinRange(t *testing.T) {
 	// A real move sequence, known-legal (also used in wtb_test.go), that

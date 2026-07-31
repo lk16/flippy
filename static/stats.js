@@ -80,5 +80,16 @@ function renderTable(rows) {
     });
 }
 
-loadStats();
-setInterval(loadStats, 1000);
+// Poll by re-scheduling only after each load settles, so a load slower than
+// the interval can't stack up overlapping requests (and a failed load doesn't
+// stop the polling).
+async function pollStats() {
+    try {
+        await loadStats();
+    } catch (error) {
+        console.error('Error loading stats:', error);
+    }
+    setTimeout(pollStats, 1000);
+}
+
+pollStats();

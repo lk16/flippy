@@ -70,13 +70,21 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, responses)
 }
 
+// maxLevel bounds a submitted edax search level. It's well above any level flippy actually requests
+// (see TargetLevel) but stays within the smallint column the evaluation is stored in, so an
+// out-of-range value is a clean 400 rather than a Postgres error surfaced as a 500.
+const maxLevel = 60
+
 // validateJobResult checks that a submitted evaluation's values are within sane bounds.
 func validateJobResult(req jobResultRequest) error {
-	if req.Level <= 0 {
-		return errors.New("level must be positive")
+	if req.Level <= 0 || req.Level > maxLevel {
+		return fmt.Errorf("level must be between 1 and %d", maxLevel)
 	}
 	if req.Depth < 0 || req.Depth > 60 {
 		return errors.New("depth out of range")
+	}
+	if req.Confidence < 0 || req.Confidence > 100 {
+		return errors.New("confidence out of range")
 	}
 	if req.Score < -64 || req.Score > 64 {
 		return errors.New("score out of range")

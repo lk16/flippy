@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lk16/flippy/internal/othello"
+	"github.com/lk16/flippy/internal/othello/othellotest"
 )
 
 // testRepository returns a Repository backed by a transaction that's rolled
@@ -39,62 +40,11 @@ func testRepository(t *testing.T) *Repository {
 
 // testBoard returns a NormalizedBoard reached by playing the first available
 // legal move (or pass) from start until it has exactly discs discs.
-func testBoard(t *testing.T, discs int) othello.NormalizedBoard {
-	t.Helper()
-
-	board := othello.NewBoardStart()
-	for board.CountDiscs() < discs {
-		if !board.HasMoves() {
-			next, err := board.DoMove(othello.PassMove)
-			require.NoError(t, err)
-			board = next
-			continue
-		}
-
-		children := board.Children()
-		require.NotEmpty(t, children)
-		board = children[0]
-	}
-
-	return board.Normalize()
-}
+var testBoard = othellotest.Board
 
 // testDistinctBoards returns n distinct NormalizedBoards with exactly discs
 // discs, found via breadth-first search from the starting position.
-func testDistinctBoards(t *testing.T, discs, n int) []othello.NormalizedBoard {
-	t.Helper()
-
-	seen := make(map[othello.Board]bool)
-	var result []othello.NormalizedBoard
-
-	frontier := []othello.Board{othello.NewBoardStart()}
-	for len(frontier) > 0 && len(result) < n {
-		var next []othello.Board
-		for _, board := range frontier {
-			if board.CountDiscs() == discs {
-				norm := board.Normalize()
-				if key := norm.Board(); !seen[key] {
-					seen[key] = true
-					result = append(result, norm)
-				}
-				continue
-			}
-
-			if !board.HasMoves() {
-				passed, err := board.DoMove(othello.PassMove)
-				require.NoError(t, err)
-				next = append(next, passed)
-				continue
-			}
-
-			next = append(next, board.Children()...)
-		}
-		frontier = next
-	}
-
-	require.GreaterOrEqual(t, len(result), n)
-	return result[:n]
-}
+var testDistinctBoards = othellotest.DistinctBoards
 
 func TestEvaluation_IsLearned(t *testing.T) {
 	require.False(t, Evaluation{}.IsLearned())
@@ -134,6 +84,36 @@ func TestRepository_AddBoards_DoesNotOverwriteExisting(t *testing.T) {
 func TestRepository_AddBoards_Empty(t *testing.T) {
 	repo := testRepository(t)
 	require.NoError(t, repo.AddBoards(context.Background(), nil))
+}
+
+func TestRepository_AddBoardsInserted_CountsOnlyNewRows(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	boards := othello.PrecomputedBoards12()[:5]
+
+	inserted, err := repo.AddBoardsInserted(ctx, boards)
+	require.NoError(t, err)
+	require.Equal(t, len(boards), inserted)
+
+	// Re-inserting the same boards must count zero new rows (ON CONFLICT DO
+	// NOTHING skips them), rather than reporting the batch size again.
+	inserted, err = repo.AddBoardsInserted(ctx, boards)
+	require.NoError(t, err)
+	require.Equal(t, 0, inserted)
+
+	// A batch that overlaps existing rows counts only the genuinely new ones.
+	extra := othello.PrecomputedBoards12()[3:8] // 2 overlap, 3 new
+	inserted, err = repo.AddBoardsInserted(ctx, extra)
+	require.NoError(t, err)
+	require.Equal(t, 3, inserted)
+}
+
+func TestRepository_AddBoardsInserted_Empty(t *testing.T) {
+	repo := testRepository(t)
+	inserted, err := repo.AddBoardsInserted(context.Background(), nil)
+	require.NoError(t, err)
+	require.Equal(t, 0, inserted)
 }
 
 func TestRepository_AddBoards_Multiple(t *testing.T) {
