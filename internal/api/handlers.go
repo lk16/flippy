@@ -131,6 +131,7 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.invalidateStatsCache(r.Context())
 
 	// Only a leaf-disc-count save can change the minimax backfill.
 	if normalized.CountDiscs() == book.LeafDiscs {
@@ -267,7 +268,17 @@ func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleStats handles GET /api/stats: returns move-counts per (disc count, level) cell.
+// The result is Redis-cached because the underlying GROUP BY scans every row in the boards table
+// and becomes slow at millions of rows. The cache is invalidated whenever an evaluation is saved
+// (see handleSubmitJobResult) and expires after statsTTL as a safety net for loader-added boards.
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	if cached, err := s.getCachedStats(r.Context()); err == nil && cached != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(cached)
+		return
+	}
+
 	stats, err := s.repo.Stats(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -279,5 +290,16 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		entries[i] = statEntry{DiscCount: stat.DiscCount, Level: stat.Level, Count: stat.Count}
 	}
 
-	writeJSON(w, http.StatusOK, entries)
+	data, err := json.Marshal(entries)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	data = append(data, '\n')
+
+	s.setCachedStats(r.Context(), data)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }

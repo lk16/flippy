@@ -22,6 +22,15 @@ const jobFloorKey = "job_floor_disc_count"
 // scratch, so boards an import (see internal/loader) adds below the floor are eventually rediscovered.
 const jobFloorTTL = 10 * time.Minute
 
+// statsKey caches the JSON response for GET /api/stats, which aggregates all rows in the boards table
+// and becomes slow as the table grows to millions of rows.
+const statsKey = "stats"
+
+// statsTTL bounds how long the stats cache is trusted. Explicit invalidation (on each SaveEvaluation)
+// keeps it fresh in the common case; the TTL is a safety net so loader-added boards eventually appear
+// even without an explicit invalidation.
+const statsTTL = 60 * time.Second
+
 // Redis field names within a worker's hash (see workerKey).
 const (
 	workerFieldHostname          = "hostname"
@@ -236,4 +245,27 @@ func (s *Server) listWorkers(ctx context.Context) ([]workerInfo, error) {
 	})
 
 	return workers, nil
+}
+
+// getCachedStats returns the cached stats JSON bytes from Redis, or (nil, nil) on a cache miss.
+// Redis errors other than "key not found" are returned so callers can decide whether to fall through.
+func (s *Server) getCachedStats(ctx context.Context) ([]byte, error) {
+	data, err := s.redis.Get(ctx, statsKey).Bytes()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get cached stats: %w", err)
+	}
+	return data, nil
+}
+
+// setCachedStats stores pre-serialised stats JSON in Redis for statsTTL.
+func (s *Server) setCachedStats(ctx context.Context, data []byte) {
+	_ = s.redis.Set(ctx, statsKey, data, statsTTL).Err()
+}
+
+// invalidateStatsCache deletes the cached stats so the next GET /api/stats re-queries the DB.
+func (s *Server) invalidateStatsCache(ctx context.Context) {
+	_ = s.redis.Del(ctx, statsKey).Err()
 }
