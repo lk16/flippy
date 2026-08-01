@@ -76,10 +76,14 @@ SBX_MEMORY="${SBX_MEMORY:-4g}"
 SBX_CPUS="${SBX_CPUS:-4}"
 
 # Multiple sandboxes can run concurrently, so pick the lowest free
-# "$SBX_BASE_NAME-<n>" suffix instead of colliding on a shared name.
+# "$SBX_BASE_NAME-<n>" suffix instead of colliding on a shared name. Also
+# skip any suffix with a leftover refs/sandboxes/<name>/* ref -- cleanup's
+# `git fetch` leaves those behind even after `sbx rm`, since the ref isn't
+# tied to the remote that fetched it, and reusing the name would step on it.
 existing_names="$(sbx ls -q 2>/dev/null || true)"
+existing_refs="$(git for-each-ref --format='%(refname)' refs/sandboxes | sed -E 's#^refs/sandboxes/([^/]+)/.*#\1#' | sort -u)"
 n=1
-while echo "$existing_names" | grep -qx "$SBX_BASE_NAME-$n"; do
+while echo "$existing_names" | grep -qx "$SBX_BASE_NAME-$n" || echo "$existing_refs" | grep -qx "$SBX_BASE_NAME-$n"; do
     n=$((n + 1))
 done
 SBX_NAME="$SBX_BASE_NAME-$n"
