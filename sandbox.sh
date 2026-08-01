@@ -44,16 +44,26 @@ and make sure ./test.sh passes.
 If you can't reasonably finish the task, stop, state concisely what's blocking
 you, and suggest a solution -- don't keep flailing.
 
-Go module downloads are blocked here (proxy.golang.org isn't on the network
-allowlist), so go build/go test will 403 if a module isn't already cached --
-check with `ls $(go env GOPATH)/pkg/mod/github.com/` first. If modules are
-missing, verify Go correctness by reviewing the diff / go vet on unaffected
-packages instead of fighting the network block; only ask the user to run
-`sbx policy allow network proxy.golang.org,sum.golang.org` if a real build is
-required. Frontend-only changes (static/, templates) don't need a Go build --
-`node --check file.js` is enough for JS syntax. If go build 403s on an
-unmodified file too, that's a pre-existing sandbox limitation, not a
-regression from your change.
+Go module downloads are blocked (proxy.golang.org not on the allowlist), so go
+build/go test will 403 if a module isn't already cached. If modules are missing,
+verify correctness by reviewing the diff / go vet on unaffected packages; only ask
+the user to run `sbx policy allow network proxy.golang.org,sum.golang.org` if a
+real build is required. Frontend-only changes (static/, templates) need only
+`node --check file.js`. If go build 403s on an unmodified file too, that's a
+pre-existing sandbox limitation, not a regression.
+
+The sandbox runs as a different user than the host, so PATH and GOMODCACHE won't
+point at the host's tools or module cache. Set these before any Go or dev-tool
+commands:
+  export PATH="$PATH:$(echo /home/*/.local/bin)"         # migrate, gotestsum, golangci-lint
+  export GOMODCACHE="$(echo /home/*/.local/go/pkg/mod)"  # host module cache
+
+Other quirks:
+- redis-cli and psql aren't installed; use docker exec to reach the containers
+- gofmt -l ./... fails (path resolution); use gofmt -l ./cmd ./internal
+
+If you find something missing from this prompt, you may edit sandbox.sh to add it.
+Rules: separate commit, and end your summary with "sandbox.sh updated: <what changed and why>".
 EOF
 )"
 
