@@ -328,6 +328,7 @@ class OthelloGame {
 
         if (this.evalMode) {
             this.requestMissingEvaluations();
+            this.requestGrandchildrenEvaluations();
             this.renderEvaluations();
         } else {
             document.querySelectorAll('.cell .score-display').forEach((el) => el.remove());
@@ -428,6 +429,7 @@ class OthelloGame {
         });
 
         this.requestMissingEvaluations();
+        this.requestGrandchildrenEvaluations();
     }
 
     requestMissingEvaluations() {
@@ -438,6 +440,23 @@ class OthelloGame {
                 .filter((board) => !this.evaluations.has(board)),
         )];
         this.wsClient.requestEvaluations(boards);
+    }
+
+    // Prefetch evaluations for grandchildren so they are cached before the user clicks a move.
+    requestGrandchildrenEvaluations() {
+        if (!this.evalMode) return;
+        const seen = new Set();
+        const missing = [];
+        for (const child of this.board.getChildren()) {
+            for (const grandchild of child.getChildren()) {
+                const key = grandchild.normalize().toString();
+                if (!seen.has(key) && !this.evaluations.has(key)) {
+                    seen.add(key);
+                    missing.push(key);
+                }
+            }
+        }
+        this.wsClient.requestEvaluations(missing);
     }
 
     handleEvaluations(evaluations) {
