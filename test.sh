@@ -27,6 +27,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Browser JS unit tests (static/). These need no infrastructure, so run them first
+# and fail fast (set -e aborts on a non-zero exit) before spinning up containers.
+echo "Running JS tests…"
+node static/test/run.js
+
 docker compose -f "$COMPOSE_FILE" up -d --wait
 
 migrate -path migrations -database "$FLIPPY_POSTGRES_URL" up

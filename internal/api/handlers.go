@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
@@ -123,21 +126,66 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 	}
 
 	eval := db.Evaluation{Level: req.Level, Depth: req.Depth, Confidence: req.Confidence, Score: req.Score}
-	if err := s.repo.SaveEvaluation(r.Context(), normalized, eval); err != nil {
-		if errors.Is(err, db.ErrBoardNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	s.invalidateStatsCache(r.Context())
 
-	// Only a leaf-disc-count save can change the minimax backfill.
-	if normalized.CountDiscs() == book.LeafDiscs {
-		if err := s.cache.Rebuild(r.Context()); err != nil {
+	// Always cache the result ephemerally so lookupEvaluation can find it regardless of DB eligibility.
+	s.setAnalysisResult(r.Context(), normalized.String(), evaluationResponse{
+		Level: req.Level, Depth: req.Depth, Confidence: req.Confidence, Score: req.Score,
+		Source: evaluationSourceEdax,
+	})
+
+	// Check whether this job originated from the priority queue.
+	isPriority, err := s.consumePriorityClaim(r.Context(), normalized.String())
+	if err != nil {
+		slog.Warn("failed to check priority claim; treating as non-priority", "error", err)
+	}
+
+	savedToDB := false
+	discCount := normalized.CountDiscs()
+
+	if isPriority {
+		if discCount <= book.MaxSavableDiscs {
+			if saveErr := s.repo.SaveEvaluation(r.Context(), normalized, eval); saveErr != nil {
+				if errors.Is(saveErr, db.ErrBoardNotFound) {
+					// Board has no row yet; add one and retry.
+					if addErr := s.repo.AddBoards(r.Context(), []othello.NormalizedBoard{normalized}); addErr != nil {
+						slog.Error("failed to add priority board", "error", addErr)
+					} else if saveErr2 := s.repo.SaveEvaluation(r.Context(), normalized, eval); saveErr2 != nil {
+						slog.Error("failed to save priority evaluation after AddBoards", "error", saveErr2)
+					} else {
+						savedToDB = true
+					}
+				} else {
+					writeError(w, http.StatusInternalServerError, saveErr)
+					return
+				}
+			} else {
+				savedToDB = true
+			}
+		}
+		// discCount > MaxSavableDiscs: ephemeral cache is the only record; skip DB entirely.
+	} else {
+		// Non-priority path: SaveEvaluation must succeed; ErrBoardNotFound is a real bug here since every
+		// ListLearnable-originated board is guaranteed to already have a row.
+		if err := s.repo.SaveEvaluation(r.Context(), normalized, eval); err != nil {
+			if errors.Is(err, db.ErrBoardNotFound) {
+				writeError(w, http.StatusNotFound, err)
+				return
+			}
 			writeError(w, http.StatusInternalServerError, err)
 			return
+		}
+		savedToDB = true
+	}
+
+	if savedToDB {
+		s.invalidateStatsCache(r.Context())
+
+		// Only a leaf-disc-count save can change the minimax backfill.
+		if discCount == book.LeafDiscs {
+			if err := s.cache.Rebuild(r.Context()); err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
 		}
 	}
 
@@ -154,8 +202,8 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// lookupEvaluation returns board's evaluation from the DB, falling back to the minimax cache; ok is
-// false if neither has a real (learned) result.
+// lookupEvaluation returns board's evaluation from the DB, minimax cache, or ephemeral analysis
+// cache; ok is false if none has a real (learned) result.
 func (s *Server) lookupEvaluation(ctx context.Context, board othello.Board) (evaluationResponse, bool, error) {
 	if !board.HasMoves() {
 		return s.lookupPassEvaluation(ctx, board)
@@ -177,6 +225,12 @@ func (s *Server) lookupEvaluation(ctx context.Context, board othello.Board) (eva
 
 	if score, ok := s.cache.Get(board); ok {
 		return evaluationResponse{Score: score, Source: evaluationSourceMinimax}, true, nil
+	}
+
+	// Ephemeral cache: covers priority-computed evaluations for boards with no DB row (>30 discs)
+	// or not yet persisted.
+	if cached, ok, err := s.getAnalysisResult(ctx, board.Normalize().String()); err == nil && ok {
+		return cached, true, nil
 	}
 
 	return evaluationResponse{}, false, nil
@@ -302,4 +356,70 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+}
+
+// handleLevelConfig handles GET /api/level-config: returns the constants the frontend needs to
+// determine how many level-increment rounds to request per board.
+func (s *Server) handleLevelConfig(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, levelConfigResponse{
+		PriorityLevel:      PriorityLevel,
+		MaxSavableDiscs:    book.MaxSavableDiscs,
+		LeafDiscs:          book.LeafDiscs,
+		TargetLevelLeaf:    TargetLevel(book.LeafDiscs),
+		TargetLevelNonLeaf: TargetLevel(book.LeafDiscs + 1),
+	})
+}
+
+// pgnBodyLimit caps the PGN request body at 1 MiB; a typical game is well under 1 KiB.
+const pgnBodyLimit = 1 << 20
+
+// handlePGN handles POST /api/pgn: parses PGN text (or a compact OthelloQuest move string) and
+// returns the board sequence as strings. Only the first game in a multi-game PGN is used.
+func (s *Server) handlePGN(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, pgnBodyLimit))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("failed to read body: %w", err))
+		return
+	}
+
+	text := strings.TrimSpace(string(body))
+
+	if text == "" {
+		writeError(w, http.StatusBadRequest, errors.New("empty request body"))
+		return
+	}
+
+	var firstGame *othello.Game
+
+	if !strings.Contains(text, "[") {
+		// No PGN metadata brackets → treat as OthelloQuest compact format (e.g. "e6f4e3d6").
+		compact := strings.Join(strings.Fields(text), "")
+		game, parseErr := othello.ParseOthelloQuestMoves(compact)
+		if parseErr != nil {
+			writeError(w, http.StatusBadRequest, parseErr)
+			return
+		}
+		firstGame = game
+	} else {
+		// ParsePGNLenient accepts any PGN regardless of which metadata tags are present;
+		// handlePGN only needs the board sequence, not game metadata.
+		games, parseErr := othello.ParsePGNLenient(text)
+		if parseErr != nil {
+			writeError(w, http.StatusBadRequest, parseErr)
+			return
+		}
+		if len(games) == 0 {
+			writeError(w, http.StatusBadRequest, errors.New("no games found in PGN"))
+			return
+		}
+		firstGame = games[0]
+	}
+
+	boards := firstGame.Boards()
+	boardStrings := make([]string, len(boards))
+	for i, b := range boards {
+		boardStrings[i] = b.String()
+	}
+
+	writeJSON(w, http.StatusOK, pgnResponse{Boards: boardStrings})
 }

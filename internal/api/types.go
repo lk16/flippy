@@ -58,3 +58,17 @@ type workerResponse struct {
 	PositionsComputed int       `json:"positions_computed"`
 	LastActive        time.Time `json:"last_active"`
 }
+
+// pgnResponse is the JSON body returned by POST /api/pgn.
+type pgnResponse struct {
+	Boards []string `json:"boards"`
+}
+
+// levelConfigResponse is the JSON body returned by GET /api/level-config.
+type levelConfigResponse struct {
+	PriorityLevel      int `json:"priority_level"`
+	MaxSavableDiscs    int `json:"max_savable_discs"`
+	LeafDiscs          int `json:"leaf_discs"`
+	TargetLevelLeaf    int `json:"target_level_leaf"`
+	TargetLevelNonLeaf int `json:"target_level_non_leaf"`
+}

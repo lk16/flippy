@@ -33,6 +33,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/workers/heartbeat", s.handleHeartbeat)
 	mux.HandleFunc("GET /api/workers", s.handleListWorkers)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
+	mux.HandleFunc("GET /api/level-config", s.handleLevelConfig)
+	mux.HandleFunc("POST /api/pgn", s.handlePGN)
 	mux.HandleFunc("GET /ws", s.handleWebSocket)
 
 	return mux

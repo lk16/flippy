@@ -194,3 +194,166 @@ func mustMarshal(t *testing.T, v any) json.RawMessage {
 	require.NoError(t, err)
 	return data
 }
+
+// TestHandleWebSocket_AnalyzeRequest_EnqueuesMissingBoards verifies that boards without an
+// existing evaluation are placed on the priority queue, while already-resolved boards are not.
+func TestHandleWebSocket_AnalyzeRequest_EnqueuesMissingBoards(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	// board1 is already evaluated (DB).
+	board1 := testBoard(t, 12)
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board1}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, board1, db.Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 4}))
+
+	// board2 has no evaluation.
+	board2 := testBoard(t, 13)
+
+	conn := testWebSocket(t, s)
+
+	require.NoError(t, wsjson.Write(ctx, conn, wsIncoming{
+		ID: 1, Event: "analyze_request",
+		Data: mustMarshal(t, wsEvaluationRequest{Boards: []string{board1.String(), board2.String()}}),
+	}))
+
+	var resp wsOutgoing
+	require.NoError(t, wsjson.Read(ctx, conn, &resp))
+	require.Equal(t, 1, resp.ID)
+
+	// board1 should already be in the response (it's resolved); board2 is not yet.
+	data := resp.Data.(map[string]any)
+	evaluations, _ := data["evaluations"].([]any)
+	require.Len(t, evaluations, 1)
+	entry := evaluations[0].(map[string]any)
+	require.Equal(t, board1.String(), entry["board"])
+
+	// board2 (normalized) should be in the priority queue.
+	pending, err := s.dequeuePriority(ctx, 10)
+	require.NoError(t, err)
+	pendingBoards := make([]string, len(pending))
+	for i, e := range pending {
+		pendingBoards[i] = e.Board
+	}
+	require.Contains(t, pendingBoards, board2.String())
+}
+
+// TestHandleWebSocket_AnalyzeRequest_ForcedPassEnqueuesPostPassBoard verifies that requesting
+// analysis of a forced-pass board (no legal move, opponent can move) enqueues the board *after*
+// the pass — whose negated evaluation is the pass board's evaluation — rather than the pass board
+// itself, which edax cannot search.
+func TestHandleWebSocket_AnalyzeRequest_ForcedPassEnqueuesPostPassBoard(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	passBoard := testPassRequiredBoard(t)
+	passed, err := passBoard.DoMove(othello.PassMove)
+	require.NoError(t, err)
+	postPassNormalized := passed.Normalize()
+
+	conn := testWebSocket(t, s)
+
+	require.NoError(t, wsjson.Write(ctx, conn, wsIncoming{
+		ID: 1, Event: "analyze_request",
+		Data: mustMarshal(t, wsEvaluationRequest{Boards: []string{passBoard.String()}}),
+	}))
+
+	var resp wsOutgoing
+	require.NoError(t, wsjson.Read(ctx, conn, &resp))
+	require.Equal(t, 1, resp.ID)
+
+	pending, err := s.dequeuePriority(ctx, 10)
+	require.NoError(t, err)
+	pendingBoards := make([]string, len(pending))
+	for i, e := range pending {
+		pendingBoards[i] = e.Board
+	}
+
+	// The post-pass board is enqueued; the un-searchable pass board is not.
+	require.Contains(t, pendingBoards, postPassNormalized.String())
+	require.NotContains(t, pendingBoards, passBoard.Normalize().String())
+}
+
+// TestHandleWebSocket_AnalyzeRequest_GameOverNotEnqueued verifies that a game-over board (neither
+// player can move) is not enqueued for analysis, since its score is final.
+func TestHandleWebSocket_AnalyzeRequest_GameOverNotEnqueued(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	// A full board with only one color: no moves for either player → game over.
+	gameOver, err := othello.NewBoard(0xFFFFFFFFFFFFFFFF, 0, othello.Black)
+	require.NoError(t, err)
+	require.False(t, gameOver.HasMoves())
+
+	conn := testWebSocket(t, s)
+
+	require.NoError(t, wsjson.Write(ctx, conn, wsIncoming{
+		ID: 1, Event: "analyze_request",
+		Data: mustMarshal(t, wsEvaluationRequest{Boards: []string{gameOver.String()}}),
+	}))
+
+	var resp wsOutgoing
+	require.NoError(t, wsjson.Read(ctx, conn, &resp))
+
+	pending, err := s.dequeuePriority(ctx, 10)
+	require.NoError(t, err)
+	require.Empty(t, pending)
+}
+
+// TestHandleWebSocket_AnalyzeRequest_NoDuplicatesInQueue verifies that repeated analyze_request
+// calls for the same board only enqueue it once.
+func TestHandleWebSocket_AnalyzeRequest_NoDuplicatesInQueue(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	board := testBoard(t, 13)
+	conn := testWebSocket(t, s)
+
+	send := func(id int) {
+		require.NoError(t, wsjson.Write(ctx, conn, wsIncoming{
+			ID: id, Event: "analyze_request",
+			Data: mustMarshal(t, wsEvaluationRequest{Boards: []string{board.String()}}),
+		}))
+		var resp wsOutgoing
+		require.NoError(t, wsjson.Read(ctx, conn, &resp))
+	}
+
+	send(1)
+	send(2) // same board again
+
+	// Only one entry must be in the queue.
+	dequeued, err := s.dequeuePriority(ctx, 10)
+	require.NoError(t, err)
+	count := 0
+	for _, entry := range dequeued {
+		if entry.Board == board.String() {
+			count++
+		}
+	}
+	require.Equal(t, 1, count)
+}
+
+// TestHandleWebSocket_AnalyzeRequest_SameShapeAsEvaluationRequest confirms the response uses
+// the same wsEvaluationResponse shape as evaluation_request.
+func TestHandleWebSocket_AnalyzeRequest_SameShapeAsEvaluationRequest(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	board := testBoard(t, 12)
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 3}))
+
+	conn := testWebSocket(t, s)
+
+	require.NoError(t, wsjson.Write(ctx, conn, wsIncoming{
+		ID: 5, Event: "analyze_request",
+		Data: mustMarshal(t, wsEvaluationRequest{Boards: []string{board.String()}}),
+	}))
+
+	var resp wsOutgoing
+	require.NoError(t, wsjson.Read(ctx, conn, &resp))
+	require.Equal(t, 5, resp.ID)
+
+	data := resp.Data.(map[string]any)
+	_, hasEvaluations := data["evaluations"]
+	require.True(t, hasEvaluations, "response must have 'evaluations' key matching evaluation_request shape")
+}

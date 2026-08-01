@@ -59,8 +59,10 @@ pre-existing sandbox limitation, not a regression.
 The sandbox runs as a different user than the host, so PATH and GOMODCACHE won't
 point at the host's tools or module cache. Set these before any Go or dev-tool
 commands:
-  export PATH="$PATH:$(echo /home/*/.local/bin)"         # migrate, gotestsum, golangci-lint
-  export GOMODCACHE="$(echo /home/*/.local/go/pkg/mod)"  # host module cache
+  export PATH="$PATH:$(echo /home/*/.local/bin | tr ' ' ':')"  # migrate, gotestsum, golangci-lint
+  export GOMODCACHE="$(echo /home/*/.local/go/pkg/mod)"        # host module cache
+  # Note: multiple /home/*/ dirs exist here (agent + luuk); the tr joins the
+  # glob matches with ':' so PATH isn't corrupted by a space-separated entry.
 
 Other quirks:
 - redis-cli and psql aren't installed; use docker exec to reach the containers
