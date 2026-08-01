@@ -182,3 +182,11 @@
 .game-button:hover {
     background-color: #3a506b;
 }
+
+.game-button.active {
+    background-color: #43a047;
+}
+
+.game-button.active:hover {
+    background-color: #388e3c;
+}

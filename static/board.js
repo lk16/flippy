@@ -1,7 +1,8 @@
 const BITBOARD_MASK = 0xFFFFFFFFFFFFFFFFn;
 
 // WebSocketClient batches evaluation lookups over a persistent connection, auto-reconnecting on
-// disconnect; a request made before the socket opens is queued as pendingBoards (only the latest kept).
+// disconnect; requests made before the socket opens are accumulated in pendingBoards and flushed
+// together once it connects.
 class WebSocketClient {
     constructor(onEvaluations) {
         this.ws = null;
@@ -48,7 +49,7 @@ class WebSocketClient {
         }
 
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            this.pendingBoards = boards;
+            this.pendingBoards = this.pendingBoards ? [...this.pendingBoards, ...boards] : boards;
             return;
         }
 
@@ -289,6 +290,7 @@ class OthelloGame {
         this.wsClient = new WebSocketClient((evaluations) => this.handleEvaluations(evaluations));
         this.board = new OthelloBoard();
         this.boardHistory = [];
+        this.evalMode = true;
         this.initializeBoard();
         this.initializeButtons();
         this.renderBoard(null, false);
@@ -315,6 +317,27 @@ class OthelloGame {
     initializeButtons() {
         document.getElementById('undo-button').addEventListener('click', () => this.undoMove());
         document.getElementById('new-game-button').addEventListener('click', () => this.newGame());
+        document.getElementById('eval-mode-button').addEventListener('click', () => this.toggleEvalMode());
+    }
+
+    toggleEvalMode() {
+        this.evalMode = !this.evalMode;
+        const button = document.getElementById('eval-mode-button');
+        button.classList.toggle('active', this.evalMode);
+        button.textContent = this.evalMode ? 'Hide evals' : 'Show evals';
+
+        if (this.evalMode) {
+            this.requestMissingEvaluations();
+            this.renderEvaluations();
+        } else {
+            document.querySelectorAll('.cell .score-display').forEach((el) => el.remove());
+            document.querySelectorAll('.best-move-circle').forEach((el) => el.remove());
+            const validMoves = this.board.getValidMoves();
+            document.querySelectorAll('.cell').forEach((cell) => {
+                const index = parseInt(cell.dataset.index, 10);
+                cell.classList.toggle('valid-move', ((1n << BigInt(index)) & validMoves) !== 0n);
+            });
+        }
     }
 
     newGame() {
@@ -408,6 +431,7 @@ class OthelloGame {
     }
 
     requestMissingEvaluations() {
+        if (!this.evalMode) return;
         const boards = [...new Set(
             this.board.getChildren()
                 .map((child) => child.normalize().toString())
@@ -424,7 +448,9 @@ class OthelloGame {
     }
 
     // renderEvaluations shows each legal move's score, the negation of its child's stored score.
+    // In game mode this is a no-op; the caller already cleared score displays before calling.
     renderEvaluations() {
+        if (!this.evalMode) return;
         let bestScore = -Infinity;
         const moveEvaluations = new Map();
         let haveAllEvaluations = true;
