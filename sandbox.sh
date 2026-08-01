@@ -41,6 +41,10 @@ pre-commit is not installed here, so its git hook won't run: before committing,
 run the checks from .pre-commit-config.yaml by hand (gofmt, golangci-lint, etc.),
 and make sure ./test.sh passes.
 
+Commit as you go, one feature/fix per commit, rather than saving it all for
+the end. Only committed work survives sandbox removal -- if the session gets
+cut off mid-task, uncommitted changes are gone for good.
+
 If you can't reasonably finish the task, stop, state concisely what's blocking
 you, and suggest a solution -- don't keep flailing.
 
@@ -87,7 +91,24 @@ export DOCKER_SANDBOXES_ROOT_SIZE="${SBX_ROOT_SIZE:-10g}"
 export DOCKER_SANDBOXES_DOCKER_SIZE="${SBX_DOCKER_SIZE:-10g}"
 
 cleanup() {
+    # Preserves committed work, but git fetch can't do anything about
+    # uncommitted changes in the agent's clone -- e.g. if the session was
+    # interrupted before it got to commit. Check for that separately and
+    # refuse to destroy the sandbox in that case, rather than silently
+    # losing work.
     git fetch "sandbox-$SBX_NAME" || true
+
+    local dirty
+    dirty="$(sbx exec "$SBX_NAME" git -C "$PWD" status --porcelain 2>/dev/null || true)"
+    if [ -n "$dirty" ]; then
+        echo "WARNING: sandbox $SBX_NAME has uncommitted changes -- not removing it." >&2
+        echo "$dirty" >&2
+        echo "Inspect:  sbx exec $SBX_NAME git -C $PWD diff" >&2
+        echo "Recover:  sbx cp $SBX_NAME:$PWD/<file> ." >&2
+        echo "Then remove manually once safe: sbx rm --force $SBX_NAME" >&2
+        return
+    fi
+
     sbx rm --force "$SBX_NAME"
 }
 trap cleanup EXIT
