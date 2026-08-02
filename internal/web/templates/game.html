@@ -1,0 +1,38 @@
+{{define "head"}}
+<link rel="stylesheet" href="/static/board.css">
+{{end}}
+
+{{define "content"}}
+<div class="game-container">
+    <div class="game-info">
+        <div class="disc-circles">
+            <div class="disc-circle black"><span id="black-score">2</span></div>
+            <div class="disc-separator">-</div>
+            <div class="disc-circle white"><span id="white-score">2</span></div>
+        </div>
+        <div class="game-status" id="game-status">Black has 4 moves</div>
+    </div>
+    <div class="board-container">
+        <div class="board" id="board"></div>
+    </div>
+    <div class="button-container">
+        <div class="button-row">
+            <button id="new-game-button" class="game-button">New Game</button>
+            <button id="undo-button" class="game-button">Undo</button>
+        </div>
+        <div class="button-row">
+            <button id="eval-mode-button" class="game-button">Hide evals</button>
+            <button id="load-pgn-button" class="game-button">Load PGN</button>
+        </div>
+    </div>
+    <div id="pgn-section" class="pgn-section" style="display:none">
+        <textarea id="pgn-input" class="pgn-textarea" placeholder="Paste PGN or OthelloQuest moves (e.g. e6f4d3…)" rows="5" spellcheck="false"></textarea>
+        <span id="pgn-error" class="pgn-error"></span>
+        <div id="eval-graph-section" class="eval-graph-section" style="display:none">
+            <canvas id="score-graph" class="score-graph"></canvas>
+            <div id="graph-status" class="graph-status"></div>
+        </div>
+    </div>
+</div>
+<script src="/static/board.js"></script>
+{{end}}

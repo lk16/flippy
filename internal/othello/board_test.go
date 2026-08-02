@@ -9,216 +9,228 @@ import (
 func TestNewBoardStart(t *testing.T) {
 	board := NewBoardStart()
 
-	// Check that it's a valid starting position
-	require.Equal(t, BLACK, board.turn)
-	require.Equal(t, NewPositionStart(), board.position)
-
-	// Starting position should have 4 discs
-	require.Equal(t, 4, board.position.CountDiscs())
-
-	// Should have valid moves
-	require.True(t, board.position.HasMoves())
+	require.Equal(t, Black, board.Turn())
+	require.Equal(t, 4, board.CountDiscs())
+	require.True(t, board.HasMoves())
 }
 
-func TestBoard_Position(t *testing.T) {
-	board := NewBoardStart()
-	position := board.Position()
-
-	require.Equal(t, NewPositionStart(), position)
+func TestNewBoard_Overlap(t *testing.T) {
+	_, err := NewBoard(0x1, 0x1, Black)
+	require.Error(t, err)
 }
 
-func TestBoard_IsValidMove(t *testing.T) {
+func TestNewBoardEmpty(t *testing.T) {
+	board := NewBoardEmpty()
+
+	require.Equal(t, Black, board.Turn())
+	require.Equal(t, 0, board.CountDiscs())
+}
+
+func TestColor_String(t *testing.T) {
+	require.Equal(t, "black", Black.String())
+	require.Equal(t, "white", White.String())
+}
+
+func TestBoard_Moves_Start(t *testing.T) {
 	board := NewBoardStart()
 
-	// Test valid moves in starting position
-	validMoves := []int{19, 26, 37, 44} // c3, d3, e3, f3
-	for _, move := range validMoves {
-		require.True(t, board.IsValidMove(move), "Move %d should be valid", move)
+	// Standard Othello opening moves for black: d3, c4, f5, e6.
+	wantMoves := []int{19, 26, 37, 44}
+	for _, move := range wantMoves {
+		require.True(t, board.IsValidMove(move), "move %d should be legal", move)
 	}
 
-	// Test invalid moves in starting position
-	invalidMoves := []int{0, 7, 56, 63, 27, 28, 35, 36} // corners and center squares
+	invalidMoves := []int{0, 7, 56, 63, 27, 28, 35, 36}
 	for _, move := range invalidMoves {
-		require.False(t, board.IsValidMove(move), "Move %d should be invalid", move)
+		require.False(t, board.IsValidMove(move), "move %d should be illegal", move)
 	}
 
-	// Test pass move when no valid moves
-	// Create a position with no valid moves
-	noMovesPosition := NewPositionMust(0xFFFFFFFFFFFFFFFF, 0x0000000000000000)
-	noMovesBoard := Board{
-		position: noMovesPosition,
-		turn:     BLACK,
-	}
-	require.True(t, noMovesBoard.IsValidMove(PassMove))
-	require.False(t, noMovesBoard.IsValidMove(0))
+	require.False(t, board.IsValidMove(PassMove), "pass should be illegal when moves exist")
 }
 
-func TestBoard_opponent(t *testing.T) {
+func TestBoard_IsValidMove_OutOfRange(t *testing.T) {
 	board := NewBoardStart()
 
-	// Black's opponent should be White
-	require.Equal(t, WHITE, board.opponent())
+	require.False(t, board.IsValidMove(-5))
+	require.False(t, board.IsValidMove(64))
+}
 
-	// Change turn to White
-	board.turn = WHITE
-	require.Equal(t, BLACK, board.opponent())
+func TestBoard_PassDetection(t *testing.T) {
+	// A board with no empty squares for black has no legal moves, so a pass
+	// is the only legal move.
+	board, err := NewBoard(0xFFFFFFFFFFFFFFFF, 0, Black)
+	require.NoError(t, err)
+
+	require.False(t, board.HasMoves())
+	require.True(t, board.IsValidMove(PassMove))
+	require.False(t, board.IsValidMove(0))
 }
 
 func TestBoard_DoMove(t *testing.T) {
 	board := NewBoardStart()
 
-	// Test a valid move
-	move := 19 // c3
-	newBoard := board.DoMove(move)
-
-	// Turn should change
-	require.Equal(t, WHITE, newBoard.turn)
-
-	// Position should be different
-	require.NotEqual(t, board.position, newBoard.position)
-
-	// Test pass move
-	passBoard := board.DoMove(PassMove)
-	require.Equal(t, WHITE, passBoard.turn)
-	// Position should be swapped (pass move)
-	require.Equal(t, board.position.Opponent(), passBoard.position.Player())
-	require.Equal(t, board.position.Player(), passBoard.position.Opponent())
+	next, err := board.DoMove(19)
+	require.NoError(t, err)
+	require.Equal(t, White, next.Turn())
+	require.NotEqual(t, board.Black(), next.Black())
+	require.Greater(t, next.CountDiscs(), board.CountDiscs())
 }
 
-func TestBoard_DoMove_InvalidMove(t *testing.T) {
+func TestBoard_DoMove_Invalid(t *testing.T) {
 	board := NewBoardStart()
 
-	// Test invalid move (should return same board)
-	invalidMove := 0 // corner
-	newBoard := board.DoMove(invalidMove)
-
-	// Should return the same board for invalid moves
-	require.Equal(t, board.position, newBoard.position)
-	require.Equal(t, board.turn, newBoard.turn)
+	_, err := board.DoMove(0)
+	require.Error(t, err)
 }
 
-func TestBoard_GetChildren(t *testing.T) {
+func TestBoard_DoMove_Pass(t *testing.T) {
+	board, err := NewBoard(0xFFFFFFFFFFFFFFFF, 0, Black)
+	require.NoError(t, err)
+
+	passed, err := board.DoMove(PassMove)
+	require.NoError(t, err)
+
+	// A pass flips whose turn it is, but never changes who owns which
+	// square: black/white discs are absolute colors, not mover-relative.
+	require.Equal(t, board.Black(), passed.Black())
+	require.Equal(t, board.White(), passed.White())
+	require.Equal(t, White, passed.Turn())
+}
+
+func TestBoard_DoMove_PassInvalidWhenMovesExist(t *testing.T) {
 	board := NewBoardStart()
 
-	children := board.GetChildren()
+	_, err := board.DoMove(PassMove)
+	require.Error(t, err)
+}
 
-	// Starting position should have 4 valid moves
+func TestBoard_Children(t *testing.T) {
+	board := NewBoardStart()
+
+	children := board.Children()
 	require.Len(t, children, 4)
 
-	// All children should have different turn
+	seen := make(map[Board]bool)
 	for _, child := range children {
-		require.Equal(t, WHITE, child.turn)
+		require.Equal(t, White, child.Turn())
+		seen[child] = true
 	}
-
-	// All children should have different positions
-	positions := make(map[Position]bool)
-	for _, child := range children {
-		positions[child.position] = true
-	}
-	require.Len(t, positions, 4) // All positions should be unique
+	require.Len(t, seen, 4)
 }
 
-func TestBoard_GetChildren_NoMoves(t *testing.T) {
-	// Create a position with no valid moves
-	noMovesPosition := NewPositionMust(0xFFFFFFFFFFFFFFFF, 0x0000000000000000)
-	noMovesBoard := Board{
-		position: noMovesPosition,
-		turn:     BLACK,
-	}
+func TestBoard_Children_NoMoves(t *testing.T) {
+	board, err := NewBoard(0xFFFFFFFFFFFFFFFF, 0, Black)
+	require.NoError(t, err)
 
-	children := noMovesBoard.GetChildren()
-
-	// Should have no children when no valid moves
-	require.Empty(t, children)
+	require.Empty(t, board.Children())
 }
 
-func TestBoard_GetChildPositions(t *testing.T) {
+func TestBoard_FinalScore(t *testing.T) {
+	// 40 black discs, 24 white discs, black to move: black is ahead.
+	black := uint64(0xFFFFFFFFFF000000)
+	white := uint64(0x0000000000FFFFFF)
+	board, err := NewBoard(black, white, Black)
+	require.NoError(t, err)
+
+	require.Equal(t, 64-2*24, board.FinalScore())
+
+	board, err = NewBoard(black, white, White)
+	require.NoError(t, err)
+	require.Equal(t, -64+2*24, board.FinalScore())
+}
+
+func TestBoard_FinalScore_Tie(t *testing.T) {
+	black := uint64(0x00000000FFFF0000)
+	white := uint64(0x0000FFFF00000000)
+	board, err := NewBoard(black, white, Black)
+	require.NoError(t, err)
+
+	require.Equal(t, 0, board.FinalScore())
+}
+
+func TestBoard_String(t *testing.T) {
 	board := NewBoardStart()
 
-	positions := board.GetChildPositions()
+	require.Len(t, board.String(), 16+16+2)
+	require.Equal(t, "-b", board.String()[32:])
 
-	// Should have same number of positions as children
-	children := board.GetChildren()
-	require.Len(t, positions, len(children))
+	next, err := board.DoMove(19)
+	require.NoError(t, err)
+	require.Equal(t, "-w", next.String()[32:])
+}
 
-	// All positions should be unique
-	positionMap := make(map[Position]bool)
-	for _, pos := range positions {
-		positionMap[pos] = true
+func TestParseBoard_RoundTrip(t *testing.T) {
+	board, err := NewBoardStart().DoMove(19)
+	require.NoError(t, err)
+
+	parsed, err := ParseBoard(board.String())
+	require.NoError(t, err)
+	require.Equal(t, board, parsed)
+}
+
+func TestParseBoard_InvalidLength(t *testing.T) {
+	_, err := ParseBoard("too-short")
+	require.Error(t, err)
+}
+
+func TestParseBoard_InvalidBlackHex(t *testing.T) {
+	_, err := ParseBoard("zzzzzzzzzzzzzzzz0000000000000000-b")
+	require.Error(t, err)
+}
+
+func TestParseBoard_InvalidWhiteHex(t *testing.T) {
+	_, err := ParseBoard("0000000000000000zzzzzzzzzzzzzzzz-b")
+	require.Error(t, err)
+}
+
+func TestParseBoard_InvalidTurnSuffix(t *testing.T) {
+	_, err := ParseBoard("00000000000000000000000000000000-x")
+	require.Error(t, err)
+}
+
+func TestParseBoard_Overlap(t *testing.T) {
+	_, err := ParseBoard("ffffffffffffffffffffffffffffffff-b")
+	require.Error(t, err)
+}
+
+func TestBoard_Bytes_RoundTrip(t *testing.T) {
+	board, err := NewBoardStart().DoMove(19)
+	require.NoError(t, err)
+
+	buf := board.Bytes()
+	require.Len(t, buf, BoardBytesLength)
+
+	parsed, err := ParseBoardBytes(buf)
+	require.NoError(t, err)
+	require.Equal(t, board, parsed)
+}
+
+func TestBoard_Bytes_TurnByte(t *testing.T) {
+	black := NewBoardStart()
+	require.Equal(t, byte(0), black.Bytes()[16])
+
+	white, err := black.DoMove(19)
+	require.NoError(t, err)
+	require.Equal(t, byte(1), white.Bytes()[16])
+}
+
+func TestParseBoardBytes_InvalidLength(t *testing.T) {
+	_, err := ParseBoardBytes([]byte{1, 2, 3})
+	require.Error(t, err)
+}
+
+func TestParseBoardBytes_InvalidTurnByte(t *testing.T) {
+	buf := make([]byte, BoardBytesLength)
+	buf[16] = 2
+	_, err := ParseBoardBytes(buf)
+	require.Error(t, err)
+}
+
+func TestParseBoardBytes_Overlap(t *testing.T) {
+	buf := make([]byte, BoardBytesLength)
+	for i := range 16 {
+		buf[i] = 0xff
 	}
-	require.Len(t, positionMap, len(positions))
-}
-
-func TestBoard_Equal(t *testing.T) {
-	board1 := NewBoardStart()
-	board2 := NewBoardStart()
-
-	// Same boards should be equal
-	require.True(t, board1.Equal(board2))
-
-	// Different turn should make boards unequal
-	board2.turn = WHITE
-	require.False(t, board1.Equal(board2))
-
-	// Different position should make boards unequal
-	board2.turn = BLACK
-	board2.position = NewPositionEmpty()
-	require.False(t, board1.Equal(board2))
-}
-
-func TestBoard_GameFlow(t *testing.T) {
-	// Test a simple game flow
-	board := NewBoardStart()
-
-	// First move: c3
-	board = board.DoMove(19) // c3
-	require.Equal(t, WHITE, board.turn)
-
-	// Second move: d3
-	board = board.DoMove(20) // d3
-	require.Equal(t, BLACK, board.turn)
-
-	// Third move: e3
-	board = board.DoMove(21) // e3
-	require.Equal(t, WHITE, board.turn)
-
-	// Check that the game state is progressing
-	require.Greater(t, board.position.CountDiscs(), 4)
-}
-
-func TestBoard_Constants(t *testing.T) {
-	// Test that constants are correctly defined
-	require.Equal(t, BLACK, 0)
-	require.Equal(t, WHITE, 1)
-	require.Equal(t, EMPTY, 2)
-	require.Equal(t, PassMove, -1)
-}
-
-func TestBoard_OpponentCalculation(t *testing.T) {
-	// Test the opponent calculation formula: BLACK + WHITE - turn
-	require.Equal(t, WHITE, BLACK+WHITE-BLACK)
-	require.Equal(t, BLACK, BLACK+WHITE-WHITE)
-}
-
-func TestBoard_GetChildren_Consistency(t *testing.T) {
-	board := NewBoardStart()
-
-	// Get children directly
-	children := board.GetChildren()
-
-	// Get children through positions
-	positions := board.position.GetChildren()
-	expectedChildren := make([]Board, len(positions))
-	for i, pos := range positions {
-		expectedChildren[i] = Board{
-			position: pos,
-			turn:     board.opponent(),
-		}
-	}
-
-	// Should be the same
-	require.Len(t, children, len(expectedChildren))
-	for i := range children {
-		require.True(t, children[i].Equal(expectedChildren[i]))
-	}
+	_, err := ParseBoardBytes(buf)
+	require.Error(t, err)
 }

@@ -1,0 +1,273 @@
+:root {
+    --board-color: #2e7d32;
+    --grid-color: #1b5e20;
+    --black-piece: #000000;
+    --white-piece: #ecf0f1;
+}
+
+.game-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    max-width: 700px;
+    margin: 0 auto;
+}
+
+.game-info {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+}
+
+.disc-circles {
+    display: flex;
+    align-items: center;
+    gap: 1em;
+}
+
+.disc-circle {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 22px;
+    font-weight: bold;
+}
+
+.disc-circle.black {
+    background-color: var(--black-piece);
+    color: var(--white-piece);
+}
+
+.disc-circle.white {
+    background-color: var(--white-piece);
+    color: var(--black-piece);
+}
+
+.disc-separator {
+    font-size: 22px;
+    font-weight: bold;
+}
+
+.game-status {
+    font-size: clamp(16px, 3vw, 24px);
+    font-weight: bold;
+    color: var(--accent);
+    text-align: center;
+}
+
+.board-container {
+    width: 100%;
+    max-width: min(90vw, 600px);
+    aspect-ratio: 1;
+}
+
+.board,
+.button-container,
+.eval-graph-section {
+    user-select: none;
+}
+
+.board {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 0.5%;
+    background-color: var(--grid-color);
+    padding: 1%;
+    border-radius: 5px;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+    width: 100%;
+    height: 100%;
+}
+
+.cell.next-move-played::before {
+    content: '';
+    position: absolute;
+    width: 82%;
+    height: 82%;
+    border-radius: 50%;
+    background-color: rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.cell {
+    aspect-ratio: 1;
+    background-color: var(--board-color);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    position: relative;
+}
+
+/* Exploring off the PGN line (click-to-diverge): a lighter board shade signals "not the game
+   line", mirroring chess.com's analysis-board tint. */
+.board.exploring {
+    background-color: #2e7d32;
+}
+
+.board.exploring .cell {
+    background-color: #388e3c;
+}
+
+.cell:hover {
+    background-color: #3a506b;
+}
+
+.valid-move::after {
+    content: '';
+    position: absolute;
+    width: 20%;
+    height: 20%;
+    border-radius: 50%;
+    opacity: 0.5;
+}
+
+.black-turn .valid-move::after {
+    background-color: var(--black-piece);
+}
+
+.white-turn .valid-move::after {
+    background-color: var(--white-piece);
+}
+
+.piece {
+    width: 80%;
+    height: 80%;
+    border-radius: 50%;
+    position: absolute;
+    transition: opacity 300ms ease-in-out;
+}
+
+.piece.black {
+    background-color: var(--black-piece);
+}
+
+.piece.white {
+    background-color: var(--white-piece);
+}
+
+.score-display {
+    position: absolute;
+    font-size: clamp(14px, 3vw, 26px);
+    font-weight: bold;
+    z-index: 1;
+    pointer-events: none;
+}
+
+.black-turn .score-display {
+    color: var(--black-piece);
+}
+
+.white-turn .score-display {
+    color: var(--white-piece);
+}
+
+.best-move-circle {
+    position: absolute;
+    width: 70%;
+    height: 70%;
+    border: 2px solid;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.black-turn .best-move-circle {
+    border-color: var(--black-piece);
+}
+
+.white-turn .best-move-circle {
+    border-color: var(--white-piece);
+}
+
+.button-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    max-width: min(90vw, 600px);
+}
+
+.button-row {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+    align-items: center;
+}
+
+.game-button {
+    flex: 1;
+    padding: 12px 20px;
+    border: none;
+    border-radius: 5px;
+    background-color: var(--board-color);
+    color: var(--white-piece);
+    font-size: clamp(14px, 2.5vw, 18px);
+    cursor: pointer;
+}
+
+.game-button:hover {
+    background-color: #3a506b;
+}
+
+/* PGN section */
+
+.pgn-section {
+    width: 100%;
+    max-width: min(90vw, 600px);
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.pgn-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--panel-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.5rem;
+    font-family: monospace;
+    font-size: 0.85rem;
+    resize: vertical;
+}
+
+.pgn-textarea:focus {
+    outline: 1px solid var(--accent);
+}
+
+.pgn-error {
+    color: #e05555;
+    font-size: 0.9rem;
+    min-height: 1.2em;
+}
+
+.eval-graph-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.score-graph {
+    width: 100%;
+    height: 280px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    display: block;
+}
+
+.graph-status {
+    font-size: 0.8rem;
+    color: #888;
+    min-height: 1.2em;
+}

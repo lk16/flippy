@@ -1,236 +1,259 @@
 package othello
 
 import (
+	"encoding/binary"
 	"fmt"
+	"math/bits"
 	"strconv"
 )
 
+// BoardBytesLength is the length in bytes of the encoding produced by Board.Bytes.
+const BoardBytesLength = 17
+
+// PassMove is the sentinel move value representing a pass.
+const PassMove = -1
+
 const (
-	BLACK = 0
-	WHITE = 1
-	EMPTY = 2
-	DRAW  = EMPTY
+	startBlackDiscs = 0x0000000810000000
+	startWhiteDiscs = 0x0000001008000000
 )
 
-// Board represents an Othello board with position and turn information.
+// Board is an Othello position: which squares are black, which are white,
+// and whose turn it is.
 type Board struct {
-	position Position
-	turn     int
+	black uint64
+	white uint64
+	turn  Color
 }
 
-// NewBoardStart creates a new board with the starting position.
+// NewBoardStart returns a board set up with the standard Othello starting
+// position, black to move.
 func NewBoardStart() Board {
 	return Board{
-		position: NewPositionStart(),
-		turn:     BLACK,
+		black: startBlackDiscs,
+		white: startWhiteDiscs,
+		turn:  Black,
 	}
 }
 
-// NewBoardEmpty creates a new board with an empty position.
+// NewBoardEmpty returns a board with no discs, black to move.
 func NewBoardEmpty() Board {
-	return Board{
-		position: NewPositionEmpty(),
-		turn:     BLACK,
-	}
+	return Board{turn: Black}
 }
 
-// NewBoardFromString creates a new board from a string representation.
-func NewBoardFromString(s string) (Board, error) {
-	if len(s) != 34 {
-		return Board{}, fmt.Errorf("board string must be 34 characters long, got %d", len(s))
+// NewBoard returns a board with the given discs and turn, or an error if a square is claimed by both.
+func NewBoard(black, white uint64, turn Color) (Board, error) {
+	if black&white != 0 {
+		return Board{}, fmt.Errorf("black and white discs overlap: %#x", black&white)
 	}
 
-	player, err := strconv.ParseUint(s[:16], 16, 64)
-	if err != nil {
-		return Board{}, fmt.Errorf("invalid player position: %w", err)
-	}
-
-	opponent, err := strconv.ParseUint(s[16:32], 16, 64)
-	if err != nil {
-		return Board{}, fmt.Errorf("invalid opponent position: %w", err)
-	}
-
-	var turn int
-	switch s[32:34] {
-	case "-w":
-		turn = WHITE
-	case "-b":
-		turn = BLACK
-	default:
-		return Board{}, fmt.Errorf("invalid turn: %s", s[32:34])
-	}
-
-	board := Board{
-		position: NewPositionMust(player, opponent),
-		turn:     turn,
-	}
-
-	return board, nil
+	return Board{black: black, white: white, turn: turn}, nil
 }
 
-// Position returns the underlying position.
-func (b Board) Position() Position {
-	return b.position
+// Black returns the bitboard of black discs.
+func (b Board) Black() uint64 {
+	return b.black
 }
 
-// IsValidMove checks if a move is valid.
-func (b Board) IsValidMove(move int) bool {
-	return b.position.IsValidMove(move)
+// White returns the bitboard of white discs.
+func (b Board) White() uint64 {
+	return b.white
 }
 
-// opponent returns the opponent color.
-func (b Board) opponent() int {
-	return BLACK + WHITE - b.turn
-}
-
-// DoMove performs a move and returns the new board.
-func (b Board) DoMove(move int) Board {
-	// TODO return error on invalid move
-
-	position := b.position.DoMove(move)
-
-	// If the move is invalid, return the same board
-	if position == b.position {
-		return b
-	}
-
-	turn := b.opponent()
-	return Board{
-		position: position,
-		turn:     turn,
-	}
-}
-
-// GetChildren returns all possible child boards.
-func (b Board) GetChildren() []Board {
-	positions := b.position.GetChildren()
-	children := make([]Board, len(positions))
-	for i, pos := range positions {
-		children[i] = Board{
-			position: pos,
-			turn:     b.opponent(),
-		}
-	}
-	return children
-}
-
-// GetChildPositions returns all possible child positions.
-func (b Board) GetChildPositions() []Position {
-	children := b.GetChildren()
-	positions := make([]Position, len(children))
-	for i, child := range children {
-		positions[i] = child.Position()
-	}
-	return positions
-}
-
-// Equal checks if two boards are equal.
-func (b Board) Equal(other Board) bool {
-	return b.position == other.position && b.turn == other.turn
-}
-
-// GetSquare returns the square at the given index.
-func (b Board) GetSquare(index int) int {
-	mask := uint64(1) << index
-	if b.position.player&mask != 0 {
-		if b.turn == WHITE {
-			return WHITE
-		}
-		return BLACK
-	}
-	if b.position.opponent&mask != 0 {
-		if b.turn == BLACK {
-			return WHITE
-		}
-		return BLACK
-	}
-	return EMPTY
-}
-
-// Turn returns the turn.
-func (b Board) Turn() int {
+// Turn returns the color to move.
+func (b Board) Turn() Color {
 	return b.turn
 }
 
-// HasMoves checks if the board has moves.
-func (b Board) HasMoves() bool {
-	return b.position.HasMoves()
+// CountDiscs returns the total number of discs on the board.
+func (b Board) CountDiscs() int {
+	return bits.OnesCount64(b.black | b.white)
 }
 
-// GetNormalizedChildren returns all normalized children for a board.
-func (b Board) GetNormalizedChildren() []NormalizedPosition {
-	return b.position.GetNormalizedChildren()
-}
-
-// GetFinalScore returns the final score of the board.
-func (b Board) GetFinalScore() int {
-	return b.position.GetFinalScore()
-}
-
-// Moves returns the moves for the board.
-func (b Board) Moves() uint64 {
-	return b.position.Moves()
-}
-
-// ASCIIArtLines returns the ascii art lines for the position.
-func (b Board) ASCIIArtLines() []string {
-	moves := b.Moves()
-
-	var black, white uint64
-
-	if b.turn == WHITE {
-		black = b.position.opponent
-		white = b.position.player
-	} else {
-		black = b.position.player
-		white = b.position.opponent
+// mover returns the bitboard of the player to move.
+func (b Board) mover() uint64 {
+	if b.turn == Black {
+		return b.black
 	}
-	lines := make([]string, MaxY+2)
+	return b.white
+}
 
-	lines[0] = "+-a-b-c-d-e-f-g-h-+"
-	for y := range MaxY {
-		line := fmt.Sprintf("%d ", y+1)
+// opponent returns the bitboard of the player not to move.
+func (b Board) opponent() uint64 {
+	if b.turn == Black {
+		return b.white
+	}
+	return b.black
+}
 
-		for x := range MaxX {
-			index := (y * MaxX) + x
-			mask := uint64(1 << index)
+// fromMoverOpponent rebuilds black/white fields from bitboards expressed relative to the mover.
+func fromMoverOpponent(mover, opponent uint64, turn Color) Board {
+	b := Board{turn: turn}
+	if turn == Black {
+		b.black, b.white = mover, opponent
+	} else {
+		b.white, b.black = mover, opponent
+	}
+	return b
+}
 
-			switch {
-			case white&mask != 0:
-				line += "○ "
-			case black&mask != 0:
-				line += "● "
-			case moves&mask != 0:
-				line += "· "
-			default:
-				line += "  "
-			}
+// Moves returns a bitboard of the squares the player to move can legally play on.
+func (b Board) Moves() uint64 {
+	return legalMoves(b.mover(), b.opponent())
+}
+
+// HasMoves reports whether the player to move has any legal move.
+func (b Board) HasMoves() bool {
+	return b.Moves() != 0
+}
+
+// IsValidMove reports whether move is legal; PassMove is only legal with no other legal move.
+func (b Board) IsValidMove(move int) bool {
+	if move == PassMove {
+		return !b.HasMoves()
+	}
+	if move < 0 || move >= squareCount {
+		return false
+	}
+	return b.Moves()&(uint64(1)<<move) != 0
+}
+
+// DoMove plays move and returns the resulting board, or an error if move is not legal.
+func (b Board) DoMove(move int) (Board, error) {
+	if !b.IsValidMove(move) {
+		return Board{}, fmt.Errorf("invalid move: %d", move)
+	}
+
+	if move == PassMove {
+		return fromMoverOpponent(b.opponent(), b.mover(), b.turn.Opponent()), nil
+	}
+
+	newMover, newOpponent := applyMove(b.mover(), b.opponent(), move)
+	return fromMoverOpponent(newMover, newOpponent, b.turn.Opponent()), nil
+}
+
+// Children returns the boards resulting from every legal move; does not include a pass.
+func (b Board) Children() []Board {
+	moves := b.Moves()
+	children := make([]Board, 0, bits.OnesCount64(moves))
+
+	for move := range squareCount {
+		if moves&(uint64(1)<<move) == 0 {
+			continue
 		}
 
-		lines[y+1] = line + "|"
+		if child, err := b.DoMove(move); err == nil {
+			children = append(children, child)
+		}
 	}
 
-	lines[9] = "+-----------------+"
-
-	return lines
+	return children
 }
 
-// Print prints the board to the console. This is used for debugging.
-func (b Board) Print() {
-	lines := b.ASCIIArtLines()
-	for _, line := range lines {
-		fmt.Println(line)
+// FinalScore returns the mover's score: positive if ahead, negative if behind, zero if tied.
+func (b Board) FinalScore() int {
+	moverCount := bits.OnesCount64(b.mover())
+	opponentCount := bits.OnesCount64(b.opponent())
+
+	switch {
+	case moverCount > opponentCount:
+		return 64 - 2*opponentCount
+	case opponentCount > moverCount:
+		return -64 + 2*moverCount
+	default:
+		return 0
 	}
 }
 
-// String returns the string representation of the board.
+// Normalize returns the canonical NormalizedBoard for b: the symmetry whose (mover, opponent) bitboard
+// pair sorts lowest, with turn carried through unchanged.
+func (b Board) Normalize() NormalizedBoard {
+	bestMover, bestOpponent := b.mover(), b.opponent()
+
+	for r := 1; r < 8; r++ {
+		mover := rotateBits(b.mover(), r)
+		opponent := rotateBits(b.opponent(), r)
+
+		if mover < bestMover || (mover == bestMover && opponent < bestOpponent) {
+			bestMover, bestOpponent = mover, opponent
+		}
+	}
+
+	return NormalizedBoard{board: fromMoverOpponent(bestMover, bestOpponent, b.turn)}
+}
+
+// IsNormalized reports whether b is already in its own canonical form.
+func (b Board) IsNormalized() bool {
+	return b.Normalize().Board() == b
+}
+
+// String returns a textual encoding: 16 hex digits of black discs, 16 of white discs, then "-b"/"-w".
 func (b Board) String() string {
-	var turnString string
-	if b.turn == WHITE {
-		turnString = "-w"
-	} else {
-		turnString = "-b"
+	turnSuffix := "-b"
+	if b.turn == White {
+		turnSuffix = "-w"
+	}
+	return fmt.Sprintf("%016x%016x%s", b.black, b.white, turnSuffix)
+}
+
+// ParseBoard parses the format produced by Board.String().
+func ParseBoard(s string) (Board, error) {
+	if len(s) != 34 {
+		return Board{}, fmt.Errorf("invalid board string %q: want length 34, got %d", s, len(s))
 	}
 
-	return fmt.Sprintf("%016x%016x%s", b.position.player, b.position.opponent, turnString)
+	black, err := strconv.ParseUint(s[:16], 16, 64)
+	if err != nil {
+		return Board{}, fmt.Errorf("invalid board string %q: bad black discs: %w", s, err)
+	}
+
+	white, err := strconv.ParseUint(s[16:32], 16, 64)
+	if err != nil {
+		return Board{}, fmt.Errorf("invalid board string %q: bad white discs: %w", s, err)
+	}
+
+	var turn Color
+	switch s[32:] {
+	case "-b":
+		turn = Black
+	case "-w":
+		turn = White
+	default:
+		return Board{}, fmt.Errorf("invalid board string %q: bad turn suffix", s)
+	}
+
+	return NewBoard(black, white, turn)
+}
+
+// Bytes returns the binary encoding of b: 8 bytes black, 8 bytes white (big-endian), then 1 turn byte.
+func (b Board) Bytes() []byte {
+	buf := make([]byte, BoardBytesLength)
+	binary.BigEndian.PutUint64(buf[0:8], b.black)
+	binary.BigEndian.PutUint64(buf[8:16], b.white)
+	if b.turn == White {
+		buf[16] = 1
+	}
+	return buf
+}
+
+// ParseBoardBytes parses the format produced by Board.Bytes.
+func ParseBoardBytes(buf []byte) (Board, error) {
+	if len(buf) != BoardBytesLength {
+		return Board{}, fmt.Errorf("invalid board bytes: want length %d, got %d", BoardBytesLength, len(buf))
+	}
+
+	black := binary.BigEndian.Uint64(buf[0:8])
+	white := binary.BigEndian.Uint64(buf[8:16])
+
+	var turn Color
+	switch buf[16] {
+	case 0:
+		turn = Black
+	case 1:
+		turn = White
+	default:
+		return Board{}, fmt.Errorf("invalid board bytes: bad turn byte %d", buf[16])
+	}
+
+	return NewBoard(black, white, turn)
 }

@@ -2,7 +2,6 @@ name: Enforce semi-linear commit history
 
 on: [push, pull_request]
 
-
 # Adapted from: https://github.com/maxwell-k/semi-linear/blob/master/.github/workflows/semi-linear.yaml
 jobs:
   force_semi_linear_history:

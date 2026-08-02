@@ -5,230 +5,142 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/lk16/flippy/api/internal/api"
-	"github.com/lk16/flippy/api/internal/othello"
+	"github.com/lk16/flippy/internal/othello"
 )
 
-const (
-	tableBorder = "------+-----+--------------+-------------+----------+---------------------"
-)
+// tableBorder is the line edax prints after its results-table header and again after the last result row.
+const tableBorder = "------+-----+--------------+-------------+----------+---------------------"
 
-var (
-	errEmptyLine         = errors.New("line is empty")
-	errTableLine         = errors.New("line is table header or border line")
-	errBoardASCIIArtLine = errors.New("line is board ascii art line")
-	errProblemNumberLine = errors.New("line is problem number line")
-	errScoreParseError   = errors.New("line has broken score")
+// bestMovesByteOffset is the fixed column edax's principal-variation move list starts at (edax's search.c).
+const bestMovesByteOffset = 53
 
-	asciiArtLineRegex = regexp.MustCompile(`^\d [O*\-\.]`)
-)
+// asciiArtLineRegex matches a row of edax's board dump, e.g. "1 - - - - - - - - 1".
+var asciiArtLineRegex = regexp.MustCompile(`^\d [O*\-.]`)
 
-// parser reads edax output and send results over a channel. It should only be used for parsing the output of one job.
-type parser struct {
-	job              api.Job
-	startTime        time.Time
-	reader           *bufio.Reader
-	resultChan       chan<- Result
-	finalResultOnly  bool
-	prevResult       *Result
-	tableBorderCount int
-	verbose          bool
-}
+// parseFinalEvaluation reads one problem's final evaluation from r, stopping right after its second
+// table-border line so the rest of r is left unread for the next problem on the same edax process.
+func parseFinalEvaluation(r *bufio.Reader) (Evaluation, error) {
+	var (
+		last       *Evaluation
+		borderSeen int
+	)
 
-func newParser(
-	job api.Job,
-	startTime time.Time,
-	reader *bufio.Reader,
-	resultChan chan<- Result,
-	finalEvalOnly bool,
-	verbose bool,
-) *parser {
-	return &parser{
-		job:             job,
-		startTime:       startTime,
-		reader:          reader,
-		resultChan:      resultChan,
-		finalResultOnly: finalEvalOnly,
-		verbose:         verbose,
-	}
-}
-
-func (p *parser) parseLines() {
 	for {
-		line, err := p.reader.ReadString('\n')
+		line, err := r.ReadString('\n')
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				// EOF likely means the edax process got killed.
-				return
+				return Evaluation{}, fmt.Errorf("edax output ended before a final result: %w", io.ErrUnexpectedEOF)
 			}
-
-			err = fmt.Errorf("error reading from stdout: %w", err)
-			p.resultChan <- Result{Err: err}
-			return
+			return Evaluation{}, fmt.Errorf("failed to read edax output: %w", err)
 		}
 
-		if p.verbose {
-			log.Printf("Edax stdout: %v", line)
+		if strings.Contains(line, tableBorder) {
+			borderSeen++
+			if borderSeen == 2 {
+				if last == nil {
+					return Evaluation{}, errors.New("no evaluation found before final table border")
+				}
+				return *last, nil
+			}
+			continue
 		}
 
-		parsedLine, err := p.parseLine(line)
-		if err != nil {
-			if p.tableBorderCount == 2 {
-				// Find final score and return
-				p.sendFinalResult()
-				return
-			}
-
-			if p.isExpectedError(err) {
-				continue
-			}
-
-			err = fmt.Errorf("failed to parse output line: %w", err)
-			p.resultChan <- Result{Err: err}
-			return
+		if eval, ok := parseResultLine(line); ok {
+			last = &eval
 		}
-
-		p.sendIntermediateResult(parsedLine)
 	}
 }
 
-func (p *parser) parseLine(line string) (*parsedLine, error) {
-	if line == "\n" {
-		return nil, errEmptyLine
+// parseResultLine parses one edax search-progress row; ok=false for non-data lines (headers, art, etc).
+func parseResultLine(line string) (Evaluation, bool) {
+	if strings.TrimSpace(line) == "" {
+		return Evaluation{}, false
 	}
-
-	if strings.Contains(line, tableBorder) {
-		p.tableBorderCount++
-		return nil, errTableLine
-	}
-
 	if strings.Contains(line, "depth") {
-		return nil, errTableLine
+		return Evaluation{}, false // header line
 	}
-
 	if strings.Contains(line, "*** problem #") {
-		return nil, errProblemNumberLine
+		return Evaluation{}, false
 	}
-
 	if strings.Contains(line, "A B C D E F G H") {
-		return nil, errBoardASCIIArtLine
+		return Evaluation{}, false
+	}
+	if asciiArtLineRegex.MatchString(line) {
+		return Evaluation{}, false
 	}
 
-	if ok := asciiArtLineRegex.MatchString(line); ok {
-		return nil, errBoardASCIIArtLine
-	}
-
-	// Normalize whitespace and split into columns
 	columns := strings.Fields(line)
 	if len(columns) < 2 {
-		return nil, fmt.Errorf("not enough columns in output line: %s", line)
+		return Evaluation{}, false
 	}
 
-	// Parse depth and confidence
-	depthConfidence := columns[0]
-	depthStr := strings.Split(depthConfidence, "@")[0]
+	depth, confidence, ok := parseDepthConfidence(columns[0])
+	if !ok {
+		return Evaluation{}, false
+	}
+
+	scoreField := columns[1]
+	if scoreField[0] == '<' || scoreField[0] == '>' {
+		// Non-exact bound: the search isn't done at this depth yet.
+		return Evaluation{}, false
+	}
+	score, err := strconv.Atoi(scoreField)
+	if err != nil {
+		return Evaluation{}, false
+	}
+
+	bestMoves, ok := parseBestMoves(line)
+	if !ok {
+		return Evaluation{}, false
+	}
+
+	return Evaluation{
+		Depth:      depth,
+		Confidence: confidence,
+		Score:      score,
+		BestMoves:  bestMoves,
+	}, true
+}
+
+// parseDepthConfidence parses a field like "10" or "6@73%"; confidence defaults to 100 without "@".
+func parseDepthConfidence(field string) (depth, confidence int, ok bool) {
+	depthStr, confidenceStr, hasConfidence := strings.Cut(field, "@")
+
 	depth, err := strconv.Atoi(depthStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse depth: %w", err)
+		return 0, 0, false
 	}
 
-	confidence := 100
-	if strings.Contains(depthConfidence, "@") {
-		confidenceStr := strings.Split(strings.Split(depthConfidence, "@")[1], "%")[0]
-		confidence, err = strconv.Atoi(confidenceStr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse confidence: %w", err)
-		}
+	if !hasConfidence {
+		return depth, 100, true
 	}
 
-	// Parse score
-	scoreStr := columns[1]
-	if scoreStr[0] == '>' || scoreStr[0] == '<' {
-		return nil, errScoreParseError
-	}
-
-	score, err := strconv.Atoi(scoreStr)
+	confidence, err = strconv.Atoi(strings.TrimSuffix(confidenceStr, "%"))
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse score: %w", err)
+		return 0, 0, false
 	}
 
-	// Parse best moves
-	bestFields := strings.Fields(line[53:])
-	bestMoves := make([]int, len(bestFields))
-	for i, field := range bestFields {
-		bestMoves[i], err = othello.FieldToIndex(field)
+	return depth, confidence, true
+}
+
+// parseBestMoves parses the principal-variation move list starting at bestMovesByteOffset in line.
+func parseBestMoves(line string) ([]int, bool) {
+	if len(line) <= bestMovesByteOffset {
+		return nil, true
+	}
+
+	var bestMoves []int
+	for _, field := range strings.Fields(line[bestMovesByteOffset:]) {
+		move, err := othello.ParseField(field)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse best move: %w", err)
+			return nil, false
 		}
+		bestMoves = append(bestMoves, move)
 	}
 
-	parsedLine := &parsedLine{
-		depth:      depth,
-		confidence: confidence,
-		score:      score,
-		bestMoves:  bestMoves,
-	}
-
-	return parsedLine, nil
-}
-
-func (*parser) isExpectedError(err error) bool {
-	return errors.Is(err, errEmptyLine) ||
-		errors.Is(err, errTableLine) ||
-		errors.Is(err, errProblemNumberLine) ||
-		errors.Is(err, errScoreParseError) ||
-		errors.Is(err, errBoardASCIIArtLine)
-}
-
-func (p *parser) makeEvaluation(parsedLine *parsedLine) (*api.Evaluation, error) {
-	evaluation := &api.Evaluation{
-		Position:   p.job.Position,
-		Level:      p.job.Level,
-		Depth:      parsedLine.depth,
-		Confidence: parsedLine.confidence,
-		Score:      parsedLine.score,
-		BestMoves:  parsedLine.bestMoves,
-	}
-
-	if err := evaluation.Validate(); err != nil {
-		return nil, fmt.Errorf("failed to validate evaluation: %w", err)
-	}
-
-	return evaluation, nil
-}
-
-// sendIntermediateResult may send a previous intermediate result.
-func (p *parser) sendIntermediateResult(parsedLine *parsedLine) {
-	evaluation, err := p.makeEvaluation(parsedLine)
-	if err != nil {
-		err = fmt.Errorf("failed to validate evaluation: %w", err)
-		p.resultChan <- Result{Err: err}
-		return
-	}
-
-	result := Result{
-		Result: &api.JobResult{
-			Evaluation:      *evaluation,
-			ComputationTime: time.Since(p.startTime).Seconds(),
-		},
-	}
-
-	if !p.finalResultOnly && p.prevResult != nil {
-		prevDepth := p.prevResult.Result.Evaluation.Depth
-		if evaluation.Depth > prevDepth {
-			p.resultChan <- *p.prevResult
-		}
-	}
-
-	p.prevResult = &result
-}
-
-func (p *parser) sendFinalResult() {
-	p.resultChan <- *p.prevResult
+	return bestMoves, true
 }

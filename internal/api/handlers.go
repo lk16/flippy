@@ -5,373 +5,421 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
-	"os/exec"
-	"path/filepath"
+	"strconv"
 	"strings"
-	"time"
 
-	"github.com/gofiber/contrib/websocket"
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/filesystem"
-	"github.com/lk16/flippy/api/internal/config"
-	"github.com/lk16/flippy/api/internal/middleware"
+	"github.com/lk16/flippy/internal/book"
+	"github.com/lk16/flippy/internal/db"
+	"github.com/lk16/flippy/internal/othello"
 )
 
-func SetupRoutes(app *fiber.App) {
-	apiGroup := app.Group("/api", middleware.AuthOrToken())
-	apiGroup.Post("/learn-clients/register", RegisterClient)
-	apiGroup.Post("/learn-clients/heartbeat", Heartbeat)
-	apiGroup.Get("/learn-clients", GetClients)
-	apiGroup.Get("/learn-clients/job", GetJob)
-	apiGroup.Post("/positions/evaluations", SubmitEvaluations)
-	apiGroup.Post("/positions/lookup", LookupPositions)
-	apiGroup.Get("/positions/stats", GetBookStats)
-
-	// Serve static files
-	app.Use("/static", staticHandler())
-
-	// Serve HTML pages
-	bookGroup := app.Group("/book", middleware.BasicAuth())
-	bookGroup.Get("/", BookPage)
-
-	clientsGroup := app.Group("/clients", middleware.BasicAuth())
-	clientsGroup.Get("/", ClientsPage)
-
-	// Serve version info
-	versionGroup := app.Group("/version")
-	versionGroup.Get("/", Handler)
-
-	// Serve websocket
-	app.Get("/ws", websocket.New(HandleWs))
-
-	// Serve gamepage
-	app.Get("/game", GamePage)
-
-	// Serve root page
-	app.Get("/", rootHandler)
-}
-
-func rootHandler(c *fiber.Ctx) error {
-	return c.Redirect("/game")
-}
-
-// staticHandler serves static files.
-func staticHandler() fiber.Handler {
-	cfg := config.LoadServerConfig()
-
-	return filesystem.New(filesystem.Config{
-		Root:   http.Dir(cfg.StaticDir),
-		Browse: false,
-	})
-}
-
-func getServices(c *fiber.Ctx) *Services {
-	return c.Locals("services").(*Services) // nolint:errcheck
-}
-
-func getConfig(c *fiber.Ctx) *config.ServerConfig {
-	return c.Locals("config").(*config.ServerConfig) // nolint:errcheck
-}
-
-// BookPage serves the book.html page.
-func BookPage(c *fiber.Ctx) error {
-	staticDir := getConfig(c).StaticDir
-	return c.SendFile(filepath.Join(staticDir, "book.html"))
-}
-
-// ClientsPage serves the clients.html page.
-func ClientsPage(c *fiber.Ctx) error {
-	staticDir := getConfig(c).StaticDir
-	return c.SendFile(filepath.Join(staticDir, "clients.html"))
-}
-
-// GamePage serves the game.html page.
-func GamePage(c *fiber.Ctx) error {
-	staticDir := getConfig(c).StaticDir
-	return c.SendFile(filepath.Join(staticDir, "game.html"))
-}
-
-// RegisterClient handles client registration.
-func RegisterClient(c *fiber.Ctx) error {
-	var req RegisterRequest
-	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid request body",
-		})
-	}
-
-	resp, err := registerClient(c.Context(), getServices(c), req)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	return c.Status(fiber.StatusOK).JSON(resp)
-}
-
-// lookupClientInRedis checks if the client ID is registered.
-func lookupClientInRedis(c *fiber.Ctx) (string, error) {
-	clientID := c.Get("x-client-id")
-	if clientID == "" {
-		return "", errors.New("missing client ID")
-	}
-
-	if _, err := getClientStats(c.Context(), getServices(c), clientID); err != nil {
-		return "", err
-	}
-
-	return clientID, nil
-}
-
-// Heartbeat handles client heartbeat updates.
-func Heartbeat(c *fiber.Ctx) error {
-	clientID, err := lookupClientInRedis(c)
-	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	if err = updateHeartbeat(c.Context(), getServices(c), clientID); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	return c.SendStatus(fiber.StatusOK)
-}
-
-// GetClients returns statistics for all clients.
-func GetClients(c *fiber.Ctx) error {
-	stats, err := getClientStatsList(c.Context(), getServices(c))
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	return c.Status(fiber.StatusOK).JSON(stats)
-}
-
-// GetJob handles job assignment to clients.
-func GetJob(c *fiber.Ctx) error {
-	clientID, err := lookupClientInRedis(c)
-	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	job, err := getJob(c.Context(), getServices(c), clientID)
-
-	if errors.Is(err, ErrNoJobsAvailable) {
-		return c.Status(fiber.StatusOK).JSON(nil)
-	}
-
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	return c.Status(fiber.StatusOK).JSON(job)
-}
-
-// LookupPositions handles position lookup requests.
-func LookupPositions(c *fiber.Ctx) error {
-	var payload LookupPositionsPayload
-	if err := c.BodyParser(&payload); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid request body",
-		})
-	}
-
-	evaluations, err := lookupPositions(c.Context(), getServices(c), payload.Positions)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	return c.Status(fiber.StatusOK).JSON(evaluations)
-}
-
-// SubmitEvaluations handles submission of evaluation results.
-func SubmitEvaluations(c *fiber.Ctx) error {
-	var payload EvaluationsPayload
-	if err := c.BodyParser(&payload); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid request body",
-		})
-	}
-
-	if err := payload.Validate(); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	if err := submitEvaluations(c.Context(), getServices(c), payload); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	return c.SendStatus(fiber.StatusOK)
-}
-
-// GetBookStats returns statistics about the book.
-func GetBookStats(c *fiber.Ctx) error {
-	stats, err := getBookStats(c.Context(), getServices(c))
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	return c.Status(fiber.StatusOK).JSON(stats)
-}
-
-var response VersionResponse
-
-// Handler returns the version of the application.
-func Handler(c *fiber.Ctx) error {
-	if response.Commit == "" {
-		output, err := exec.Command("git", "rev-parse", "HEAD").Output()
-		if err != nil {
-			response.Commit = "unknown"
-		}
-		response.Commit = strings.TrimSpace(string(output))
-	}
-
-	return c.JSON(response)
-}
-
-func HandleWs(c *websocket.Conn) {
-	services := c.Locals("services").(*Services) //nolint: errcheck
-
-	h := NewWsHandler(c, services)
-	err := h.Handle()
-	if err != nil {
-		slog.Error("ws handle error", "error", err)
-	}
-}
-
+// minJobsPerRequest and maxJobsPerRequest bound the count param on GET /api/jobs.
 const (
-	wsEvaluationLoadTimeout = 2 * time.Second
+	minJobsPerRequest = 1
+	maxJobsPerRequest = 10
 )
 
-type WsHandler struct {
-	services *Services
-	ws       *websocket.Conn
+// writeJSON encodes v as the JSON response body with the given status code.
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
-// NewWsHandler creates a new Handler.
-func NewWsHandler(ws *websocket.Conn, services *Services) *WsHandler {
-	return &WsHandler{services: services, ws: ws}
+// writeError writes err's message as a JSON error response.
+func writeError(w http.ResponseWriter, status int, err error) {
+	writeJSON(w, status, map[string]string{"error": err.Error()})
 }
 
-var errClientDisconnected = errors.New("client disconnected")
+// handleGetJob handles GET /api/jobs: claims and returns up to count available jobs as a JSON array,
+// or 204 if none.
+func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
+	workerID := r.URL.Query().Get("worker_id")
+	if workerID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("missing worker_id"))
+		return
+	}
 
-func (h *WsHandler) readMessage() (*Incoming, error) {
-	var req Incoming
+	countParam := r.URL.Query().Get("count")
+	if countParam == "" {
+		writeError(w, http.StatusBadRequest, errors.New("missing count"))
+		return
+	}
+	count, err := strconv.Atoi(countParam)
+	if err != nil || count < minJobsPerRequest || count > maxJobsPerRequest {
+		writeError(w, http.StatusBadRequest,
+			fmt.Errorf("count must be an integer between %d and %d", minJobsPerRequest, maxJobsPerRequest))
+		return
+	}
 
-	msgType, msg, err := h.ws.ReadMessage()
+	jobs, err := s.claimJobs(r.Context(), workerID, count)
 	if err != nil {
-		if websocket.IsCloseError(err, websocket.CloseGoingAway) {
-			return nil, errClientDisconnected
-		}
-
-		return nil, fmt.Errorf("ws read error: %w", err)
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if len(jobs) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
 
-	slog.Debug("read ws message", "msgType", msgType, "msg", msg)
-
-	if msgType != websocket.TextMessage {
-		return nil, fmt.Errorf("unexpected message type: %d", msgType)
+	responses := make([]jobResponse, len(jobs))
+	for i, job := range jobs {
+		responses[i] = jobResponse{Board: job.Board.String(), Level: job.Level}
 	}
 
-	if err = json.Unmarshal(msg, &req); err != nil {
-		return nil, fmt.Errorf("unmarshal error: %w", err)
-	}
-
-	return &req, nil
+	writeJSON(w, http.StatusOK, responses)
 }
 
-func (h *WsHandler) writeMessage(outgoing *Outgoing) error {
-	msg, err := json.Marshal(outgoing)
-	if err != nil {
-		return fmt.Errorf("marshal error: %w", err)
+// maxLevel bounds a submitted edax search level. It's well above any level flippy actually requests
+// (see TargetLevel) but stays within the smallint column the evaluation is stored in, so an
+// out-of-range value is a clean 400 rather than a Postgres error surfaced as a 500.
+const maxLevel = 60
+
+// validateJobResult checks that a submitted evaluation's values are within sane bounds.
+func validateJobResult(req jobResultRequest) error {
+	if req.Level <= 0 || req.Level > maxLevel {
+		return fmt.Errorf("level must be between 1 and %d", maxLevel)
 	}
-
-	slog.Debug("write ws message", "msg", string(msg))
-
-	if err = h.ws.WriteMessage(websocket.TextMessage, msg); err != nil {
-		return fmt.Errorf("write error: %w", err)
+	if req.Depth < 0 || req.Depth > 60 {
+		return errors.New("depth out of range")
 	}
-
+	if req.Confidence < 0 || req.Confidence > 100 {
+		return errors.New("confidence out of range")
+	}
+	if req.Score < -64 || req.Score > 64 {
+		return errors.New("score out of range")
+	}
 	return nil
 }
 
-func (h *WsHandler) handleMessage(req *Incoming) (*Outgoing, error) {
-	if req.Event == "" {
-		return nil, errors.New("event field is either empty or missing")
+// handleSubmitJobResult handles POST /api/jobs/result: stores a worker's evaluation and releases its claim.
+func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
+	var req jobResultRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid request body: %w", err))
+		return
 	}
 
-	switch req.Event {
-	case "evaluation_request":
-		return h.handleEvaluationRequest(req)
-	default:
-		return nil, fmt.Errorf("unknown event: %s", req.Event)
-	}
-}
-
-// Handle handles the websocket connection.
-func (h *WsHandler) Handle() error {
-	for {
-		req, err := h.readMessage()
-		if err != nil {
-			if errors.Is(err, errClientDisconnected) {
-				return nil
-			}
-
-			return fmt.Errorf("ws read error: %w", err)
-		}
-
-		respData, err := h.handleMessage(req)
-		if err != nil {
-			return fmt.Errorf("ws handle error: %w", err)
-		}
-
-		if err = h.writeMessage(respData); err != nil {
-			return fmt.Errorf("ws write error: %w", err)
-		}
-	}
-}
-
-func (h *WsHandler) handleEvaluationRequest(req *Incoming) (*Outgoing, error) {
-	var reqData EvaluationRequest
-	if err := json.Unmarshal(req.Data, &reqData); err != nil {
-		return nil, fmt.Errorf("ws evaluation request unmarshal error: %w", err)
+	if req.WorkerID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("missing worker_id"))
+		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), wsEvaluationLoadTimeout)
-	defer cancel()
-
-	evaluations, err := lookupPositions(ctx, h.services, reqData.Positions)
+	board, err := othello.ParseBoard(req.Board)
 	if err != nil {
-		return nil, fmt.Errorf("failed to lookup positions: %w", err)
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid board: %w", err))
+		return
 	}
 
-	outgoing := &Outgoing{
-		ID: req.ID,
-		Data: EvaluationResponse{
-			Evaluations: evaluations,
-		},
+	normalized, err := othello.NewNormalizedBoard(board)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("board must be normalized: %w", err))
+		return
 	}
 
-	return outgoing, nil
+	if err := validateJobResult(req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	eval := db.Evaluation{Level: req.Level, Depth: req.Depth, Confidence: req.Confidence, Score: req.Score}
+
+	// Always cache the result ephemerally so lookupEvaluation can find it regardless of DB eligibility.
+	s.setAnalysisResult(r.Context(), normalized.String(), evaluationResponse{
+		Level: req.Level, Depth: req.Depth, Confidence: req.Confidence, Score: req.Score,
+		Source: evaluationSourceEdax,
+	})
+
+	// Check whether this job originated from the priority queue.
+	isPriority, err := s.consumePriorityClaim(r.Context(), normalized.String())
+	if err != nil {
+		slog.Warn("failed to check priority claim; treating as non-priority", "error", err)
+	}
+
+	savedToDB := false
+	discCount := normalized.CountDiscs()
+
+	if isPriority {
+		if discCount <= book.MaxSavableDiscs {
+			if saveErr := s.repo.SaveEvaluation(r.Context(), normalized, eval); saveErr != nil {
+				if errors.Is(saveErr, db.ErrBoardNotFound) {
+					// Board has no row yet; add one and retry.
+					if addErr := s.repo.AddBoards(r.Context(), []othello.NormalizedBoard{normalized}); addErr != nil {
+						slog.Error("failed to add priority board", "error", addErr)
+					} else if saveErr2 := s.repo.SaveEvaluation(r.Context(), normalized, eval); saveErr2 != nil {
+						slog.Error("failed to save priority evaluation after AddBoards", "error", saveErr2)
+					} else {
+						savedToDB = true
+					}
+				} else {
+					writeError(w, http.StatusInternalServerError, saveErr)
+					return
+				}
+			} else {
+				savedToDB = true
+			}
+		}
+		// discCount > MaxSavableDiscs: ephemeral cache is the only record; skip DB entirely.
+	} else {
+		// Non-priority path: SaveEvaluation must succeed; ErrBoardNotFound is a real bug here since every
+		// ListLearnable-originated board is guaranteed to already have a row.
+		if err := s.repo.SaveEvaluation(r.Context(), normalized, eval); err != nil {
+			if errors.Is(err, db.ErrBoardNotFound) {
+				writeError(w, http.StatusNotFound, err)
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		savedToDB = true
+	}
+
+	if savedToDB {
+		s.invalidateStatsCache(r.Context())
+
+		// Only a leaf-disc-count save can change the minimax backfill.
+		if discCount == book.LeafDiscs {
+			if err := s.cache.Rebuild(r.Context()); err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+		}
+	}
+
+	if err := s.recordJobCompletion(r.Context(), req.WorkerID); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	if err := s.releaseClaim(r.Context(), normalized.String(), req.WorkerID); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// lookupEvaluation returns board's evaluation from the DB, minimax cache, or ephemeral analysis
+// cache; ok is false if none has a real (learned) result.
+func (s *Server) lookupEvaluation(ctx context.Context, board othello.Board) (evaluationResponse, bool, error) {
+	if !board.HasMoves() {
+		return s.lookupPassEvaluation(ctx, board)
+	}
+
+	eval, err := s.repo.GetBoard(ctx, board)
+	if err == nil && eval.IsLearned() {
+		return evaluationResponse{
+			Level:      eval.Level,
+			Depth:      eval.Depth,
+			Confidence: eval.Confidence,
+			Score:      eval.Score,
+			Source:     evaluationSourceEdax,
+		}, true, nil
+	}
+	if err != nil && !errors.Is(err, db.ErrBoardNotFound) {
+		return evaluationResponse{}, false, err
+	}
+
+	if score, ok := s.cache.Get(board); ok {
+		return evaluationResponse{Score: score, Source: evaluationSourceMinimax}, true, nil
+	}
+
+	// Ephemeral cache: covers priority-computed evaluations for boards with no DB row (>30 discs)
+	// or not yet persisted.
+	if cached, ok, err := s.getAnalysisResult(ctx, board.Normalize().String()); err == nil && ok {
+		return cached, true, nil
+	}
+
+	return evaluationResponse{}, false, nil
+}
+
+// lookupPassEvaluation handles a forced-pass board: negates the other player's evaluation, or returns
+// the final score if the pass ends the game.
+func (s *Server) lookupPassEvaluation(ctx context.Context, board othello.Board) (evaluationResponse, bool, error) {
+	passed, err := board.DoMove(othello.PassMove)
+	if err != nil {
+		return evaluationResponse{}, false, err
+	}
+
+	if !passed.HasMoves() {
+		return evaluationResponse{Score: board.FinalScore(), Source: evaluationSourceFinal}, true, nil
+	}
+
+	eval, ok, err := s.lookupEvaluation(ctx, passed)
+	if err != nil || !ok {
+		return evaluationResponse{}, ok, err
+	}
+
+	eval.Score = -eval.Score
+	return eval, true, nil
+}
+
+// handleGetBoard handles GET /api/boards?board=<board string>: looks up a board's evaluation.
+func (s *Server) handleGetBoard(w http.ResponseWriter, r *http.Request) {
+	boardParam := r.URL.Query().Get("board")
+	if boardParam == "" {
+		writeError(w, http.StatusBadRequest, errors.New("missing board"))
+		return
+	}
+
+	board, err := othello.ParseBoard(boardParam)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid board: %w", err))
+		return
+	}
+
+	eval, ok, err := s.lookupEvaluation(r.Context(), board)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, db.ErrBoardNotFound)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, eval)
+}
+
+// handleHeartbeat handles POST /api/workers/heartbeat: marks the worker active and refreshes its claim TTL.
+func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
+	var req heartbeatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid request body: %w", err))
+		return
+	}
+
+	if req.WorkerID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("missing worker_id"))
+		return
+	}
+
+	if err := s.heartbeat(r.Context(), req.WorkerID, req.Hostname, req.GitCommit); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleListWorkers handles GET /api/workers: returns active workers, ordered by positions computed.
+func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
+	workers, err := s.listWorkers(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	entries := make([]workerResponse, len(workers))
+	for i, wk := range workers {
+		entries[i] = workerResponse(wk)
+	}
+
+	writeJSON(w, http.StatusOK, entries)
+}
+
+// handleStats handles GET /api/stats: returns move-counts per (disc count, level) cell.
+// The result is Redis-cached because the underlying GROUP BY scans every row in the boards table
+// and becomes slow at millions of rows. The cache is invalidated whenever an evaluation is saved
+// (see handleSubmitJobResult) and expires after statsTTL as a safety net for loader-added boards.
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	if cached, err := s.getCachedStats(r.Context()); err == nil && cached != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(cached)
+		return
+	}
+
+	stats, err := s.repo.Stats(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	entries := make([]statEntry, len(stats))
+	for i, stat := range stats {
+		entries[i] = statEntry{DiscCount: stat.DiscCount, Level: stat.Level, Count: stat.Count}
+	}
+
+	data, err := json.Marshal(entries)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	data = append(data, '\n')
+
+	s.setCachedStats(r.Context(), data)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
+// handleLevelConfig handles GET /api/level-config: returns the constants the frontend needs to
+// determine how many level-increment rounds to request per board.
+func (s *Server) handleLevelConfig(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, levelConfigResponse{
+		PriorityLevel:      PriorityLevel,
+		MaxSavableDiscs:    book.MaxSavableDiscs,
+		LeafDiscs:          book.LeafDiscs,
+		TargetLevelLeaf:    TargetLevel(book.LeafDiscs),
+		TargetLevelNonLeaf: TargetLevel(book.LeafDiscs + 1),
+	})
+}
+
+// pgnBodyLimit caps the PGN request body at 1 MiB; a typical game is well under 1 KiB.
+const pgnBodyLimit = 1 << 20
+
+// handlePGN handles POST /api/pgn: parses PGN text (or a compact OthelloQuest move string) and
+// returns the board sequence as strings. Only the first game in a multi-game PGN is used.
+func (s *Server) handlePGN(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, pgnBodyLimit))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("failed to read body: %w", err))
+		return
+	}
+
+	text := strings.TrimSpace(string(body))
+
+	if text == "" {
+		writeError(w, http.StatusBadRequest, errors.New("empty request body"))
+		return
+	}
+
+	var firstGame *othello.Game
+
+	if !strings.Contains(text, "[") {
+		// No PGN metadata brackets → treat as OthelloQuest compact format (e.g. "e6f4e3d6").
+		compact := strings.Join(strings.Fields(text), "")
+		game, parseErr := othello.ParseOthelloQuestMoves(compact)
+		if parseErr != nil {
+			writeError(w, http.StatusBadRequest, parseErr)
+			return
+		}
+		firstGame = game
+	} else {
+		// ParsePGNLenient accepts any PGN regardless of which metadata tags are present;
+		// handlePGN only needs the board sequence, not game metadata.
+		games, parseErr := othello.ParsePGNLenient(text)
+		if parseErr != nil {
+			writeError(w, http.StatusBadRequest, parseErr)
+			return
+		}
+		if len(games) == 0 {
+			writeError(w, http.StatusBadRequest, errors.New("no games found in PGN"))
+			return
+		}
+		firstGame = games[0]
+	}
+
+	boards := firstGame.Boards()
+	boardStrings := make([]string, len(boards))
+	for i, b := range boards {
+		boardStrings[i] = b.String()
+	}
+
+	writeJSON(w, http.StatusOK, pgnResponse{Boards: boardStrings})
 }

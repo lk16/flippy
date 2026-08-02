@@ -1,43 +1,42 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Runs the full test suite against an ephemeral, isolated Postgres instance:
+# brings up docker-compose.test.yml, waits for it to be healthy, applies
+# migrations, runs tests, then tears the test infrastructure back down.
+set -euo pipefail
 
-set -e
+cd "$(dirname "${BASH_SOURCE[0]}")"
 
-COMPOSE_FILE="docker-compose-test.yml"
+# Load local dev config (e.g. EDAX_PATH) so tests that need it aren't
+# skipped. The exports below still take precedence over any values .env
+# happens to set, keeping tests isolated from the local dev DB/Redis.
+if [ -f .env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
+fi
 
-# Function to clean up containers
+COMPOSE_FILE="docker-compose.test.yml"
+export FLIPPY_POSTGRES_URL="postgres://flippy_test:flippy_test@localhost:12322/flippy_test?sslmode=disable"
+export FLIPPY_REDIS_URL="redis://localhost:12324/0"
+COVERPROFILE="$(mktemp)"
+
 cleanup() {
-    echo "Cleaning up containers..."
-    docker compose -f $COMPOSE_FILE down
+    docker compose -f "$COMPOSE_FILE" down --volumes
+    rm -f "$COVERPROFILE"
 }
-
-# Set up trap to run cleanup on script exit
 trap cleanup EXIT
 
-# Start supportingcontainers
-echo "Starting test containers..."
-docker compose -f $COMPOSE_FILE up -d test-redis test-postgres
+# Browser JS unit tests (static/). These need no infrastructure, so run them first
+# and fail fast (set -e aborts on a non-zero exit) before spinning up containers.
+echo "Running JS tests…"
+node static/test/run.js
 
-echo "Waiting for test-postgres to be healthy..."
-while ! docker compose -f $COMPOSE_FILE ps test-postgres | grep -q "healthy"; do
-    sleep 1
-done
+docker compose -f "$COMPOSE_FILE" up -d --wait
 
-# Initialize database schema
-docker compose -f $COMPOSE_FILE exec -T test-postgres psql -U pg-test-user -d pg-test-db < ./schema.sql
+migrate -path migrations -database "$FLIPPY_POSTGRES_URL" up
 
-# Load test data
-docker compose -f $COMPOSE_FILE exec -T test-postgres psql -U pg-test-user -d pg-test-db < ./test_data.sql
+gotestsum -- -p 1 -cover -coverprofile="$COVERPROFILE" ./...
 
-# Run tests
-echo "Running tests..."
-export FLIPPY_REDIS_URL='redis://localhost:6380'
-export FLIPPY_POSTGRES_URL='postgres://pg-test-user:pg-test-password@localhost:5433/pg-test-db?sslmode=disable'
-export FLIPPY_BOOK_SERVER_HOST='localhost'
-export FLIPPY_BOOK_SERVER_PORT='3000'
-export FLIPPY_BOOK_SERVER_BASIC_AUTH_USER='test-user'
-export FLIPPY_BOOK_SERVER_BASIC_AUTH_PASS='test-password'
-export FLIPPY_BOOK_SERVER_TOKEN='test-token'
-export FLIPPY_BOOK_SERVER_PREFORK='false'
-export FLIPPY_BOOK_SERVER_STATIC_DIR="$(pwd)/static"
-
-go test -v ./internal/...
+echo
+go tool cover -func="$COVERPROFILE"

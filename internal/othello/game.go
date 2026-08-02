@@ -1,119 +1,65 @@
 package othello
 
-import (
-	"fmt"
-	"os"
-	"strings"
-)
+import "fmt"
 
-// Game represents an Othello game, either complete or in progress.
+// Game is a sequence of boards from a start position; boards always has one more entry than moves.
 type Game struct {
-	// filename is the PGN file path or empty if created manually
+	moves    []int
+	boards   []Board
 	filename string
-
-	// metadata is the PGN metadata
 	metadata *GameMetadata
-
-	// moves is the list of moves in the game. Pass moves are added automatically.
-	moves []int
-
-	// start board is the board before any move is played. This allows for custom start positions for debugging.
-	start Board
 }
 
-// NewGameWithStart creates a new empty game with custom start Position.
-func NewGameWithStart(start Board) *Game {
-	return &Game{
-		metadata: &GameMetadata{},
-		moves:    make([]int, 0),
-		start:    start,
-	}
-}
-
-// NewGame creates a new empty game.
+// NewGame returns a new game starting from the standard Othello position.
 func NewGame() *Game {
-	start := NewBoardStart()
-	return NewGameWithStart(start)
+	return NewGameWithStart(NewBoardStart())
 }
 
-// NewGameFromPGN creates a new game from a PGN file.
-func NewGameFromPGN(filename string) (*Game, error) {
-	content, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %w", err)
-	}
-
-	lines := strings.Split(string(content), "\n")
-
-	metadataRowCount := 0
-	for _, line := range lines {
-		if !strings.HasPrefix(line, "[") {
-			break
-		}
-		metadataRowCount++
-	}
-
-	metadata, err := parseMetadata(lines[:metadataRowCount], filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse metadata: %w", err)
-	}
-
-	moves, err := parsePgnMoves(lines[metadataRowCount:])
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse moves: %w", err)
-	}
-
-	game, err := NewGameFromMoves(moves)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create game: %w", err)
-	}
-
-	game.metadata = metadata
-	game.filename = filename
-	return game, nil
+// NewGameWithStart returns a new game starting from start.
+func NewGameWithStart(start Board) *Game {
+	return &Game{boards: []Board{start}}
 }
 
-// NewGameFromMoves creates a new game from a list of moves.
+// NewGameFromMoves returns a new game starting from the standard position with moves played in order.
 func NewGameFromMoves(moves []int) (*Game, error) {
 	game := NewGame()
 
 	for _, move := range moves {
 		if err := game.PushMove(move); err != nil {
-			return nil, fmt.Errorf("failed to push move: %w", err)
+			return nil, fmt.Errorf("failed to push move %d: %w", move, err)
 		}
 	}
 
 	return game, nil
 }
 
-func parsePgnMoves(lines []string) ([]int, error) {
-	moves := make([]int, 0)
-
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-
-		words := strings.Fields(line)
-		for _, word := range words {
-			if len(word) == 0 || word[0] >= '0' && word[0] <= '9' {
-				continue
-			}
-
-			move, err := FieldToIndex(word)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse move %s: %w", word, err)
-			}
-
-			moves = append(moves, move)
-		}
-	}
-
-	return moves, nil
+// Moves returns the moves played so far, including automatically inserted passes.
+func (g *Game) Moves() []int {
+	return append([]int(nil), g.moves...)
 }
 
-// MetaData returns a copy of the game metadata.
-func (g *Game) MetaData() *GameMetadata {
+// Board returns the board after all moves played so far.
+func (g *Game) Board() Board {
+	return g.boards[len(g.boards)-1]
+}
+
+// BoardAt returns the board after the first moveIndex moves.
+func (g *Game) BoardAt(moveIndex int) Board {
+	return g.boards[moveIndex]
+}
+
+// Boards returns the full sequence of boards from start to the current board, inclusive.
+func (g *Game) Boards() []Board {
+	return append([]Board(nil), g.boards...)
+}
+
+// Filename returns the path of the file the game was loaded from, or "" if none.
+func (g *Game) Filename() string {
+	return g.filename
+}
+
+// Metadata returns the game's metadata, or nil if it has none.
+func (g *Game) Metadata() *GameMetadata {
 	if g.metadata == nil {
 		return nil
 	}
@@ -122,88 +68,45 @@ func (g *Game) MetaData() *GameMetadata {
 	return &metadata
 }
 
-// GetNormalizedPositionsWithChildren returns all normalized positions from the game with their children.
-func (g *Game) GetNormalizedPositionsWithChildren() map[NormalizedPosition]bool {
-	positions := make(map[NormalizedPosition]bool)
-
-	for moveIndex := range len(g.moves) + 1 {
-		board := g.getBoard(moveIndex)
-		positions[board.Position().Normalized()] = true
-
-		for _, childPosition := range board.GetChildPositions() {
-			positions[childPosition.Normalized()] = true
-		}
-	}
-
-	return positions
-}
-
-// GetBoard returns the last board in the game.
-func (g *Game) GetBoard() Board {
-	return g.getBoard(len(g.moves))
-}
-
-// getBoard returns the board after doing the moves up to the given move index.
-func (g *Game) getBoard(moveIndex int) Board {
-	board := g.start
-
-	for i := range moveIndex {
-		board = board.DoMove(g.moves[i])
-	}
-
-	return board
-}
-
-// PushMove appends a move to the game.
+// PushMove plays move, automatically appending a pass if the resulting board has no legal move.
 func (g *Game) PushMove(move int) error {
-	moveCount := len(g.moves)
-
-	if moveCount > 0 {
-		lastMove := g.moves[moveCount-1]
-
-		// Prevent double pass.
-		if lastMove == PassMove && move == PassMove {
-			return nil
-		}
+	if n := len(g.moves); n > 0 && g.moves[n-1] == PassMove && move == PassMove {
+		return nil
 	}
 
-	board := g.GetBoard()
-	if !board.IsValidMove(move) {
+	next, err := g.Board().DoMove(move)
+	if err != nil {
 		return fmt.Errorf("invalid move: %d", move)
 	}
 
 	g.moves = append(g.moves, move)
+	g.boards = append(g.boards, next)
 
-	// Try adding a pass move if we didn't pass last move.
-	if move != PassMove {
-		board = g.GetBoard()
-		passed := board.DoMove(PassMove)
+	if move == PassMove || next.HasMoves() {
+		return nil
+	}
 
-		// Add pass move if current player doesn't have moves but opponent does.
-		if !board.HasMoves() && passed.HasMoves() {
-			g.moves = append(g.moves, PassMove)
-		}
+	// next has no moves, so passing is always legal here.
+	passed, _ := next.DoMove(PassMove)
+	if passed.HasMoves() {
+		g.moves = append(g.moves, PassMove)
+		g.boards = append(g.boards, passed)
 	}
 
 	return nil
 }
 
-// PopMove undoes the last move.
+// PopMove undoes the last move, and the move before it too if it was an automatically inserted pass.
 func (g *Game) PopMove() {
 	if len(g.moves) == 0 {
 		return
 	}
 
-	poppedMoves := 1
-	// Prevent having a last board without moves.
-	if g.moves[len(g.moves)-1] == PassMove {
-		poppedMoves = 2
+	n := 1
+	if len(g.moves) >= 2 && g.moves[len(g.moves)-1] == PassMove {
+		n = 2
 	}
 
-	g.moves = g.moves[:len(g.moves)-poppedMoves]
-}
-
-// GetFilename returns the filename of the game.
-func (g *Game) GetFilename() string {
-	return g.filename
+	g.moves = g.moves[:len(g.moves)-n]
+	g.boards = g.boards[:len(g.boards)-n]
 }

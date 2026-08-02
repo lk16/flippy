@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    ports:
+      - "12321:5432"
+    environment:
+      POSTGRES_USER: ${FLIPPY_POSTGRES_USER:-flippy}
+      POSTGRES_PASSWORD: ${FLIPPY_POSTGRES_PASSWORD:-flippy}
+      POSTGRES_DB: ${FLIPPY_POSTGRES_DB:-flippy}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${FLIPPY_POSTGRES_USER:-flippy}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:8
+    restart: unless-stopped
+    ports:
+      - "12323:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Talks to the server started by local.sh (which runs on the host, not in
+  # compose). network_mode: host lets FLIPPY_SERVER_URL just say localhost.
+  # Scaled to 0 by default; run `docker compose up -d --scale worker=N` to
+  # start N of them.
+  worker:
+    build:
+      context: .
+      dockerfile: cmd/worker/Dockerfile
+    network_mode: host
+    environment:
+      FLIPPY_SERVER_URL: ${FLIPPY_SERVER_URL:-http://localhost:8080}
+      EDAX_PATH: /edax/bin/lEdax-x64
+    volumes:
+      - ${EDAX_HOST_DIR}:/edax:ro
+    deploy:
+      replicas: 0
+
+volumes:
+  pgdata:

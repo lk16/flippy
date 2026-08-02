@@ -1,187 +1,296 @@
 package edax
 
 import (
-	"fmt"
+	"bufio"
+	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/lk16/flippy/internal/othello"
 )
 
-func TestParserParseLine(t *testing.T) {
-	// Lines are generated using this command on Edax version 4.5.3:
-	// echo 'OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO---OXOX----XXXXO----XOOO-------- X;' \
-	// | /path/to/edax -solve /dev/stdin -level 60 -verbose 3
+// singleProblemOutput is real `lEdax-x64 -solve ... -level 10 -verbose 3`
+// stdout for the start position after black plays d3, captured directly
+// from the binary (see internal/othello/gen for how boards are produced;
+// this fixture predates that and was captured manually against the real
+// edax-reversi binary during development).
+const singleProblemOutput = `
+*** problem # 1 ***
 
-	tests := []struct {
-		line    string
-		want    *parsedLine
-		wantErr error
-	}{
-		{
-			line:    "*** problem # 1 ***\n",
-			want:    nil,
-			wantErr: errProblemNumberLine,
-		},
-		{
-			line:    "\n",
-			want:    nil,
-			wantErr: errEmptyLine,
-		},
-		{
-			line:    "  A B C D E F G H\n",
-			want:    nil,
-			wantErr: errBoardASCIIArtLine,
-		},
-		{
-			line:    "1 O O O O O O O O 1\n",
-			want:    nil,
-			wantErr: errBoardASCIIArtLine,
-		},
-		{
-			line:    "2 O O O O O O O O 2 * to move\n",
-			want:    nil,
-			wantErr: errBoardASCIIArtLine,
-		},
-		{
-			line:    "3 O O O O O O O O 3\n",
-			want:    nil,
-			wantErr: errBoardASCIIArtLine,
-		},
-		{
-			line:    "4 O O O O O O O O 4 *: discs =  7    moves =  5\n",
-			want:    nil,
-			wantErr: errBoardASCIIArtLine,
-		},
-		{
-			line:    "5 - - . O * O * - 5 O: discs = 38    moves =  6\n",
-			want:    nil,
-			wantErr: errBoardASCIIArtLine,
-		},
-		{
-			line:    "6 - - - * * * * O 6  empties = 19      ply = 42\n",
-			want:    nil,
-			wantErr: errBoardASCIIArtLine,
-		},
-		{
-			line:    "7 - - - - * O O O 7\n",
-			want:    nil,
-			wantErr: errBoardASCIIArtLine,
-		},
-		{
-			line:    "8 - - - - . . . . 8\n",
-			want:    nil,
-			wantErr: errBoardASCIIArtLine,
-		},
-		{
-			line:    "  A B C D E F G H\n",
-			want:    nil,
-			wantErr: errBoardASCIIArtLine,
-		},
-		{
-			line:    "\n",
-			want:    nil,
-			wantErr: errEmptyLine,
-		},
-		{
-			line:    " depth|score|       time   |  nodes (N)  |   N/s    | principal variation\n",
-			want:    nil,
-			wantErr: errTableLine,
-		},
-		{
-			line:    "------+-----+--------------+-------------+----------+---------------------\n",
-			want:    nil,
-			wantErr: errTableLine,
-		},
-		{
-			line:    " 0@73%  -44        0:00.000             7            f8                  \n",
-			want:    &parsedLine{depth: 0, confidence: 73, score: -44, bestMoves: []int{61}},
-			wantErr: nil,
-		},
-		{
-			line:    " 0@73%  -44        0:00.000             7            f8                  \n",
-			want:    &parsedLine{depth: 0, confidence: 73, score: -44, bestMoves: []int{61}},
-			wantErr: nil,
-		},
-		{
-			line:    " 5@73%  -59        0:00.000           210            f8 H5 c5            ",
-			want:    &parsedLine{depth: 5, confidence: 73, score: -59, bestMoves: []int{61, 39, 34}},
-			wantErr: nil,
-		},
-		{
-			line:    " 5@73%  -53        0:00.000           464            e8 H5 h8            \n",
-			want:    &parsedLine{depth: 5, confidence: 73, score: -53, bestMoves: []int{60, 39, 63}},
-			wantErr: nil,
-		},
-		{
-			line:    " 5@73%  -53        0:00.000          1785            e8 H5 h8            \n",
-			want:    &parsedLine{depth: 5, confidence: 73, score: -53, bestMoves: []int{60, 39, 63}},
-			wantErr: nil,
-		},
-		{
-			line:    " 7@73%  -50        0:00.000          2627            e8 H5 c5 C7 c6      \n",
-			want:    &parsedLine{depth: 7, confidence: 73, score: -50, bestMoves: []int{60, 39, 34, 50, 42}},
-			wantErr: nil,
-		},
-		{
-			line:    " 7@73%  -50        0:00.000          4730            e8 H5 c5 C7 c6      \n",
-			want:    &parsedLine{depth: 7, confidence: 73, score: -50, bestMoves: []int{60, 39, 34, 50, 42}},
-			wantErr: nil,
-		},
-		{
-			line:    " 9@73%  -51        0:00.001          6064    6064000 e8 H5 h8 C7 c6 C5 b8\n",
-			want:    &parsedLine{depth: 9, confidence: 73, score: -51, bestMoves: []int{60, 39, 63, 50, 42, 34, 57}},
-			wantErr: nil,
-		},
-		{
-			line:    " 9@73%  -51        0:00.001          9439    9439000 e8 H5 h8 C7 c6 C5 b8\n",
-			want:    &parsedLine{depth: 9, confidence: 73, score: -51, bestMoves: []int{60, 39, 63, 50, 42, 34, 57}},
-			wantErr: nil,
-		},
-		{
-			line:    "19@73% <-53        0:00.001         10657   10657000 e8 H5 h8 C7 c6 C5 b8\n",
-			want:    nil,
-			wantErr: errScoreParseError,
-		},
-		{
-			line:    "19@73%  -60        0:00.003         24589    8196333 e8 H5 c5 B5 h8 C6 ps\n",
-			want:    &parsedLine{depth: 19, confidence: 73, score: -60, bestMoves: []int{60, 39, 34, 33, 63, 42, -1}},
-			wantErr: nil,
-		},
-		{
-			line:    "   19  <-62        0:00.003         31405   10468333 e8 H5 c5 D8 h8 B5   \n",
-			want:    nil,
-			wantErr: errScoreParseError,
-		},
-		{
-			line:    "   19   -60        0:00.003           352     117333 h8 H5 g8 C7 c6 B6 c5\n",
-			want:    &parsedLine{depth: 19, confidence: 100, score: -60, bestMoves: []int{63, 39, 62, 50, 42, 41, 34}},
-			wantErr: nil,
-		},
-		{
-			line:    "   19   -60        0:00.003         52539   17513000 h8 H5 g8 C7 c6 B6 c5\n",
-			want:    &parsedLine{depth: 19, confidence: 100, score: -60, bestMoves: []int{63, 39, 62, 50, 42, 41, 34}},
-			wantErr: nil,
-		},
-		{
-			line:    "\n",
-			want:    nil,
-			wantErr: errEmptyLine,
-		},
-		{
-			line:    "------+-----+--------------+-------------+----------+---------------------\n",
-			want:    nil,
-			wantErr: errTableLine,
-		},
+  A B C D E F G H
+1 - - - - - - - - 1
+2 - - - - - - - - 2 * to move
+3 - - - . - - - - 3
+4 - - . O * - - - 4 *: discs =  2    moves =  4
+5 - - - * O . - - 5 O: discs =  2    moves =  4
+6 - - - - . - - - 6  empties = 60      ply =  1
+7 - - - - - - - - 7
+8 - - - - - - - - 8
+  A B C D E F G H
+
+ depth|score|       time   |  nodes (N)  |   N/s    | principal variation
+------+-----+--------------+-------------+----------+---------------------
+    0   -04        0:00.000             6            d3
+    0   -04        0:00.000             6            d3
+    6   -04        0:00.000           489            d3 C5 f6 E3
+    6   -04        0:00.000          2280            d3 C5 f6 E3
+    8   -03        0:00.000          5574            d3 E3 f3 E2 f4 G3
+    8   -03        0:00.002         16839    8419500 d3 E3 f3 E2 f4 G3
+   10   +00        0:00.003         53244   17748000 d3 C5 e6 D2 c3 E3 f3
+   10   +00        0:00.007        155022   22146000 d3 C5 e6 D2 c3 E3 f3
+
+------+-----+--------------+-------------+----------+---------------------
+/tmp/foo: 155022 nodes in  0:00.007 (22146000 nodes/s).
+1 positions; 0 erroneous move; 0 erroneous score; mean absolute score error = 0.000; mean absolute move error = 0.000
+`
+
+// selectiveOutput is real output from the same position at -level 20,
+// which (unlike level 10) uses probabilistic (non-100%-confidence) search
+// for most of the iterative deepening, showing both the "@NN%" confidence
+// suffix and '<'/'>' non-exact-bound rows that must be skipped.
+const selectiveOutput = `
+*** problem # 1 ***
+
+  A B C D E F G H
+1 - - - - - - - - 1
+2 - - - - - - - - 2 * to move
+3 - - - . - - - - 3
+4 - - . O * - - - 4 *: discs =  2    moves =  4
+5 - - - * O . - - 5 O: discs =  2    moves =  4
+6 - - - - . - - - 6  empties = 60      ply =  1
+7 - - - - - - - - 7
+8 - - - - - - - - 8
+  A B C D E F G H
+
+ depth|score|       time   |  nodes (N)  |   N/s    | principal variation
+------+-----+--------------+-------------+----------+---------------------
+ 0@73%  -04        0:00.000             6            d3
+ 0@73%  -04        0:00.000             6            d3
+16@73% >+00        0:00.008        204111   25513875 d3 E3 f4 C3 c4 D6 e6
+16@73%  +00        0:00.009        207460   23051111 d3 E3 f4 C3 c4 D6 e6
+18@73% <-01        0:00.013        405552   31196308 d3 C5
+18@73%  +00        0:00.025       1175140   47005600 d3 E3 f4 C3 c4 D6 e6
+20@73% <-01        0:00.054       4019509   74435352 d3 C5 f6 F5 e6
+20@73%  -01        0:00.072       7044923   97846153 d3 C5 f6 F5 e6 E3 c3
+
+------+-----+--------------+-------------+----------+---------------------
+/tmp/foo: 7044923 nodes in  0:00.072 (97846153 nodes/s).
+1 positions; 0 erroneous move; 0 erroneous score; mean absolute score error = 0.000; mean absolute move error = 0.000
+`
+
+// twoProblemOutput is real output from sending the same problem twice to
+// one long-running edax process at -level 6, confirming the process stays
+// alive and keeps printing "*** problem #" blocks back to back rather than
+// exiting after the first.
+const twoProblemOutput = `
+*** problem # 1 ***
+
+  A B C D E F G H
+1 - - - - - - - - 1
+2 - - - - - - - - 2 * to move
+3 - - - . - - - - 3
+4 - - . O * - - - 4 *: discs =  2    moves =  4
+5 - - - * O . - - 5 O: discs =  2    moves =  4
+6 - - - - . - - - 6  empties = 60      ply =  1
+7 - - - - - - - - 7
+8 - - - - - - - - 8
+  A B C D E F G H
+
+ depth|score|       time   |  nodes (N)  |   N/s    | principal variation
+------+-----+--------------+-------------+----------+---------------------
+    0   -04        0:00.000             6            d3
+    0   -04        0:00.000             6            d3
+    4   -04        0:00.000            61            d3 E3
+    4   -04        0:00.000           316            d3 E3
+    6   -04        0:00.000           784            d3 C5 f6 E3
+    6   -04        0:00.001          2525    2525000 d3 C5 f6 E3
+
+------+-----+--------------+-------------+----------+---------------------
+
+*** problem # 2 ***
+
+  A B C D E F G H
+1 - - - - - - - - 1
+2 - - - - - - - - 2 * to move
+3 - - - . - - - - 3
+4 - - . O * - - - 4 *: discs =  2    moves =  4
+5 - - - * O . - - 5 O: discs =  2    moves =  4
+6 - - - - . - - - 6  empties = 60      ply =  1
+7 - - - - - - - - 7
+8 - - - - - - - - 8
+  A B C D E F G H
+
+ depth|score|       time   |  nodes (N)  |   N/s    | principal variation
+------+-----+--------------+-------------+----------+---------------------
+    0   -04        0:00.000             6            d3
+    0   -04        0:00.000             6            d3
+    4   -04        0:00.000            61            d3 E3
+    4   -04        0:00.000           316            d3 E3
+    6   -04        0:00.000           784            d3 C5 f6 E3
+    6   -04        0:00.000          2525            d3 C5 f6 E3
+
+------+-----+--------------+-------------+----------+---------------------
+/tmp/foo: 5050 nodes in  0:00.001 ( 5050000 nodes/s).
+2 positions; 0 erroneous move; 0 erroneous score; mean absolute score error = 0.000; mean absolute move error = 0.000
+`
+
+func mustParseFields(t *testing.T, fields ...string) []int {
+	t.Helper()
+	moves := make([]int, len(fields))
+	for i, f := range fields {
+		move, err := othello.ParseField(f)
+		require.NoError(t, err)
+		moves[i] = move
+	}
+	return moves
+}
+
+func TestParseFinalEvaluation_ExactSearch(t *testing.T) {
+	r := bufio.NewReader(strings.NewReader(singleProblemOutput))
+
+	got, err := parseFinalEvaluation(r)
+	require.NoError(t, err)
+
+	want := Evaluation{
+		Depth:      10,
+		Confidence: 100,
+		Score:      0,
+		BestMoves:  mustParseFields(t, "d3", "C5", "e6", "D2", "c3", "E3", "f3"),
+	}
+	require.Equal(t, want, got)
+}
+
+func TestParseFinalEvaluation_SelectiveSearch(t *testing.T) {
+	r := bufio.NewReader(strings.NewReader(selectiveOutput))
+
+	got, err := parseFinalEvaluation(r)
+	require.NoError(t, err)
+
+	want := Evaluation{
+		Depth:      20,
+		Confidence: 73,
+		Score:      -1,
+		BestMoves:  mustParseFields(t, "d3", "C5", "f6", "F5", "e6", "E3", "c3"),
+	}
+	require.Equal(t, want, got)
+}
+
+func TestParseFinalEvaluation_MultipleProblemsOnSameReader(t *testing.T) {
+	r := bufio.NewReader(strings.NewReader(twoProblemOutput))
+
+	want := Evaluation{
+		Depth:      6,
+		Confidence: 100,
+		Score:      -4,
+		BestMoves:  mustParseFields(t, "d3", "C5", "f6", "E3"),
 	}
 
-	parser := &parser{}
+	first, err := parseFinalEvaluation(r)
+	require.NoError(t, err)
+	require.Equal(t, want, first)
 
-	for testIndex, test := range tests {
-		testName := fmt.Sprintf("Line-%d", testIndex+1)
-		t.Run(testName, func(t *testing.T) {
-			got, err := parser.parseLine(test.line)
-			assert.Equal(t, test.want, got)
-			assert.Equal(t, test.wantErr, err)
-		})
+	second, err := parseFinalEvaluation(r)
+	require.NoError(t, err)
+	require.Equal(t, want, second)
+}
+
+func TestParseFinalEvaluation_EmptyInput(t *testing.T) {
+	r := bufio.NewReader(strings.NewReader(""))
+
+	_, err := parseFinalEvaluation(r)
+	require.Error(t, err)
+}
+
+func TestParseFinalEvaluation_TruncatedBeforeSecondBorder(t *testing.T) {
+	truncated := strings.SplitAfter(singleProblemOutput, tableBorder)[0] +
+		"\n    0   -04        0:00.000             6            d3                  \n"
+	r := bufio.NewReader(strings.NewReader(truncated))
+
+	_, err := parseFinalEvaluation(r)
+	require.Error(t, err)
+}
+
+func TestParseFinalEvaluation_NoDataRowsBeforeSecondBorder(t *testing.T) {
+	input := tableBorder + "\n" + tableBorder + "\n"
+	r := bufio.NewReader(strings.NewReader(input))
+
+	_, err := parseFinalEvaluation(r)
+	require.Error(t, err)
+}
+
+func TestParseResultLine_SkipsNonDataLines(t *testing.T) {
+	nonDataLines := []string{
+		"\n",
+		"   \n",
+		"*** problem # 1 ***\n",
+		"  A B C D E F G H\n",
+		"1 - - - - - - - - 1\n",
+		"4 - - . O * - - - 4 *: discs =  2    moves =  4\n",
+		" depth|score|       time   |  nodes (N)  |   N/s    | principal variation\n",
 	}
+
+	for _, line := range nonDataLines {
+		_, ok := parseResultLine(line)
+		require.False(t, ok, "expected line to be skipped: %q", line)
+	}
+}
+
+func TestParseResultLine_ExactRow(t *testing.T) {
+	eval, ok := parseResultLine("   10   +00        0:00.003         53244   17748000 d3 C5 e6 D2 c3 E3 f3\n")
+	require.True(t, ok)
+	require.Equal(t, Evaluation{
+		Depth:      10,
+		Confidence: 100,
+		Score:      0,
+		BestMoves:  mustParseFields(t, "d3", "C5", "e6", "D2", "c3", "E3", "f3"),
+	}, eval)
+}
+
+func TestParseResultLine_ConfidenceSuffix(t *testing.T) {
+	eval, ok := parseResultLine(" 0@73%  -04        0:00.000             6            d3                  \n")
+	require.True(t, ok)
+	require.Equal(t, 73, eval.Confidence)
+	require.Equal(t, 0, eval.Depth)
+	require.Equal(t, -4, eval.Score)
+}
+
+func TestParseResultLine_SkipsNonExactBound(t *testing.T) {
+	_, ok := parseResultLine("16@73% >+00        0:00.008        204111   25513875 d3 E3 f4 C3 c4 D6 e6\n")
+	require.False(t, ok)
+
+	_, ok = parseResultLine("18@73% <-01        0:00.013        405552   31196308 d3 C5               \n")
+	require.False(t, ok)
+}
+
+func TestParseResultLine_TooFewColumns(t *testing.T) {
+	_, ok := parseResultLine("garbage\n")
+	require.False(t, ok)
+}
+
+func TestParseResultLine_InvalidDepth(t *testing.T) {
+	_, ok := parseResultLine("xx   +00        0:00.000             6            d3\n")
+	require.False(t, ok)
+}
+
+func TestParseResultLine_InvalidConfidence(t *testing.T) {
+	_, ok := parseResultLine("0@xx%  -04        0:00.000             6            d3\n")
+	require.False(t, ok)
+}
+
+func TestParseResultLine_InvalidScore(t *testing.T) {
+	_, ok := parseResultLine("10   xx        0:00.000             6            d3\n")
+	require.False(t, ok)
+}
+
+func TestParseResultLine_InvalidBestMoveField(t *testing.T) {
+	_, ok := parseResultLine("   10   +00        0:00.003         53244   17748000 zz\n")
+	require.False(t, ok)
+}
+
+func TestParseResultLine_NoBestMoves(t *testing.T) {
+	// Shorter than bestMovesByteOffset: no move list present.
+	eval, ok := parseResultLine("0 +00\n")
+	require.True(t, ok)
+	require.Empty(t, eval.BestMoves)
 }

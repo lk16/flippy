@@ -1,33 +1,47 @@
-function updateTable() {
-    fetch('/api/learn-clients')
-        .then(response => response.json())
-        .then(data => {
-            const tbody = document.getElementById('clientTableBody');
-            tbody.innerHTML = '';
-
-            data.client_stats.forEach(client => {
-                const date = new Date(client.last_active);
-                const formattedDate = date.getFullYear() + '-' +
-                    String(date.getMonth() + 1).padStart(2, '0') + '-' +
-                    String(date.getDate()).padStart(2, '0') + ' ' +
-                    String(date.getHours()).padStart(2, '0') + ':' +
-                    String(date.getMinutes()).padStart(2, '0') + ':' +
-                    String(date.getSeconds()).padStart(2, '0');
-
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>${client.id}</td>
-                    <td>${client.hostname}</td>
-                    <td>${client.git_commit.substring(0, 8)}</td>
-                    <td>${client.positions_computed}</td>
-                    <td class="timestamp">${formattedDate}</td>
-                `;
-                tbody.appendChild(row);
-            });
-        })
-        .catch(error => console.error('Error fetching data:', error));
+function formatTimestamp(isoString) {
+    const date = new Date(isoString);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} `
+        + `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-// Update immediately and then every second
-updateTable();
-setInterval(updateTable, 1000);
+// createCell returns a <td> with text set via textContent, so worker-supplied
+// values (id, hostname, git_commit) can't inject HTML into the page.
+function createCell(text, className) {
+    const td = document.createElement('td');
+    td.textContent = text;
+    if (className) td.className = className;
+    return td;
+}
+
+async function loadWorkers() {
+    const response = await fetch('/api/workers');
+    const workers = await response.json();
+
+    const tbody = document.getElementById('worker-table-body');
+    tbody.innerHTML = '';
+
+    workers.forEach((worker) => {
+        const row = document.createElement('tr');
+        row.appendChild(createCell(worker.id));
+        row.appendChild(createCell(worker.hostname));
+        row.appendChild(createCell((worker.git_commit || '').substring(0, 8)));
+        row.appendChild(createCell(worker.positions_computed));
+        row.appendChild(createCell(formatTimestamp(worker.last_active), 'timestamp'));
+        tbody.appendChild(row);
+    });
+}
+
+// Poll by re-scheduling only after each load settles, so a load slower than
+// the interval can't stack up overlapping requests (and a failed load doesn't
+// stop the polling).
+async function pollWorkers() {
+    try {
+        await loadWorkers();
+    } catch (error) {
+        console.error('Error loading workers:', error);
+    }
+    setTimeout(pollWorkers, 1000);
+}
+
+pollWorkers();
