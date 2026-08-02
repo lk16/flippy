@@ -77,6 +77,12 @@ SBX_BASE_NAME="${SBX_NAME:-flippy}"
 SBX_MEMORY="${SBX_MEMORY:-4g}"
 SBX_CPUS="${SBX_CPUS:-4}"
 
+# Optional model override for the claude CLI (e.g. CLAUDE_MODEL=fable).
+CLAUDE_MODEL_ARGS=()
+if [ -n "${CLAUDE_MODEL:-}" ]; then
+    CLAUDE_MODEL_ARGS=(--model "$CLAUDE_MODEL")
+fi
+
 # Multiple sandboxes can run concurrently, so pick the lowest free
 # "$SBX_BASE_NAME-<n>" suffix instead of colliding on a shared name. Also
 # skip any suffix with a leftover refs/sandboxes/<name>/* ref -- cleanup's
@@ -129,4 +135,4 @@ sbx run claude \
     --kit .sbx/kit \
     --memory "$SBX_MEMORY" \
     --cpus "$SBX_CPUS" \
-    -- --append-system-prompt "$SYSTEM_PROMPT"
+    -- --append-system-prompt "$SYSTEM_PROMPT" "${CLAUDE_MODEL_ARGS[@]}"
