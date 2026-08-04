@@ -14,6 +14,7 @@ function stubElement() {
     classList: { toggle: noop, add: noop, remove: noop, contains: () => false },
     addEventListener: noop,
     appendChild: noop,
+    focus: noop,
     querySelectorAll: () => [],
     getBoundingClientRect: () => ({ width: 400, height: 200, left: 0, top: 0 }),
     getContext: () => new Proxy({}, { get: () => () => {} }),
@@ -36,9 +37,10 @@ global.getComputedStyle = () => ({ getPropertyValue: () => '' });
 global.WebSocket = function () { this.send = () => {}; };
 global.WebSocket.OPEN = 1;
 global.fetch = () => Promise.reject(new Error('no network in tests'));
+global.requestAnimationFrame = (cb) => setTimeout(cb, 0);
 
 // ── Load the real classes ────────────────────────────────────────────────────
-const { OthelloBoard, OthelloGame } = require('../board.js');
+const { OthelloBoard, OthelloGame, LOCAL_EVAL_LEVELS } = require('../board.js');
 
 const DEFAULT_LEVEL_CONFIG = {
   priorityLevel: 10,
@@ -69,6 +71,9 @@ function buildGame(boardStrings, { complete = true } = {}) {
   game._graphData = null;
   game._graphLayout = null;
   game._graphClickBound = false;
+  game.edaxWorkerPool = null;
+  game._pendingLocalEvals = new Set();
+  game._localEvalRenderPending = false;
 
   // Mirror pgnBuildChildSets(): children of each valid-move board, [] for pass/game-over.
   game.pgnChildrenByPly = game.pgnBoards.map((b) =>
@@ -103,4 +108,33 @@ function graphSegments(data) {
   return segs;
 }
 
-module.exports = { OthelloBoard, OthelloGame, buildGame, graphSegments, DEFAULT_LEVEL_CONFIG };
+// buildNormalGame constructs an OthelloGame in normal (non-PGN) play mode, bypassing the
+// DOM-touching constructor the same way buildGame does. board defaults to the starting position.
+function buildNormalGame(board = new OthelloBoard()) {
+  const game = Object.create(OthelloGame.prototype);
+  game.pgnState = null;
+  game.evaluations = new Map();
+  game.board = board;
+  game.boardHistory = [];
+  game.evalMode = true;
+  game.evalPollTimer = null;
+  game.evalPollStart = 0;
+  game.levelConfig = { ...DEFAULT_LEVEL_CONFIG };
+  game.pendingLevelRequests = new Map();
+  game._pendingLocalEvals = new Set();
+  game._localEvalRenderPending = false;
+  game.edaxWorkerPool = null;
+  // No-op by default; tests that need to inspect outgoing requests replace this.
+  game.wsClient = { requestEvaluations() {}, sendEvent() {} };
+  return game;
+}
+
+module.exports = {
+  OthelloBoard,
+  OthelloGame,
+  buildGame,
+  buildNormalGame,
+  graphSegments,
+  DEFAULT_LEVEL_CONFIG,
+  LOCAL_EVAL_LEVELS,
+};

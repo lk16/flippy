@@ -38,6 +38,26 @@ jobs:
       - name: Run JS tests
         run: node static/test/run.js
 
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - name: Check cargo fmt
+        run: cargo fmt --manifest-path wasm/edax-eval/Cargo.toml -- --check
+      - name: Run clippy
+        run: cargo clippy --manifest-path wasm/edax-eval/Cargo.toml -- -Dwarnings
+      - name: Run tests
+        # --release: see test.sh's comment on the same flag.
+        run: cargo test --manifest-path wasm/edax-eval/Cargo.toml --release
+      - name: Build wasm32 lib
+        # --lib: the extract_weights bin tool is a native-only offline tool (needs flate2, which
+        # is scoped out of wasm32 builds -- see Cargo.toml) and was never meant to target wasm32.
+        run: cargo build --manifest-path wasm/edax-eval/Cargo.toml --target wasm32-unknown-unknown --lib --release
+
   test:
     runs-on: ubuntu-latest
     services:

@@ -32,6 +32,22 @@ trap cleanup EXIT
 echo "Running JS tests…"
 node static/test/run.js
 
+# Rust unit tests (wasm/edax-eval/). Also need no infrastructure, so run them
+# here too, before the Docker compose stack comes up.
+echo "Running Rust checks…"
+cargo fmt --manifest-path wasm/edax-eval/Cargo.toml -- --check
+cargo clippy --manifest-path wasm/edax-eval/Cargo.toml -- -Dwarnings
+# --release: the differential test (tests/differential.rs, EDAX_PATH-gated) runs an unoptimized
+# depth-10 search in minutes rather than seconds without it; skipped entirely when EDAX_PATH isn't
+# set (e.g. in CI), so this only matters for local runs with the real edax binary configured.
+cargo test --manifest-path wasm/edax-eval/Cargo.toml --release
+
+# wasm/edax-eval/js/edax-eval.test.js (Task 10) exercises the real compiled .wasm module, so it
+# needs one built first. --lib: the extract_weights bin tool was never meant to target wasm32 (see
+# Cargo.toml).
+cargo build --manifest-path wasm/edax-eval/Cargo.toml --target wasm32-unknown-unknown --lib --release
+node wasm/edax-eval/js/edax-eval.test.js
+
 docker compose -f "$COMPOSE_FILE" up -d --wait
 
 migrate -path migrations -database "$FLIPPY_POSTGRES_URL" up

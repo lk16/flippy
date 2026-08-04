@@ -39,3 +39,24 @@ is required — pick items up when a real need appears.
 
 - The websocket client's reconnect/queueing logic has no JS unit tests;
   `static/test/` covers board logic only.
+
+## Build artifacts
+
+- **`wasm/edax-eval/dist/`** (`edax_eval.wasm`, `weights.bin.gz`,
+  `weights_manifest.json`) is committed to git — unlike `generated/` and
+  `target/` (both gitignored scratch output), these are the actual files
+  `internal/web` embeds and serves at `/static/wasm/`, so the running
+  server has no build step of its own to reproduce them. Regenerating them
+  requires a local Edax checkout (`eval.dat`, matching the `EDAX_HOST_DIR`
+  env var used elsewhere in this repo — see `.env.sample`):
+  ```
+  cargo run --manifest-path wasm/edax-eval/Cargo.toml --bin extract_weights --release -- wasm/edax-eval/generated
+  cargo build --manifest-path wasm/edax-eval/Cargo.toml --target wasm32-unknown-unknown --lib --release
+  cp wasm/edax-eval/generated/weights.bin.gz wasm/edax-eval/generated/weights_manifest.json wasm/edax-eval/dist/
+  cp wasm/edax-eval/target/wasm32-unknown-unknown/release/edax_eval.wasm wasm/edax-eval/dist/
+  ```
+  Only needs re-running if `wasm/edax-eval`'s Rust source changes (rebuild
+  `edax_eval.wasm`) or `eval.dat` itself changes (regenerate
+  `weights.bin.gz`) — CI can't do this itself (no `EDAX_PATH`/`eval.dat`
+  there), so it's a manual step before committing, same as any other
+  `EDAX_PATH`-gated local-only workflow in this repo.

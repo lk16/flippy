@@ -1,0 +1,6 @@
+# Enable WASM SIMD128 for the wasm32 target only. All modern browsers support
+# it (Chrome 91+/2021, Firefox 90+/2021, Safari 16.4+/2023); the auto-vectorizer
+# uses it for array-heavy loops in eval.rs (compute_features/accumulate_eval)
+# without any code changes. Has no effect on native builds (cargo test, clippy).
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128"]

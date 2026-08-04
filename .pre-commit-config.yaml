@@ -24,3 +24,26 @@ repos:
         entry: golangci-lint run --fix ./cmd/... ./internal/...
         types: [go]
         pass_filenames: false
+
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        language: system
+        entry: cargo fmt --manifest-path wasm/edax-eval/Cargo.toml -- --check
+        types: [rust]
+        pass_filenames: false
+
+      - id: cargo-check
+        name: cargo check
+        language: system
+        entry: cargo check --manifest-path wasm/edax-eval/Cargo.toml
+        types: [rust]
+        pass_filenames: false
+
+      - id: cargo-clippy
+        name: cargo clippy
+        language: system
+        entry: cargo clippy --manifest-path wasm/edax-eval/Cargo.toml -- -Dwarnings
+        types: [rust]
+        pass_filenames: false
