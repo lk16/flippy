@@ -17,7 +17,7 @@ is required — pick items up when a real need appears.
 - **Stricter evaluation validation**: submitted results check
   level/depth/score bounds, but not the confidence enum
   ({73,87,95,98,99,100}) or an explicit level floor (`TargetLevel` never
-  assigns below 16, so the floor holds by construction, not by input
+  assigns below 28, so the floor holds by construction, not by input
   validation).
 - **PGN illegal-move tolerance**: old auto-inserted a pass when a recorded
   move was illegal, recovering from bad data; our parser errors instead.
