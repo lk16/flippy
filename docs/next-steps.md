@@ -39,6 +39,11 @@ is required — pick items up when a real need appears.
 
 - The websocket client's reconnect/queueing logic has no JS unit tests;
   `static/test/` covers board logic only.
+- No browser-level regression tests at all: nothing catches a frontend
+  wiring bug (e.g. evaluations not appearing under the legal moves) short
+  of opening the page by hand. Playwright is the intended answer;
+  [playwright-e2e-prep.md](playwright-e2e-prep.md) lists what the host has
+  to prepare first, since the sandbox can't reach npm or Playwright's CDN.
 
 ## Build artifacts
 
@@ -59,4 +64,9 @@ is required — pick items up when a real need appears.
   `edax_eval.wasm`) or `eval.dat` itself changes (regenerate
   `weights.bin.gz`) — CI can't do this itself (no `EDAX_PATH`/`eval.dat`
   there), so it's a manual step before committing, same as any other
-  `EDAX_PATH`-gated local-only workflow in this repo.
+  `EDAX_PATH`-gated local-only workflow in this repo. Forgetting the
+  `edax_eval.wasm` half now fails loudly:
+  `wasm/edax-eval/js/dist-freshness.test.js` (run by `test.sh` and CI)
+  compares the committed artifact against a fresh build. Regenerating
+  `weights.bin.gz` is *not* covered — nothing in CI has `eval.dat` to
+  compare against.
