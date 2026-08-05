@@ -2,14 +2,17 @@ package api
 
 import "github.com/lk16/flippy/internal/book"
 
-// TargetLevel returns the edax search level to use for a board with discCount discs. The 12-disc
-// boards are searched deepest, since every board below them is backfilled by minimaxing up from their
-// evaluations; boards beyond 12 discs are only ever looked at directly, so they use a shallower level.
+// TargetLevel returns the edax search level to use for a board with discCount discs. Deeper boards
+// get shallower searches to keep evaluation time roughly bounded as the search tree widens.
 func TargetLevel(discCount int) int {
-	if discCount > book.LeafDiscs {
-		return 16
+	switch {
+	case discCount <= 16:
+		return 32
+	case discCount <= 20:
+		return 30
+	default:
+		return 28
 	}
-	return 24
 }
 
 // EffectiveTargetLevel returns the target level for a board at the given disc count, capping at

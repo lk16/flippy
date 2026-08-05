@@ -12,4 +12,4 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /worker /usr/local/bin/worker
-ENTRYPOINT ["/usr/local/bin/worker", "-edax-tasks=1"]
+ENTRYPOINT ["/bin/sh", "-c", "exec /usr/local/bin/worker -edax-tasks=${EDAX_TASKS:-1}"]

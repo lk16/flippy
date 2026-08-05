@@ -232,6 +232,80 @@ func TestHandleSubmitJobResult_BoardNotFound(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
+func TestHandleReleaseJob_AllowsAnotherWorkerToClaim(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+	board := testBoard(t, 12)
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+
+	claimed, err := s.tryClaim(ctx, board.String(), "w1")
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	reqBody := releaseJobRequest{WorkerID: "w1", Board: board.String()}
+	w := doRequest(t, s, http.MethodPost, "/api/jobs/release", reqBody)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	claimed, err = s.tryClaim(ctx, board.String(), "w2")
+	require.NoError(t, err)
+	require.True(t, claimed)
+}
+
+func TestHandleReleaseJob_NoActiveClaimIsNoop(t *testing.T) {
+	s := testServer(t)
+	board := testBoard(t, 12)
+
+	reqBody := releaseJobRequest{WorkerID: "w1", Board: board.String()}
+	w := doRequest(t, s, http.MethodPost, "/api/jobs/release", reqBody)
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestHandleReleaseJob_DoesNotRevokeAnotherWorkersClaim(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+	board := testBoard(t, 12)
+
+	// Simulates w1's claim TTL having expired and w2 winning the re-claim before w1's late release.
+	claimed, err := s.tryClaim(ctx, board.String(), "w1")
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NoError(t, s.releaseClaim(ctx, board.String(), "w1"))
+	claimed, err = s.tryClaim(ctx, board.String(), "w2")
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	reqBody := releaseJobRequest{WorkerID: "w1", Board: board.String()}
+	w := doRequest(t, s, http.MethodPost, "/api/jobs/release", reqBody)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	claimed, err = s.tryClaim(ctx, board.String(), "w3")
+	require.NoError(t, err)
+	require.False(t, claimed, "w2's claim must survive w1's late release")
+}
+
+func TestHandleReleaseJob_InvalidBody(t *testing.T) {
+	s := testServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/release", bytes.NewReader([]byte("not json")))
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandleReleaseJob_MissingWorkerID(t *testing.T) {
+	s := testServer(t)
+	board := testBoard(t, 12)
+	reqBody := releaseJobRequest{Board: board.String()}
+	w := doRequest(t, s, http.MethodPost, "/api/jobs/release", reqBody)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandleReleaseJob_InvalidBoard(t *testing.T) {
+	s := testServer(t)
+	reqBody := releaseJobRequest{WorkerID: "w1", Board: "garbage"}
+	w := doRequest(t, s, http.MethodPost, "/api/jobs/release", reqBody)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
 func TestHandleGetBoard_MissingParam(t *testing.T) {
 	s := testServer(t)
 	w := doRequest(t, s, http.MethodGet, "/api/boards", nil)

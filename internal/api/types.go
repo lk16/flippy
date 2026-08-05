@@ -18,6 +18,12 @@ type jobResultRequest struct {
 	Score      int    `json:"score"`
 }
 
+// releaseJobRequest is the JSON body POSTed to /api/jobs/release.
+type releaseJobRequest struct {
+	WorkerID string `json:"worker_id"`
+	Board    string `json:"board"`
+}
+
 // heartbeatRequest is the JSON body POSTed to /api/workers/heartbeat.
 type heartbeatRequest struct {
 	WorkerID  string `json:"worker_id"`

@@ -21,10 +21,12 @@ type fakeAPIClient struct {
 
 	getJobs         func(ctx context.Context, count int) ([]Job, error)
 	submitJobResult func(ctx context.Context, board string, level int, eval edax.Evaluation) error
+	releaseJob      func(ctx context.Context, board string) error
 	heartbeat       func(ctx context.Context) error
 
 	getJobsCalls   []int
 	submitCalls    []jobResultRequest
+	releaseCalls   []string
 	heartbeatCalls int
 }
 
@@ -42,6 +44,13 @@ func (f *fakeAPIClient) SubmitJobResult(ctx context.Context, board string, level
 	})
 	f.mu.Unlock()
 	return f.submitJobResult(ctx, board, level, eval)
+}
+
+func (f *fakeAPIClient) ReleaseJob(ctx context.Context, board string) error {
+	f.mu.Lock()
+	f.releaseCalls = append(f.releaseCalls, board)
+	f.mu.Unlock()
+	return f.releaseJob(ctx, board)
 }
 
 func (f *fakeAPIClient) Heartbeat(ctx context.Context) error {
@@ -67,6 +76,12 @@ func (f *fakeAPIClient) getJobsCallCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.getJobsCalls)
+}
+
+func (f *fakeAPIClient) releasedBoards() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.releaseCalls...)
 }
 
 // fakeEvaluator is a test double for evaluator.
@@ -230,11 +245,14 @@ func TestWorker_ProcessJob_EvaluateError(t *testing.T) {
 	require.Equal(t, 0, api.submitCallCount())
 }
 
-func TestWorker_ProcessJob_EvaluateErrorDuringShutdownReturnsQuietly(t *testing.T) {
+func TestWorker_ProcessJob_EvaluateErrorDuringShutdownReleasesClaimInsteadOfSubmitting(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	api := &fakeAPIClient{}
+	board := othello.NewBoardStart().String()
+	api := &fakeAPIClient{
+		releaseJob: func(context.Context, string) error { return nil },
+	}
 	eval := &fakeEvaluator{
 		// Simulates the edax process having been killed by a concurrent
 		// shutdown while Evaluate was blocked on it.
@@ -244,9 +262,10 @@ func TestWorker_ProcessJob_EvaluateErrorDuringShutdownReturnsQuietly(t *testing.
 	}
 	w := testWorker(api, eval)
 
-	w.processJob(ctx, Job{Board: othello.NewBoardStart().String(), Level: 24})
+	w.processJob(ctx, Job{Board: board, Level: 24})
 
 	require.Equal(t, 0, api.submitCallCount())
+	require.Equal(t, []string{board}, api.releasedBoards())
 }
 
 func TestWorker_ProcessJob_SubmitError(t *testing.T) {
@@ -262,6 +281,38 @@ func TestWorker_ProcessJob_SubmitError(t *testing.T) {
 
 	// SubmitJobResult was attempted (and recorded) even though it failed.
 	require.Equal(t, 1, api.submitCallCount())
+}
+
+// --- releaseQueuedJobs ---
+
+func TestWorker_ReleaseQueuedJobs_ReleasesEveryQueuedJob(t *testing.T) {
+	var released []string
+	api := &fakeAPIClient{
+		releaseJob: func(_ context.Context, board string) error {
+			released = append(released, board)
+			return nil
+		},
+	}
+	w := testWorker(api, &fakeEvaluator{})
+	w.jobs <- Job{Board: "board-a", Level: 16}
+	w.jobs <- Job{Board: "board-b", Level: 16}
+
+	w.releaseQueuedJobs()
+
+	require.ElementsMatch(t, []string{"board-a", "board-b"}, released)
+	require.Empty(t, w.jobs)
+}
+
+func TestWorker_ReleaseQueuedJobs_EmptyQueueIsNoop(t *testing.T) {
+	api := &fakeAPIClient{
+		releaseJob: func(context.Context, string) error {
+			t.Fatal("ReleaseJob must not be called for an empty queue")
+			return nil
+		},
+	}
+	w := testWorker(api, &fakeEvaluator{})
+
+	w.releaseQueuedJobs()
 }
 
 // --- runOneJob (dequeueJob + processJob wired together) ---
@@ -464,6 +515,64 @@ func TestWorker_Run_SendsHeartbeats(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return api.heartbeatCallCount() >= 3
 	}, time.Second, time.Millisecond)
+}
+
+func TestWorker_Run_ReleasesQueuedJobsOnShutdown(t *testing.T) {
+	board := othello.NewBoardStart().String()
+
+	// evaluate blocks until the test cancels ctx, simulating a worker mid-search on the one job it's
+	// actively processing while the rest of its prefetched batch sits untouched in the queue.
+	evaluating := make(chan struct{})
+	unblock := make(chan struct{})
+	eval := &fakeEvaluator{
+		evaluate: func(othello.Board, int) (edax.Evaluation, error) {
+			close(evaluating)
+			<-unblock
+			return edax.Evaluation{}, errors.New("process killed")
+		},
+	}
+
+	var released []string
+	var mu sync.Mutex
+	api := &fakeAPIClient{
+		getJobs: func(context.Context, int) ([]Job, error) {
+			return []Job{{Board: board, Level: 16}, {Board: board, Level: 16}, {Board: board, Level: 16}}, nil
+		},
+		heartbeat: func(context.Context) error { return nil },
+		releaseJob: func(_ context.Context, board string) error {
+			mu.Lock()
+			released = append(released, board)
+			mu.Unlock()
+			return nil
+		},
+	}
+	w := testWorker(api, eval)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		w.Run(ctx)
+		close(done)
+	}()
+
+	<-evaluating
+	cancel()
+	close(unblock)
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not stop after context cancellation")
+	}
+
+	// 1 job was being evaluated (released via processJob's shutdown branch) and up to 2 more were
+	// still sitting in the queue (released via releaseQueuedJobs); jobBatchSize is 3 in testWorker.
+	mu.Lock()
+	defer mu.Unlock()
+	require.NotEmpty(t, released)
+	for _, b := range released {
+		require.Equal(t, board, b)
+	}
 }
 
 func TestWorker_Run_EvaluatesAndSubmitsJobsFromRefill(t *testing.T) {

@@ -158,6 +158,26 @@ func TestClient_Heartbeat_Success(t *testing.T) {
 	require.NoError(t, client.Heartbeat(context.Background()))
 }
 
+func TestClient_ReleaseJob_AllowsAnotherWorkerToClaimIt(t *testing.T) {
+	client1, repo := testClient(t, "w1")
+	client2 := NewClient(client1.baseURL, "w2", "test-host", "test-commit")
+	ctx := context.Background()
+
+	board := testBoard(t, 12)
+	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+
+	jobs, err := client1.GetJobs(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+
+	require.NoError(t, client1.ReleaseJob(ctx, jobs[0].Board))
+
+	jobs2, err := client2.GetJobs(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, jobs2, 1)
+	require.Equal(t, jobs[0].Board, jobs2[0].Board)
+}
+
 // testDistinctClientBoards returns n distinct NormalizedBoards with exactly
 // discs discs, found via breadth-first search from the starting position.
 func testDistinctClientBoards(t *testing.T, discs, n int) []othello.NormalizedBoard {

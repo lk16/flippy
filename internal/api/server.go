@@ -29,6 +29,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/jobs", s.handleGetJob)
 	mux.HandleFunc("POST /api/jobs/result", s.handleSubmitJobResult)
+	mux.HandleFunc("POST /api/jobs/release", s.handleReleaseJob)
 	mux.HandleFunc("GET /api/boards", s.handleGetBoard)
 	mux.HandleFunc("POST /api/workers/heartbeat", s.handleHeartbeat)
 	mux.HandleFunc("GET /api/workers", s.handleListWorkers)
