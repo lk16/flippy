@@ -202,6 +202,41 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// handleReleaseJob handles POST /api/jobs/release: releases a worker's claim on a board it didn't
+// finish (e.g. a graceful shutdown with the job still queued or in flight), so another worker can pick
+// it up without waiting out claimTTL.
+func (s *Server) handleReleaseJob(w http.ResponseWriter, r *http.Request) {
+	var req releaseJobRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid request body: %w", err))
+		return
+	}
+
+	if req.WorkerID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("missing worker_id"))
+		return
+	}
+
+	board, err := othello.ParseBoard(req.Board)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid board: %w", err))
+		return
+	}
+
+	normalized, err := othello.NewNormalizedBoard(board)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("board must be normalized: %w", err))
+		return
+	}
+
+	if err := s.releaseClaim(r.Context(), normalized.String(), req.WorkerID); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 // lookupEvaluation returns board's evaluation from the DB, minimax cache, or ephemeral analysis
 // cache; ok is false if none has a real (learned) result.
 func (s *Server) lookupEvaluation(ctx context.Context, board othello.Board) (evaluationResponse, bool, error) {

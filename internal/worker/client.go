@@ -101,6 +101,18 @@ func (c *Client) SubmitJobResult(ctx context.Context, board string, level int, e
 	return c.post(ctx, "/api/jobs/result", body)
 }
 
+// releaseJobRequest is the JSON body POSTed to /api/jobs/release.
+type releaseJobRequest struct {
+	WorkerID string `json:"worker_id"`
+	Board    string `json:"board"`
+}
+
+// ReleaseJob releases this worker's claim on board without submitting a result, e.g. when shutting
+// down with the job still queued or in flight, so another worker doesn't have to wait out claimTTL.
+func (c *Client) ReleaseJob(ctx context.Context, board string) error {
+	return c.post(ctx, "/api/jobs/release", releaseJobRequest{WorkerID: c.workerID, Board: board})
+}
+
 // heartbeatRequest is the JSON body POSTed to /api/workers/heartbeat.
 type heartbeatRequest struct {
 	WorkerID  string `json:"worker_id"`

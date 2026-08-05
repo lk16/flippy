@@ -25,12 +25,17 @@ const (
 
 	// defaultStatsInterval is how often throughput (boards/sec, sec/board since start) is logged.
 	defaultStatsInterval = 10 * time.Second
+
+	// releaseTimeout bounds a best-effort claim release on shutdown, run against a fresh context since
+	// Run's ctx is already canceled by the time it happens.
+	releaseTimeout = 5 * time.Second
 )
 
 // apiClient is the subset of Client's behavior Worker depends on, so tests can inject a fake.
 type apiClient interface {
 	GetJobs(ctx context.Context, count int) ([]Job, error)
 	SubmitJobResult(ctx context.Context, board string, level int, eval edax.Evaluation) error
+	ReleaseJob(ctx context.Context, board string) error
 	Heartbeat(ctx context.Context) error
 }
 
@@ -101,6 +106,30 @@ func (w *Worker) Run(ctx context.Context) {
 	}()
 
 	wg.Wait()
+
+	w.releaseQueuedJobs()
+}
+
+// releaseQueuedJobs releases claims for jobs still sitting in the local prefetch queue once Run's
+// loops have all stopped, so a shutdown doesn't leave them claimed until claimTTL naturally expires.
+func (w *Worker) releaseQueuedJobs() {
+	for {
+		select {
+		case job := <-w.jobs:
+			w.releaseJob(job.Board)
+		default:
+			return
+		}
+	}
+}
+
+// releaseJob best-effort releases this worker's claim on board.
+func (w *Worker) releaseJob(board string) {
+	ctx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
+	defer cancel()
+	if err := w.api.ReleaseJob(ctx, board); err != nil {
+		slog.Warn("failed to release job claim", "board", board, "error", err)
+	}
 }
 
 // runStats logs cumulative throughput (boards/sec and sec/board since start) every statsInterval,
@@ -249,7 +278,9 @@ func (w *Worker) processJob(ctx context.Context, job Job) {
 	eval, err := w.edax.Evaluate(board, job.Level)
 	if err != nil {
 		if ctx.Err() != nil {
-			// Shutdown closed the edax process mid-evaluation.
+			// Shutdown closed the edax process mid-evaluation; release rather than leaving the claim
+			// to expire via claimTTL.
+			w.releaseJob(job.Board)
 			return
 		}
 		slog.Error("failed to evaluate job", "error", err)
