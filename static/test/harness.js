@@ -74,6 +74,8 @@ function buildGame(boardStrings, { complete = true } = {}) {
   game.edaxWorkerPool = null;
   game._pendingLocalEvals = new Set();
   game._localEvalRenderPending = false;
+  game._localEvalBoardKey = null;
+  game._localEvalGeneration = 0;
 
   // Mirror pgnBuildChildSets(): children of each valid-move board, [] for pass/game-over.
   game.pgnChildrenByPly = game.pgnBoards.map((b) =>
@@ -123,6 +125,8 @@ function buildNormalGame(board = new OthelloBoard()) {
   game.pendingLevelRequests = new Map();
   game._pendingLocalEvals = new Set();
   game._localEvalRenderPending = false;
+  game._localEvalBoardKey = null;
+  game._localEvalGeneration = 0;
   game.edaxWorkerPool = null;
   // No-op by default; tests that need to inspect outgoing requests replace this.
   game.wsClient = { requestEvaluations() {}, sendEvent() {} };

@@ -31,6 +31,9 @@ trap cleanup EXIT
 # and fail fast (set -e aborts on a non-zero exit) before spinning up containers.
 echo "Running JS tests…"
 node static/test/run.js
+# EdaxEvalWorkerPool's scheduler (fake workers, no wasm module needed — unlike
+# wasm/edax-eval/js/edax-eval.test.js further down, which wants a built .wasm).
+node wasm/edax-eval/js/pool.test.js
 
 # Rust unit tests (wasm/edax-eval/). Also need no infrastructure, so run them
 # here too, before the Docker compose stack comes up.

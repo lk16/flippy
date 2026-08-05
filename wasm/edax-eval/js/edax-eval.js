@@ -109,19 +109,40 @@ class EdaxEval {
     }
 }
 
+// CANCELLED_MESSAGE is the rejection message cancelQueued() gives a dropped task, so callers can
+// tell "this position stopped mattering" apart from a real evaluation failure.
+const CANCELLED_MESSAGE = 'edax-eval: evaluation cancelled';
+
 // EdaxEvalWorkerPool manages N Web Worker instances each running one wasm/edax-eval instance.
 // Workers evaluate boards concurrently -- one active evaluation per worker -- so the main thread
-// never blocks on WASM. Each worker loads the wasm module and weights independently; the pool
-// dispatches requests round-robin and returns a Promise per call.
+// never blocks on WASM. Each worker loads the wasm module and weights independently.
+//
+// The pool owns its backlog rather than posting every request straight to a worker: a task waits
+// in this._queue until a worker is free, so *ordering stays changeable up to the moment a search
+// starts*. That is what makes evaluate()'s `priority` meaningful -- a cheap shallow search queued
+// later still runs before an expensive deep one queued earlier (a level-4 search costs well under
+// a millisecond, a level-10 one tens to hundreds), which is how the caller keeps a score on screen
+// for every move while deeper refinement continues in the background.
 //
 // Worker script (edax-eval-worker.js) must live beside this file, served at the same URL prefix.
-// Not available in Node (Web Worker API doesn't exist there) -- never imported by the test harness.
 class EdaxEvalWorkerPool {
-    constructor(workerUrl, wasmUrl, weightsUrl, numWorkers) {
+    // options.fastLaneMaxLevel: when set (and numWorkers > 1), worker 0 becomes a fast lane that
+    // accepts only tasks at or below this level, staying *idle* rather than picking up a deeper
+    // one. Priority alone can't bound how long a shallow search waits -- every worker may already
+    // be mid-search on a level-10 board, and a running wasm search can't be interrupted -- so
+    // without a reserved lane "show a number immediately" would still mean "in up to a second".
+    // The cost is one worker's worth of deep-search throughput.
+    //
+    // options.createWorker: injection point for tests (no Worker API in Node); defaults to the
+    // real thing.
+    constructor(workerUrl, wasmUrl, weightsUrl, numWorkers, options = {}) {
+        const { fastLaneMaxLevel = null, createWorker = (url) => new Worker(url) } = options;
         this._numWorkers = numWorkers;
+        this._fastLaneMaxLevel = numWorkers > 1 ? fastLaneMaxLevel : null;
         this._nextId = 0;
-        this._nextWorker = 0;
-        this._pending = new Map(); // id -> { resolve, reject }
+        this._queue = []; // accepted but not yet started, in arrival order
+        this._busy = new Array(numWorkers).fill(false);
+        this._pending = new Map(); // id -> { resolve, reject, workerIndex }
         this._readyCount = 0;
         this._readyResolve = null;
         this._readyReject = null;
@@ -130,7 +151,7 @@ class EdaxEvalWorkerPool {
             this._readyReject = reject;
         });
         this._workers = Array.from({ length: numWorkers }, () => {
-            const w = new Worker(workerUrl);
+            const w = createWorker(workerUrl);
             w.onmessage = ({ data: msg }) => this._onMessage(msg);
             w.onerror = (err) => console.error('edax-eval worker error:', err);
             w.postMessage({ type: 'load', wasmUrl, weightsUrl });
@@ -144,37 +165,88 @@ class EdaxEvalWorkerPool {
     }
 
     // Evaluates one board asynchronously. player/opponent are BigInt mover-relative bitboards.
-    // Returns a Promise<number> (the score from player's POV). Dispatches to the next worker in
-    // round-robin order -- the browser's worker message queue buffers any backlog automatically.
-    evaluate(player, opponent, level) {
+    // Returns a Promise<number> (the score from player's POV).
+    //
+    // options.priority: lower numbers start first; equal priorities start in arrival order.
+    // options.tag: opaque value handed back to cancelQueued()'s predicate, for dropping this
+    // task later if it stops being worth running.
+    evaluate(player, opponent, level, options = {}) {
+        const { priority = 0, tag = null } = options;
         return new Promise((resolve, reject) => {
-            const id = this._nextId++;
-            this._pending.set(id, { resolve, reject });
-            this._workers[this._nextWorker].postMessage({ type: 'evaluate', id, player, opponent, level });
-            this._nextWorker = (this._nextWorker + 1) % this._numWorkers;
+            this._queue.push({ id: this._nextId++, player, opponent, level, priority, tag, resolve, reject });
+            this._dispatch();
         });
+    }
+
+    // cancelQueued drops every queued task whose tag satisfies shouldDrop(tag), rejecting its
+    // promise with CANCELLED_MESSAGE. Tasks already running are left alone -- a wasm search runs
+    // to completion inside its worker and cannot be interrupted -- so they still resolve normally.
+    cancelQueued(shouldDrop) {
+        const kept = [];
+        const dropped = [];
+        for (const task of this._queue) (shouldDrop(task.tag) ? dropped : kept).push(task);
+        this._queue = kept;
+        for (const task of dropped) task.reject(new Error(CANCELLED_MESSAGE));
+    }
+
+    // _dispatch hands each idle worker the best task it is allowed to run, if any.
+    _dispatch() {
+        for (let i = 0; i < this._numWorkers && this._queue.length > 0; i++) {
+            if (this._busy[i]) continue;
+            const task = this._takeTaskFor(i);
+            if (!task) continue;
+            this._busy[i] = true;
+            this._pending.set(task.id, { resolve: task.resolve, reject: task.reject, workerIndex: i });
+            this._workers[i].postMessage({
+                type: 'evaluate',
+                id: task.id,
+                player: task.player,
+                opponent: task.opponent,
+                level: task.level,
+            });
+        }
+    }
+
+    // _takeTaskFor removes and returns the task worker i should run next, or null if the queue
+    // holds nothing it may run. Scanning in arrival order and replacing only on a *strictly*
+    // lower priority number keeps equal priorities FIFO.
+    _takeTaskFor(workerIndex) {
+        const fastLaneOnly = workerIndex === 0 && this._fastLaneMaxLevel !== null;
+        let best = -1;
+        for (let j = 0; j < this._queue.length; j++) {
+            if (fastLaneOnly && this._queue[j].level > this._fastLaneMaxLevel) continue;
+            if (best === -1 || this._queue[j].priority < this._queue[best].priority) best = j;
+        }
+        return best === -1 ? null : this._queue.splice(best, 1)[0];
     }
 
     _onMessage(msg) {
         if (msg.type === 'ready') {
             this._readyCount++;
             if (this._readyCount === this._numWorkers) this._readyResolve();
-        } else if (msg.type === 'load_error') {
-            this._readyReject(new Error(msg.error));
-        } else if (msg.type === 'result') {
-            const p = this._pending.get(msg.id);
-            if (p) { this._pending.delete(msg.id); p.resolve(msg.score); }
-        } else if (msg.type === 'error') {
-            const p = this._pending.get(msg.id);
-            if (p) { this._pending.delete(msg.id); p.reject(new Error(msg.error)); }
+            return;
         }
+        if (msg.type === 'load_error') {
+            this._readyReject(new Error(msg.error));
+            return;
+        }
+        const p = this._pending.get(msg.id);
+        if (!p) return;
+        this._pending.delete(msg.id);
+        this._busy[p.workerIndex] = false;
+        if (msg.type === 'result') {
+            p.resolve(msg.score);
+        } else if (msg.type === 'error') {
+            p.reject(new Error(msg.error));
+        }
+        this._dispatch();
     }
 }
 
 // In the browser (loaded via <script>) EdaxEval/EdaxEvalWorkerPool are just globals. Under Node
-// (e.g. this directory's test harness) `module` exists; export EdaxEval there instead, matching
-// static/board.js's/static/test's own dual-mode convention. EdaxEvalWorkerPool is browser-only
-// (no Worker API in Node) so it is not exported, and the test harness never touches it.
+// (e.g. this directory's test harness) `module` exists; export them there instead, matching
+// static/board.js's/static/test's own dual-mode convention. EdaxEvalWorkerPool needs no Worker
+// API under Node as long as tests pass options.createWorker (see pool.test.js).
 if (typeof module !== 'undefined') {
-    module.exports = { EdaxEval };
+    module.exports = { EdaxEval, EdaxEvalWorkerPool, CANCELLED_MESSAGE };
 }

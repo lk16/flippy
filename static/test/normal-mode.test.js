@@ -21,17 +21,23 @@ function recordingWsClient() {
   };
 }
 
-// recordingWorkerPool mimics EdaxEvalWorkerPool.evaluate's signature, recording every dispatched
-// (player, opponent, level) without ever resolving, so a test can see exactly which boards the
-// local wasm chain was asked for. bitsOf() below maps a board string to the same key.
+// recordingWorkerPool mimics EdaxEvalWorkerPool's evaluate/cancelQueued signatures, recording
+// every dispatched (player, opponent, level, options) without ever resolving, so a test can see
+// exactly which boards the local wasm chain was asked for and at what priority. bitsOf() below
+// maps a board string to the same key.
 function recordingWorkerPool() {
   const calls = [];
+  const cancelled = [];
   return {
     calls,
+    cancelled,
     keys: () => new Set(calls.map((c) => `${c.player}:${c.opponent}`)),
-    evaluate(player, opponent, level) {
-      calls.push({ player, opponent, level });
+    evaluate(player, opponent, level, options = {}) {
+      calls.push({ player, opponent, level, ...options });
       return new Promise(() => {});
+    },
+    cancelQueued(shouldDrop) {
+      cancelled.push(shouldDrop);
     },
   };
 }
@@ -72,7 +78,7 @@ test('requestMissingEvaluations: off-book children skip server requests entirely
   const game = buildNormalGame();
   game.levelConfig.maxSavableDiscs = 4; // starting position's children (5 discs) are now off-book
   game.wsClient = recordingWsClient();
-  game.edaxWorkerPool = { evaluate: () => new Promise(() => {}) };
+  game.edaxWorkerPool = recordingWorkerPool();
 
   game.requestMissingEvaluations(game.board);
 
