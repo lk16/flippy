@@ -161,6 +161,12 @@
     pointer-events: none;
 }
 
+/* A score still being refined by the local wasm evaluator (see LOCAL_EVAL_LEVELS in board.js):
+   shown immediately, but visibly provisional until a deeper search replaces it. */
+.score-display.provisional {
+    opacity: 0.55;
+}
+
 .black-turn .score-display {
     color: var(--black-piece);
 }

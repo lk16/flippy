@@ -1,9 +1,11 @@
 const BITBOARD_MASK = 0xFFFFFFFFFFFFFFFFn;
 
 // LOCAL_EVAL_LEVELS: incremental depths queueLocalEvaluations searches through, in order, for
-// each off-book board. Evaluating at 4 first (fast) and refining through 6, 8, then 10 (the
-// server's PriorityLevel) lets the UI show a rough score immediately and sharpen it in place as
-// deeper searches finish, rather than blocking on the level-10 result before showing anything.
+// each board the server hasn't evaluated yet. Evaluating at 4 first (sub-millisecond, so every
+// child shows a score as good as immediately) and refining through 6, 8, then 10 (the server's
+// PriorityLevel) lets the UI show a rough score right away and sharpen it in place as deeper
+// searches finish, rather than blocking on the level-10 result -- which costs a few hundred
+// milliseconds per board -- before showing anything.
 const LOCAL_EVAL_LEVELS = [4, 6, 8, 10];
 
 // WebSocketClient batches evaluation lookups over a persistent connection, auto-reconnecting on
@@ -353,9 +355,11 @@ class OthelloGame {
         this.levelConfig = null;        // fetched from /api/level-config
         this.pendingLevelRequests = new Map(); // board -> highest level we have requested
 
-        // Client-side fallback evaluator for positions beyond levelConfig.maxSavableDiscs (see
-        // internal/book.MaxSavableDiscs). Uses a pool of Web Workers, each running the WASM
-        // module off the main thread so evaluations never block the browser UI.
+        // Client-side evaluator for every child the server hasn't answered for yet -- both
+        // positions beyond levelConfig.maxSavableDiscs (see internal/book.MaxSavableDiscs), which
+        // the server never evaluates at all, and on-book ones whose server evaluation is still
+        // being computed. Uses a pool of Web Workers, each running the WASM module off the main
+        // thread so evaluations never block the browser UI.
         this.edaxWorkerPool = null;
         this._pendingLocalEvals = new Set(); // boardStrs queued to workers but not yet resolved
         this._localEvalRenderPending = false; // rAF batching flag for worker result renders
@@ -441,9 +445,10 @@ class OthelloGame {
 
     // shouldUpdateEval returns true when incoming should replace existing in the evaluations map.
     // Minimax/final results are never downgraded to edax; among edax results, higher level wins.
-    // 'wasm' (computeLocalEvaluations' client-side fallback) is the lowest priority: it only ever
-    // fills a blank, and any server-sourced result -- which only arrives for on-book positions, so
-    // this is mostly hypothetical -- always supersedes it.
+    // 'wasm' (queueLocalEvaluations' client-side stand-in) is the lowest priority: it only ever
+    // fills a blank, and any server-sourced result always supersedes it -- which is the normal
+    // course of events for an on-book position, whose wasm score is only shown until the server
+    // finishes analyzing it.
     shouldUpdateEval(existing, incoming) {
         if (!existing) return true;
         if (incoming.source === 'wasm') return false;
@@ -625,6 +630,15 @@ class OthelloGame {
         }
     }
 
+    // needsServerEvaluation reports whether boardStr still wants an evaluation from the server. A
+    // wasm score counts as missing here, not as an answer: it is a local stand-in shown while the
+    // server's deeper, book-quality evaluation is still being computed, so it must not stop
+    // requestMissingEvaluations from asking or startEvalPolling from waiting for the real one.
+    needsServerEvaluation(boardStr) {
+        const e = this.evaluations.get(boardStr);
+        return !e || e.source === 'wasm';
+    }
+
     // hasUnresolvedEvaluations reports whether board's children or grandchildren are missing an
     // on-book evaluation -- i.e. one requestServerAnalysis can ask the server to compute. Off-book
     // boards are excluded: those are handled by queueLocalEvaluations' wasm chain, which needs no
@@ -635,7 +649,7 @@ class OthelloGame {
             seen.add(child.normalize().toString());
             for (const grandchild of child.getChildren()) seen.add(grandchild.normalize().toString());
         }
-        const missing = [...seen].filter((b) => !this.evaluations.has(b));
+        const missing = [...seen].filter((b) => this.needsServerEvaluation(b));
         const [onBook] = this.splitOffBook(missing);
         return onBook.length > 0;
     }
@@ -671,7 +685,7 @@ class OthelloGame {
         }
     }
 
-    // splitOffBook partitions boardStrs into [onBook, offBook]: offBook holds positions beyond
+    // splitOffBook partitions boardStrs into [onBook, offBook] for *server* requests: offBook holds positions beyond
     // levelConfig.maxSavableDiscs, which the server never persists or evaluates (see
     // internal/book.MaxSavableDiscs) -- those must be evaluated locally instead of requested over
     // the websocket. Returns [boardStrs, []] unchanged while levelConfig hasn't loaded yet, so
@@ -756,17 +770,28 @@ class OthelloGame {
 
     requestMissingEvaluations(board) {
         if (!this.evalMode) return;
-        const missing = [...new Set(
-            board.getChildren()
-                .map((child) => child.normalize().toString())
-                .filter((b) => !this.evaluations.has(b)),
-        )];
-        const [onBook, offBook] = this.splitOffBook(missing);
+        const children = [...new Set(board.getChildren().map((child) => child.normalize().toString()))];
+
+        const [onBook] = this.splitOffBook(children.filter((b) => this.needsServerEvaluation(b)));
         this.requestServerAnalysis(onBook);
-        this.queueLocalEvaluations(offBook);
+
+        // Every child the server hasn't answered for goes to the local wasm chain, on-book or
+        // not: an on-book position the book hasn't explored yet takes the server seconds to
+        // minutes (analyze_request only enqueues a job), and a level-4 local search costs well
+        // under a millisecond, so there is no reason to show nothing in the meantime.
+        // queueLocalEvaluations skips whatever already has an evaluation or is already queued.
+        this.queueLocalEvaluations(children);
     }
 
     // Prefetch evaluations for grandchildren so they are cached before the user clicks a move.
+    //
+    // Unlike requestMissingEvaluations, on-book grandchildren are not handed to the wasm chain:
+    // there are an order of magnitude more of them than children, none of them is on screen, and
+    // the worker pool is FIFO -- queueing them would push the visible children's level-4 results
+    // behind ~100 invisible searches. Off-book grandchildren still go local, since for those the
+    // server is not an option at all. Whichever grandchildren the user actually navigates to
+    // become children, and requestMissingEvaluations queues them then (level 4 is sub-millisecond,
+    // so there is nothing to gain from precomputing it).
     requestGrandchildrenEvaluations(board) {
         if (!this.evalMode) return;
         const seen = new Set();
@@ -774,7 +799,7 @@ class OthelloGame {
         for (const child of board.getChildren()) {
             for (const grandchild of child.getChildren()) {
                 const key = grandchild.normalize().toString();
-                if (!seen.has(key) && !this.evaluations.has(key)) {
+                if (!seen.has(key) && this.needsServerEvaluation(key)) {
                     seen.add(key);
                     missing.push(key);
                 }
@@ -842,6 +867,12 @@ class OthelloGame {
         if (!this.evalMode) return;
         let bestScore = -Infinity;
         const moveEvaluations = new Map();
+        // Moves whose score is a wasm result that hasn't finished refining -- i.e. a deeper
+        // search (local or server) is still expected to change it. A completed local chain
+        // (LOCAL_EVAL_LEVELS' last level) is not marked: for an off-book board that is the final
+        // answer, since the server never evaluates those at all.
+        const provisionalMoves = new Set();
+        const deepestLocalLevel = LOCAL_EVAL_LEVELS[LOCAL_EVAL_LEVELS.length - 1];
         let haveAllEvaluations = true;
 
         for (let index = 0; index < 64; index++) {
@@ -857,6 +888,9 @@ class OthelloGame {
             const score = -evaluation.score;
             bestScore = Math.max(bestScore, score);
             moveEvaluations.set(index, score);
+            if (evaluation.source === 'wasm' && (evaluation.level || 0) < deepestLocalLevel) {
+                provisionalMoves.add(index);
+            }
         }
 
         document.querySelectorAll('.cell').forEach((cell) => {
@@ -877,6 +911,9 @@ class OthelloGame {
                 cell.appendChild(scoreDisplay);
             }
             scoreDisplay.textContent = score > 0 ? `+${score}` : `${score}`;
+            // Dim scores that are still the local wasm stand-in, so a provisional shallow score
+            // is visibly distinct from one the server (or a completed local chain) stands behind.
+            scoreDisplay.classList.toggle('provisional', provisionalMoves.has(index));
 
             if (haveAllEvaluations && score === bestScore) {
                 const circle = document.createElement('div');

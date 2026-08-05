@@ -4,6 +4,10 @@
 // (evaluation_request) -- otherwise a position outside the pre-explored book never gets evaluated,
 // since nothing else ever enqueues it. Off-book positions still go to the local wasm chain and
 // need no server request or polling at all.
+//
+// The children of the current board additionally *always* go to the local wasm chain while the
+// server hasn't answered for them, on-book or not: that is what puts a score under every legal
+// move immediately instead of after the server's (seconds-to-minutes) analysis.
 const assert = require('node:assert');
 const { test } = require('./framework');
 const { buildNormalGame, OthelloBoard } = require('./harness');
@@ -15,6 +19,30 @@ function recordingWsClient() {
     requestEvaluations(boards) { if (boards.length) sent.push({ event: 'evaluation_request', boards }); },
     sendEvent(event, boards, level) { if (boards.length) sent.push({ event, boards, level }); },
   };
+}
+
+// recordingWorkerPool mimics EdaxEvalWorkerPool.evaluate's signature, recording every dispatched
+// (player, opponent, level) without ever resolving, so a test can see exactly which boards the
+// local wasm chain was asked for. bitsOf() below maps a board string to the same key.
+function recordingWorkerPool() {
+  const calls = [];
+  return {
+    calls,
+    keys: () => new Set(calls.map((c) => `${c.player}:${c.opponent}`)),
+    evaluate(player, opponent, level) {
+      calls.push({ player, opponent, level });
+      return new Promise(() => {});
+    },
+  };
+}
+
+function bitsOf(boardStr) {
+  const b = OthelloBoard.fromString(boardStr);
+  return `${b.playerBits}:${b.opponentBits}`;
+}
+
+function childStrings(board) {
+  return [...new Set(board.getChildren().map((c) => c.normalize().toString()))];
 }
 
 test('requestMissingEvaluations: sends both evaluation_request and analyze_request for an unexplored on-book position', () => {
@@ -49,6 +77,49 @@ test('requestMissingEvaluations: off-book children skip server requests entirely
   game.requestMissingEvaluations(game.board);
 
   assert.equal(game.wsClient.sent.length, 0, 'no evaluation_request or analyze_request for off-book boards');
+});
+
+test('requestMissingEvaluations: on-book children go to the local wasm chain too, at level 4 first', () => {
+  const game = buildNormalGame();
+  game.wsClient = recordingWsClient();
+  const pool = recordingWorkerPool();
+  game.edaxWorkerPool = pool;
+
+  game.requestMissingEvaluations(game.board);
+
+  const expected = new Set(childStrings(game.board).map(bitsOf));
+  assert.deepEqual(pool.keys(), expected, 'every child is queued locally, not just off-book ones');
+  assert.ok(pool.calls.every((c) => c.level === 4), 'each chain starts at the shallowest level');
+  assert.ok(
+    game.wsClient.sent.some((m) => m.event === 'analyze_request'),
+    'the server is still asked for the real evaluation',
+  );
+});
+
+test('requestGrandchildrenEvaluations: on-book grandchildren are not queued locally', () => {
+  const game = buildNormalGame();
+  game.wsClient = recordingWsClient();
+  const pool = recordingWorkerPool();
+  game.edaxWorkerPool = pool;
+
+  game.requestGrandchildrenEvaluations(game.board);
+
+  assert.equal(pool.calls.length, 0, 'invisible on-book grandchildren must not delay the visible children');
+});
+
+test('requestMissingEvaluations: a wasm score does not count as the server having answered', () => {
+  const game = buildNormalGame();
+  game.wsClient = recordingWsClient();
+  for (const key of childStrings(game.board)) {
+    game.evaluations.set(key, { board: key, score: 0, source: 'wasm', level: 4 });
+  }
+
+  game.requestMissingEvaluations(game.board);
+
+  const anReq = game.wsClient.sent.find((m) => m.event === 'analyze_request');
+  assert.ok(anReq, 'the server is still asked to compute a board that only has a local wasm score');
+  assert.deepEqual(new Set(anReq.boards), new Set(childStrings(game.board)));
+  assert.ok(game.hasUnresolvedEvaluations(game.board), 'polling keeps waiting for the server result');
 });
 
 test('requestMissingEvaluations: does not re-request boards that already have an evaluation', () => {
