@@ -45,6 +45,17 @@ is required — pick items up when a real need appears.
   [playwright-e2e-prep.md](playwright-e2e-prep.md) lists what the host has
   to prepare first, since the sandbox can't reach npm or Playwright's CDN.
 
+## Frontend
+
+- **PGN review doesn't use the local wasm evaluator.** Normal play falls
+  back to `queueLocalEvaluations` for every child the server hasn't
+  answered for, so a score appears under each move right away; PGN review
+  still shows blanks until the server answers, and shows nothing at all
+  past `MaxSavableDiscs` (30) discs, where the server never evaluates.
+  Wiring it up is not just a call to `queueLocalEvaluations`: the same
+  evaluations feed the score graph, `pgnUnresolved`/`isAtTarget` and the
+  level-up chain, all of which treat an evaluation as the server's answer.
+
 ## Build artifacts
 
 - **`wasm/edax-eval/dist/`** (`edax_eval.wasm`, `weights.bin.gz`,
