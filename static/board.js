@@ -867,12 +867,6 @@ class OthelloGame {
         if (!this.evalMode) return;
         let bestScore = -Infinity;
         const moveEvaluations = new Map();
-        // Moves whose score is a wasm result that hasn't finished refining -- i.e. a deeper
-        // search (local or server) is still expected to change it. A completed local chain
-        // (LOCAL_EVAL_LEVELS' last level) is not marked: for an off-book board that is the final
-        // answer, since the server never evaluates those at all.
-        const provisionalMoves = new Set();
-        const deepestLocalLevel = LOCAL_EVAL_LEVELS[LOCAL_EVAL_LEVELS.length - 1];
         let haveAllEvaluations = true;
 
         for (let index = 0; index < 64; index++) {
@@ -888,9 +882,6 @@ class OthelloGame {
             const score = -evaluation.score;
             bestScore = Math.max(bestScore, score);
             moveEvaluations.set(index, score);
-            if (evaluation.source === 'wasm' && (evaluation.level || 0) < deepestLocalLevel) {
-                provisionalMoves.add(index);
-            }
         }
 
         document.querySelectorAll('.cell').forEach((cell) => {
@@ -911,9 +902,6 @@ class OthelloGame {
                 cell.appendChild(scoreDisplay);
             }
             scoreDisplay.textContent = score > 0 ? `+${score}` : `${score}`;
-            // Dim scores that are still the local wasm stand-in, so a provisional shallow score
-            // is visibly distinct from one the server (or a completed local chain) stands behind.
-            scoreDisplay.classList.toggle('provisional', provisionalMoves.has(index));
 
             if (haveAllEvaluations && score === bestScore) {
                 const circle = document.createElement('div');
