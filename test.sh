@@ -47,6 +47,9 @@ cargo test --manifest-path wasm/edax-eval/Cargo.toml --release
 # Cargo.toml).
 cargo build --manifest-path wasm/edax-eval/Cargo.toml --target wasm32-unknown-unknown --lib --release
 node wasm/edax-eval/js/edax-eval.test.js
+# Checks the checked-in dist/edax_eval.wasm (what the browser actually gets) against that fresh
+# build -- nothing else in this suite would notice dist/ going stale.
+node wasm/edax-eval/js/dist-freshness.test.js
 
 docker compose -f "$COMPOSE_FILE" up -d --wait
 

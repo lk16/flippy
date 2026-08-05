@@ -46,6 +46,9 @@ jobs:
         with:
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: Check cargo fmt
         run: cargo fmt --manifest-path wasm/edax-eval/Cargo.toml -- --check
       - name: Run clippy
@@ -57,6 +60,12 @@ jobs:
         # --lib: the extract_weights bin tool is a native-only offline tool (needs flate2, which
         # is scoped out of wasm32 builds -- see Cargo.toml) and was never meant to target wasm32.
         run: cargo build --manifest-path wasm/edax-eval/Cargo.toml --target wasm32-unknown-unknown --lib --release
+      - name: Run wasm JS wrapper tests
+        run: node wasm/edax-eval/js/edax-eval.test.js
+      - name: Check the checked-in dist/ artifact is built from src/
+        # dist/edax_eval.wasm is what internal/web serves to the browser; every other check in
+        # this workflow looks at src/ or a fresh build, so only this one notices it going stale.
+        run: node wasm/edax-eval/js/dist-freshness.test.js
 
   test:
     runs-on: ubuntu-latest

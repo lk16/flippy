@@ -106,16 +106,28 @@ async function main() {
         assert.ok(score >= -64 && score <= 64, `score ${score} should be in [-64, 64]`);
     });
 
-    await test('evaluate() rejects a level above 10', async () => {
+    await test('evaluate() rejects a level above 60', async () => {
         const edax = await EdaxEval.instantiate(wasmBytes, weightsBytes);
-        assert.throws(() => edax.evaluate(START_PLAYER, START_OPPONENT, 11), /level 11 is not supported/);
+        assert.throws(() => edax.evaluate(START_PLAYER, START_OPPONENT, 61), /level 61 is not supported/);
     });
 
-    await test('levels 1-10 all agree (all clamp to real level 10)', async () => {
+    await test('evaluate() accepts every supported level', async () => {
+        // Levels each map to their own depth/selectivity (search::depth_and_selectivity); the
+        // scores themselves are meaningless here (synthetic weights), so this only pins the ABI:
+        // no level in 0..=60 hits a sentinel. That levels genuinely differ in *result* is checked
+        // against the real weights, in dist-freshness.test.js.
         const edax = await EdaxEval.instantiate(wasmBytes, weightsBytes);
-        const scoreAt10 = edax.evaluate(START_PLAYER, START_OPPONENT, 10);
-        const scoreAt1 = edax.evaluate(START_PLAYER, START_OPPONENT, 1);
-        assert.strictEqual(scoreAt1, scoreAt10);
+        for (const level of [0, 1, 4, 10]) {
+            const score = edax.evaluate(START_PLAYER, START_OPPONENT, level);
+            assert.ok(score >= -64 && score <= 64, `level ${level}: score ${score} should be in [-64, 64]`);
+        }
+        // Levels 11+ are checked on a 5-empties board instead: from the starting position they
+        // mean "solve the whole game exactly", which does not finish in a test's lifetime. Same
+        // position and reasoning as search.rs's accepts_levels_zero_through_sixty.
+        for (const level of [11, 60]) {
+            const score = edax.evaluate(0x007ee4d2aadcbe7cn, 0x7e011b2d55234180n, level);
+            assert.ok(score >= -64 && score <= 64, `level ${level}: score ${score} should be in [-64, 64]`);
+        }
     });
 
     await test('instantiate() rejects a wrong-length weights blob', async () => {

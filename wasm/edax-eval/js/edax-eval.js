@@ -89,9 +89,10 @@ class EdaxEval {
         return EdaxEval.instantiate(wasmBytes, weightsBytes);
     }
 
-    // Evaluates a board at Edax level (1-10; TASKS.md decision #1: 1-9 all behave identically to
-    // 10, levels above 10 throw rather than silently running as 10 -- see search::solve's doc
-    // comment). player/opponent are Edax's mover-relative bitboards (crate::board::Board -- player
+    // Evaluates a board at Edax level (0-60; each level maps to its own search depth and
+    // selectivity, so a shallow level really is cheaper -- see search::solve and
+    // depth_and_selectivity. Levels above 60 throw rather than silently running as 60).
+    // player/opponent are Edax's mover-relative bitboards (crate::board::Board -- player
     // is the side to move), as BigInt (wasm i64 params require BigInt from JS, not Number).
     // Converting from a black/white/turn representation to mover-relative is the caller's job, not
     // this wrapper's (same reasoning as [[project_edax-color-turn-encoding]] elsewhere in this repo:
@@ -102,7 +103,7 @@ class EdaxEval {
             throw new Error('edax-eval: evaluate() called before weights finished loading');
         }
         if (score === ERR_UNSUPPORTED_LEVEL) {
-            throw new Error(`edax-eval: level ${level} is not supported (levels 1-10 only)`);
+            throw new Error(`edax-eval: level ${level} is not supported (levels 0-60 only)`);
         }
         return score;
     }
