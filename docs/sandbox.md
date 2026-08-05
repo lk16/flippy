@@ -56,7 +56,11 @@ host first, then retry in the sandbox.
 
 gcc and libc6-dev are installed via a kit startup command
 (.sbx/kit/spec.yaml), which also allowlists archive.ubuntu.com and
-security.ubuntu.com for the apt install. This gives `cargo test`/`cargo
+security.ubuntu.com for the apt install. Don't assume it succeeded — check
+`which gcc` before blaming a build error on something else. In a sandbox
+created before 2026-08-05 the startup install silently failed (its apt-get
+hit the http:// sources described below and 403'd on every retry), leaving
+no compiler behind; the fix is the same sed, run by hand. This gives `cargo test`/`cargo
 build` for the native target (x86_64-unknown-linux-gnu) a working linker,
 and also fixes `cargo check`/`clippy` for crates with a `build.rs` anywhere
 in their dependency graph — a build script is always compiled and linked as
