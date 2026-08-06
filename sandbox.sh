@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
-# Runs Claude Code inside an sbx sandbox for this project: real Docker access
-# (so test.sh's docker-compose.test.yml works), network locked down to
-# .sbx/kit's allowlist, and CPU/memory/disk capped explicitly. Torn down via
-# `sbx rm` on exit (see cleanup trap below), so each run starts fresh.
+# Runs Claude Code inside a docker sandbox (sbx)
 #
-# --clone: the agent works on a private in-container clone of this repo, not
-# the real working tree (which is mounted read-only instead). Commits land on
-# a `sandbox-<name>` git remote, fetched back out explicitly once reviewed.
+# Features:
+# - enforce limit on mem/cpu/disk usage
+# - clones git repo to sandbox
+# - supports multiple claude setups on same machine
+# - supports running multiple sandboxes for same project - no name collision
+# - removes sbx on claude exit
+# - pulls but prevents losing work
+# - mounts edax-reversi checkout read-only for Process tests
+
+
 set -euo pipefail
 
+# Run from repo root.
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-# Load local dev config (e.g. EDAX_HOST_DIR), same pattern as local.sh/test.sh.
+# Load local dev config
 if [ -f .env ]; then
     set -a
     # shellcheck disable=SC1091
@@ -21,31 +26,50 @@ fi
 
 : "${EDAX_HOST_DIR:?EDAX_HOST_DIR must be set in .env (path to the edax-reversi checkout)}"
 
-# Resolved dynamically rather than hardcoded, so this script stays portable
-# across machines with different usernames/homedirs.
-GOMODCACHE_HOST="$(go env GOMODCACHE)"
-LOCAL_BIN_HOST="$HOME/.local/bin"
+if [ -z "${CLAUDE_OAUTH_TOKEN_FILE:-}" ]; then
+    echo "CLAUDE_OAUTH_TOKEN_FILE is not set." >&2
+    echo "Set it up once:" >&2
+    echo "  1. Run: claude setup-token" >&2
+    echo "  2. Save the printed token to a file, e.g. ~/.secrets/claude-oauth-work.token" >&2
+    echo "  3. Export CLAUDE_OAUTH_TOKEN_FILE to point at that file (e.g. via direnv)." >&2
+    exit 1
+fi
 
-# The agent's extra system prompt lives in docs/sandbox.md (linked from
-# CLAUDE.md), so it's one source of truth readable both here and in normal
-# sessions. Read verbatim -- no shell expansion, same as the old quoted heredoc.
+if [ -n "${CLAUDE_OAUTH_TOKEN_FILE:-}" ] && [ ! -s "$CLAUDE_OAUTH_TOKEN_FILE" ]; then
+    echo "CLAUDE_OAUTH_TOKEN_FILE ($CLAUDE_OAUTH_TOKEN_FILE) does not exist or is empty." >&2
+    exit 1
+fi
+
+# Go module cache
+GOMODCACHE_HOST="$(go env GOMODCACHE)"
+
+# Mount host go toolchain folder to ensure correct golang version.
+GOROOT_HOST="$(go env GOROOT)"
+
+# Go installed binaries (used for: migrate, gotestsum, golangci-lint)
+GOBIN_HOST="$(go env GOBIN)"
+
+# Load system prompt, linked from CLAUDE.md, one source of truth.
 SYSTEM_PROMPT="$(cat docs/sandbox.md)"
 
-SBX_BASE_NAME="${SBX_NAME:-flippy}"
+# Limit CPU and memory usage.
 SBX_MEMORY="${SBX_MEMORY:-4g}"
 SBX_CPUS="${SBX_CPUS:-4}"
 
-# Optional model override for the claude CLI (e.g. CLAUDE_MODEL=fable).
+# Limit disk usage.
+export DOCKER_SANDBOXES_ROOT_SIZE="${SBX_ROOT_SIZE:-10g}"
+export DOCKER_SANDBOXES_DOCKER_SIZE="${SBX_DOCKER_SIZE:-10g}"
+
+# Override selected model for claude CLI.
 CLAUDE_MODEL_ARGS=()
 if [ -n "${CLAUDE_MODEL:-}" ]; then
     CLAUDE_MODEL_ARGS=(--model "$CLAUDE_MODEL")
 fi
 
-# Multiple sandboxes can run concurrently, so pick the lowest free
-# "$SBX_BASE_NAME-<n>" suffix instead of colliding on a shared name. Also
-# skip any suffix with a leftover refs/sandboxes/<name>/* ref -- cleanup's
-# `git fetch` leaves those behind even after `sbx rm`, since the ref isn't
-# tied to the remote that fetched it, and reusing the name would step on it.
+# Sandbox base name - use project name in kebab-case
+SBX_BASE_NAME='flippy'
+
+# Find first <sandbox name>-<n> that is not running and has no git refs.
 existing_names="$(sbx ls -q 2>/dev/null || true)"
 existing_refs="$(git for-each-ref --format='%(refname)' refs/sandboxes | sed -E 's#^refs/sandboxes/([^/]+)/.*#\1#' | sort -u)"
 n=1
@@ -54,20 +78,11 @@ while echo "$existing_names" | grep -qx "$SBX_BASE_NAME-$n" || echo "$existing_r
 done
 SBX_NAME="$SBX_BASE_NAME-$n"
 
-# Disk defaults to 20 GiB/sandbox and is uncapped across concurrently running
-# sandboxes otherwise -- tighten explicitly. See
-# work/notes/2026-07-29_sbx_isolation_findings.md for how this was verified.
-export DOCKER_SANDBOXES_ROOT_SIZE="${SBX_ROOT_SIZE:-10g}"
-export DOCKER_SANDBOXES_DOCKER_SIZE="${SBX_DOCKER_SIZE:-10g}"
-
 cleanup() {
-    # Preserves committed work, but git fetch can't do anything about
-    # uncommitted changes in the agent's clone -- e.g. if the session was
-    # interrupted before it got to commit. Check for that separately and
-    # refuse to destroy the sandbox in that case, rather than silently
-    # losing work.
+    # Pull all committed work from sandbox
     git fetch "sandbox-$SBX_NAME" || true
 
+    # Prevent losing work if any change is not committed.
     local dirty
     dirty="$(sbx exec "$SBX_NAME" git -C "$PWD" status --porcelain 2>/dev/null || true)"
     if [ -n "$dirty" ]; then
@@ -79,18 +94,34 @@ cleanup() {
         return
     fi
 
+    # Remove secret for this sandbox name
+    sbx secret rm "$SBX_NAME" --host api.anthropic.com -f 2>/dev/null || true
+
+    # Remove sandbox.
     sbx rm --force "$SBX_NAME"
 }
+
+# Cleanup at script exit, when user closes claude prompt inside sandbox.
 trap cleanup EXIT
 
-sbx run claude \
+sbx create claude \
     . \
     "$GOMODCACHE_HOST":ro \
-    "$LOCAL_BIN_HOST":ro \
+    "$GOBIN_HOST":ro \
+    "$GOROOT_HOST":ro \
     "$EDAX_HOST_DIR":ro \
     --clone \
     --name "$SBX_NAME" \
     --kit .sbx/kit \
     --memory "$SBX_MEMORY" \
-    --cpus "$SBX_CPUS" \
+    --cpus "$SBX_CPUS"
+
+# Clear stale secret from a previous run under this name
+sbx secret rm "$SBX_NAME" --host api.anthropic.com -f 2>/dev/null || true
+
+# Set claude token for this sandbox.
+tr -d '\n' <"$CLAUDE_OAUTH_TOKEN_FILE" | sbx secret set-custom "$SBX_NAME" --host api.anthropic.com --env CLAUDE_CODE_OAUTH_TOKEN
+
+# Run claude
+sbx run claude --name "$SBX_NAME" \
     -- --append-system-prompt "$SYSTEM_PROMPT" "${CLAUDE_MODEL_ARGS[@]}"
