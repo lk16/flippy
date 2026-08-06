@@ -453,20 +453,18 @@ class OthelloGame {
                 this.levelConfig = {
                     priorityLevel: data.priority_level,
                     maxSavableDiscs: data.max_savable_discs,
-                    leafDiscs: data.leaf_discs,
-                    targetLevelLeaf: data.target_level_leaf,
-                    targetLevelNonLeaf: data.target_level_non_leaf,
+                    targetLevels: data.target_levels.map((t) => ({ maxDiscs: t.max_discs, level: t.level })),
                 };
             }
         } catch (_) {}
-        // Fallback so the rest of the code always has a config object.
+        // Fallback so the rest of the code always has a config object. Must stay in step with
+        // internal/api/level.go: a target above what the server is willing to search is one it
+        // never reaches, so isAtTarget would never come true for those boards.
         if (!this.levelConfig) {
             this.levelConfig = {
                 priorityLevel: 10,
                 maxSavableDiscs: 30,
-                leafDiscs: 12,
-                targetLevelLeaf: 24,
-                targetLevelNonLeaf: 16,
+                targetLevels: [{ maxDiscs: 16, level: 32 }, { maxDiscs: 20, level: 30 }, { maxDiscs: 64, level: 28 }],
             };
         }
     }
@@ -478,13 +476,14 @@ class OthelloGame {
         return popcount(black) + popcount(white);
     }
 
-    // targetLevelForBoard returns the final target edax level for a board string.
+    // targetLevelForBoard returns the final target edax level for a board string. Mirrors
+    // api.EffectiveTargetLevel: pick the tier the disc count falls in, with boards past
+    // maxSavableDiscs treated as if they had exactly that many discs.
     targetLevelForBoard(boardStr) {
-        const dc = this.discCountFromBoardStr(boardStr);
-        const effectiveDc = Math.min(dc, this.levelConfig.maxSavableDiscs);
-        return effectiveDc > this.levelConfig.leafDiscs
-            ? this.levelConfig.targetLevelNonLeaf
-            : this.levelConfig.targetLevelLeaf;
+        const dc = Math.min(this.discCountFromBoardStr(boardStr), this.levelConfig.maxSavableDiscs);
+        const tiers = this.levelConfig.targetLevels;
+        const tier = tiers.find((t) => dc <= t.maxDiscs);
+        return (tier || tiers[tiers.length - 1]).level;
     }
 
     // isAtTarget returns true when a board has reached its target evaluation level.
@@ -947,7 +946,10 @@ class OthelloGame {
             const current = e.level || 0;
             if (current >= target) continue; // already at target
 
-            const nextLevel = current + 2;
+            // Never past the target: the server clamps to it anyway (handleAnalyzeRequest), so
+            // asking for more would leave pendingLevelRequests -- and the level the status line
+            // reports -- claiming a search deeper than any that is actually running.
+            const nextLevel = Math.min(current + 2, target);
             const alreadyRequested = (this.pendingLevelRequests.get(boardStr) || 0) >= nextLevel;
             if (alreadyRequested) continue;
 
@@ -1239,7 +1241,8 @@ class OthelloGame {
 
     pgnUpdateGraphStatus() {
         const total = this.pgnAllChildStrings.length;
-        const done = total - this.pgnUnresolved().length;
+        const unresolved = this.pgnUnresolved();
+        const done = total - unresolved.length;
         const statusEl = document.getElementById('graph-status');
         if (!statusEl) return;
 
@@ -1249,9 +1252,12 @@ class OthelloGame {
         }
 
         // Boards ramp up their search level together in +2 rounds (see pgnRequestLevelUps), so
-        // the lowest currently-requested level across the line is a fair read of "how deep the
-        // search is right now".
-        const levels = this.pgnAllChildStrings.map((s) => this.pendingLevelRequests.get(s) || this.levelConfig.priorityLevel);
+        // the lowest currently-requested level is a fair read of "how deep the search is right
+        // now" -- but only across the boards still being searched. Boards already at target keep
+        // their last requested level in pendingLevelRequests forever, so counting them in pinned
+        // the reported level at whatever the first board finished at (usually priorityLevel) and
+        // it never moved again.
+        const levels = unresolved.map((s) => this.pendingLevelRequests.get(s) || this.levelConfig.priorityLevel);
         const currentLevel = Math.min(...levels);
         statusEl.textContent = `Searching at level ${currentLevel} — ${done} / ${total} boards evaluated…`;
     }
