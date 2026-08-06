@@ -1,18 +1,40 @@
 package api
 
-import "github.com/lk16/flippy/internal/book"
+import (
+	"slices"
+
+	"github.com/lk16/flippy/internal/book"
+)
+
+// TargetLevelTier maps an upper disc-count bound to the edax search level boards up to that count
+// get. Tiers are ordered by MaxDiscs; the last one is a catch-all for the rest of the board.
+type TargetLevelTier struct {
+	MaxDiscs int `json:"max_discs"`
+	Level    int `json:"level"`
+}
+
+// targetLevelTiers is the single source of truth for TargetLevel, also served to the frontend
+// verbatim by handleLevelConfig so it computes the same targets the server enforces.
+var targetLevelTiers = []TargetLevelTier{
+	{MaxDiscs: 16, Level: 32},
+	{MaxDiscs: 20, Level: 30},
+	{MaxDiscs: 64, Level: 28},
+}
+
+// TargetLevelTiers returns a copy of the disc-count tiers TargetLevel is defined by.
+func TargetLevelTiers() []TargetLevelTier {
+	return slices.Clone(targetLevelTiers)
+}
 
 // TargetLevel returns the edax search level to use for a board with discCount discs. Deeper boards
 // get shallower searches to keep evaluation time roughly bounded as the search tree widens.
 func TargetLevel(discCount int) int {
-	switch {
-	case discCount <= 16:
-		return 32
-	case discCount <= 20:
-		return 30
-	default:
-		return 28
+	for _, tier := range targetLevelTiers {
+		if discCount <= tier.MaxDiscs {
+			return tier.Level
+		}
 	}
+	return targetLevelTiers[len(targetLevelTiers)-1].Level
 }
 
 // EffectiveTargetLevel returns the target level for a board at the given disc count, capping at

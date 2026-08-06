@@ -159,13 +159,20 @@ function installCellDOM() {
 // ── Load the real classes ────────────────────────────────────────────────────
 const { OthelloBoard, OthelloGame, LOCAL_EVAL_LEVELS, localEvalLevelsFor } = require('../board.js');
 
+// Mirrors GET /api/level-config (internal/api/handlers.go handleLevelConfig).
 const DEFAULT_LEVEL_CONFIG = {
   priorityLevel: 10,
   maxSavableDiscs: 30,
-  leafDiscs: 12,
-  targetLevelNonLeaf: 16,
-  targetLevelLeaf: 24,
+  targetLevels: [
+    { maxDiscs: 16, level: 32 },
+    { maxDiscs: 20, level: 30 },
+    { maxDiscs: 64, level: 28 },
+  ],
 };
+
+// MAX_TARGET_LEVEL is the deepest target any board can have, so an evaluation at this level counts
+// as "at target" whatever the board's disc count.
+const MAX_TARGET_LEVEL = Math.max(...DEFAULT_LEVEL_CONFIG.targetLevels.map((t) => t.level));
 
 // buildGame constructs an OthelloGame without its DOM-touching constructor, wiring up the same
 // PGN-review state analyzePGN()/pgnBuildChildSets() would, already in pgnState 'graph'. With
@@ -205,8 +212,8 @@ function buildGame(boardStrings, { complete = true } = {}) {
     let i = 0;
     for (const s of game.pgnAllChildStrings) {
       // Deterministic pseudo-scores in [-10, 10]; content is irrelevant to the tests,
-      // only that every child has a known evaluation at the leaf target level.
-      game.evaluations.set(s, { board: s, score: ((i++ * 7) % 21) - 10, source: 'edax', level: 24 });
+      // only that every child has a known evaluation at (or above) its target level.
+      game.evaluations.set(s, { board: s, score: ((i++ * 7) % 21) - 10, source: 'edax', level: MAX_TARGET_LEVEL });
     }
   }
   return game;
@@ -258,6 +265,7 @@ module.exports = {
   buildNormalGame,
   graphSegments,
   DEFAULT_LEVEL_CONFIG,
+  MAX_TARGET_LEVEL,
   LOCAL_EVAL_LEVELS,
   localEvalLevelsFor,
 };
