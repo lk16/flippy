@@ -31,6 +31,28 @@ trap cleanup EXIT
 # and fail fast (set -e aborts on a non-zero exit) before spinning up containers.
 echo "Running JS tests…"
 node static/test/run.js
+# EdaxEvalWorkerPool's scheduler (fake workers, no wasm module needed — unlike
+# wasm/edax-eval/js/edax-eval.test.js further down, which wants a built .wasm).
+node wasm/edax-eval/js/pool.test.js
+
+# Rust unit tests (wasm/edax-eval/). Also need no infrastructure, so run them
+# here too, before the Docker compose stack comes up.
+echo "Running Rust checks…"
+cargo fmt --manifest-path wasm/edax-eval/Cargo.toml -- --check
+cargo clippy --manifest-path wasm/edax-eval/Cargo.toml -- -Dwarnings
+# --release: the differential test (tests/differential.rs, EDAX_PATH-gated) runs an unoptimized
+# depth-10 search in minutes rather than seconds without it; skipped entirely when EDAX_PATH isn't
+# set (e.g. in CI), so this only matters for local runs with the real edax binary configured.
+cargo test --manifest-path wasm/edax-eval/Cargo.toml --release
+
+# wasm/edax-eval/js/edax-eval.test.js (Task 10) exercises the real compiled .wasm module, so it
+# needs one built first. --lib: the extract_weights bin tool was never meant to target wasm32 (see
+# Cargo.toml).
+cargo build --manifest-path wasm/edax-eval/Cargo.toml --target wasm32-unknown-unknown --lib --release
+node wasm/edax-eval/js/edax-eval.test.js
+# Checks the checked-in dist/edax_eval.wasm (what the browser actually gets) against that fresh
+# build -- nothing else in this suite would notice dist/ going stale.
+node wasm/edax-eval/js/dist-freshness.test.js
 
 docker compose -f "$COMPOSE_FILE" up -d --wait
 

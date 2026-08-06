@@ -39,3 +39,45 @@ is required — pick items up when a real need appears.
 
 - The websocket client's reconnect/queueing logic has no JS unit tests;
   `static/test/` covers board logic only.
+- No browser-level regression tests at all: nothing catches a frontend
+  wiring bug (e.g. evaluations not appearing under the legal moves) short
+  of opening the page by hand. Playwright is the intended answer;
+  [playwright-e2e-prep.md](playwright-e2e-prep.md) lists what the host has
+  to prepare first, since the sandbox can't reach npm or Playwright's CDN.
+
+## Frontend
+
+- **PGN review doesn't use the local wasm evaluator.** Normal play falls
+  back to `queueLocalEvaluations` for every child the server hasn't
+  answered for, so a score appears under each move right away; PGN review
+  still shows blanks until the server answers, and shows nothing at all
+  past `MaxSavableDiscs` (30) discs, where the server never evaluates.
+  Wiring it up is not just a call to `queueLocalEvaluations`: the same
+  evaluations feed the score graph, `pgnUnresolved`/`isAtTarget` and the
+  level-up chain, all of which treat an evaluation as the server's answer.
+
+## Build artifacts
+
+- **`wasm/edax-eval/dist/`** (`edax_eval.wasm`, `weights.bin.gz`,
+  `weights_manifest.json`) is committed to git — unlike `generated/` and
+  `target/` (both gitignored scratch output), these are the actual files
+  `internal/web` embeds and serves at `/static/wasm/`, so the running
+  server has no build step of its own to reproduce them. Regenerating them
+  requires a local Edax checkout (`eval.dat`, matching the `EDAX_HOST_DIR`
+  env var used elsewhere in this repo — see `.env.sample`):
+  ```
+  cargo run --manifest-path wasm/edax-eval/Cargo.toml --bin extract_weights --release -- wasm/edax-eval/generated
+  cargo build --manifest-path wasm/edax-eval/Cargo.toml --target wasm32-unknown-unknown --lib --release
+  cp wasm/edax-eval/generated/weights.bin.gz wasm/edax-eval/generated/weights_manifest.json wasm/edax-eval/dist/
+  cp wasm/edax-eval/target/wasm32-unknown-unknown/release/edax_eval.wasm wasm/edax-eval/dist/
+  ```
+  Only needs re-running if `wasm/edax-eval`'s Rust source changes (rebuild
+  `edax_eval.wasm`) or `eval.dat` itself changes (regenerate
+  `weights.bin.gz`) — CI can't do this itself (no `EDAX_PATH`/`eval.dat`
+  there), so it's a manual step before committing, same as any other
+  `EDAX_PATH`-gated local-only workflow in this repo. Forgetting the
+  `edax_eval.wasm` half now fails loudly:
+  `wasm/edax-eval/js/dist-freshness.test.js` (run by `test.sh` and CI)
+  compares the committed artifact against a fresh build. Regenerating
+  `weights.bin.gz` is *not* covered — nothing in CI has `eval.dat` to
+  compare against.

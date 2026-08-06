@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/lk16/flippy/static"
+	webassets "github.com/lk16/flippy/wasm/edax-eval"
 )
 
 //go:embed templates/*.html
@@ -95,6 +96,7 @@ func (s *Server) Handler() http.Handler {
 	}
 
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static.FS)))
+	mux.Handle("GET /static/wasm/", http.StripPrefix("/static/wasm/", http.FileServerFS(webassets.FS)))
 
 	return mux
 }

@@ -1,5 +1,24 @@
 const BITBOARD_MASK = 0xFFFFFFFFFFFFFFFFn;
 
+// LOCAL_EVAL_LEVELS: incremental depths queueLocalEvaluations searches through, in order, for
+// each board the server hasn't evaluated yet. Evaluating at 4 first (sub-millisecond, so every
+// child shows a score as good as immediately) and refining through 6, 8, then 10 (the server's
+// PriorityLevel) lets the UI show a rough score right away and sharpen it in place as deeper
+// searches finish, rather than blocking on the level-10 result -- which costs a few hundred
+// milliseconds per board -- before showing anything.
+const LOCAL_EVAL_LEVELS = [4, 6, 8, 10];
+
+// Local searches are scheduled shallow-first across every queued board at once, by handing
+// EdaxEvalWorkerPool.evaluate the search level as its priority: every pending level-4 search runs
+// before any level-6, and so on. So the moves on screen all get a number within milliseconds and
+// then sharpen together, instead of one board being refined to level 10 (hundreds of milliseconds)
+// while the move next to it still shows nothing.
+//
+// LOCAL_EVAL_PREFETCH_PRIORITY is added to that priority for off-screen prefetch work
+// (requestGrandchildrenEvaluations). Larger than any LOCAL_EVAL_LEVELS entry, so every visible
+// search -- at any level -- goes first.
+const LOCAL_EVAL_PREFETCH_PRIORITY = 100;
+
 // WebSocketClient batches evaluation lookups over a persistent connection, auto-reconnecting on
 // disconnect; requests made before the socket opens are accumulated in pendingBoards and flushed
 // together once it connects.
@@ -316,6 +335,8 @@ class OthelloGame {
         this.board = new OthelloBoard();
         this.boardHistory = [];
         this.evalMode = true;
+        this.evalPollTimer = null;
+        this.evalPollStart = 0;
 
         // ── PGN state ─────────────────────────────────────────────────────────
         this.pgnState = null;           // null | 'input' | 'graph'
@@ -345,10 +366,47 @@ class OthelloGame {
         this.levelConfig = null;        // fetched from /api/level-config
         this.pendingLevelRequests = new Map(); // board -> highest level we have requested
 
+        // Client-side evaluator for every child the server hasn't answered for yet -- both
+        // positions beyond levelConfig.maxSavableDiscs (see internal/book.MaxSavableDiscs), which
+        // the server never evaluates at all, and on-book ones whose server evaluation is still
+        // being computed. Uses a pool of Web Workers, each running the WASM module off the main
+        // thread so evaluations never block the browser UI.
+        this.edaxWorkerPool = null;
+        this._pendingLocalEvals = new Set(); // boardStrs queued to workers but not yet resolved
+        this._localEvalRenderPending = false; // rAF batching flag for worker result renders
+        this._localEvalBoardKey = null;  // board whose moves the queued local work belongs to
+        this._localEvalGeneration = 0;   // bumped when that board changes; see _syncLocalEvalGeneration
+
         this.initializeBoard();
         this.initializeButtons();
         this.renderBoard(null, false);
         this.fetchLevelConfig();
+        this.initEdaxEval();
+    }
+
+    // initEdaxEval creates the worker pool (each worker fetches and initializes the WASM module
+    // independently). Positions already on screen that were waiting on it are filled in once all
+    // workers report ready. Evaluation results then arrive asynchronously and trigger re-renders
+    // via _scheduleLocalEvalRender, so the main thread never blocks waiting for WASM.
+    initEdaxEval() {
+        const numWorkers = Math.min(4, navigator.hardwareConcurrency || 2);
+        this.edaxWorkerPool = new EdaxEvalWorkerPool(
+            '/static/wasm/js/edax-eval-worker.js',
+            '/static/wasm/dist/edax_eval.wasm',
+            '/static/wasm/dist/weights.bin.gz',
+            numWorkers,
+            // Reserve a worker for the shallowest level, so a move that just appeared on screen
+            // gets its first score without waiting behind a deep search already running.
+            { fastLaneMaxLevel: LOCAL_EVAL_LEVELS[0] },
+        );
+        this.edaxWorkerPool.ready()
+            .then(() => {
+                this.requestMissingEvaluations(this.board);
+                this.renderEvaluations(this.pgnState === 'graph' ? this.pgnDisplayBoard() : this.board);
+            })
+            .catch((error) => {
+                console.error('edax-eval: failed to load WASM evaluator; positions beyond the saved book stay unevaluated', error);
+            });
     }
 
     async fetchLevelConfig() {
@@ -403,8 +461,14 @@ class OthelloGame {
 
     // shouldUpdateEval returns true when incoming should replace existing in the evaluations map.
     // Minimax/final results are never downgraded to edax; among edax results, higher level wins.
+    // 'wasm' (queueLocalEvaluations' client-side stand-in) is the lowest priority: it only ever
+    // fills a blank, and any server-sourced result always supersedes it -- which is the normal
+    // course of events for an on-book position, whose wasm score is only shown until the server
+    // finishes analyzing it.
     shouldUpdateEval(existing, incoming) {
         if (!existing) return true;
+        if (incoming.source === 'wasm') return false;
+        if (existing.source === 'wasm') return true;
         const existingFinal = existing.source === 'minimax' || existing.source === 'final';
         if (existingFinal && incoming.source === 'edax') return false;
         if (existing.source === 'edax' && incoming.source === 'edax') {
@@ -575,19 +639,219 @@ class OthelloGame {
 
         this.requestMissingEvaluations(board);
         this.requestGrandchildrenEvaluations(board);
+        if (this.hasUnresolvedEvaluations(board)) {
+            this.startEvalPolling();
+        } else {
+            this.stopEvalPolling();
+        }
+    }
+
+    // needsServerEvaluation reports whether boardStr still wants an evaluation from the server. A
+    // wasm score counts as missing here, not as an answer: it is a local stand-in shown while the
+    // server's deeper, book-quality evaluation is still being computed, so it must not stop
+    // requestMissingEvaluations from asking or startEvalPolling from waiting for the real one.
+    needsServerEvaluation(boardStr) {
+        const e = this.evaluations.get(boardStr);
+        return !e || e.source === 'wasm';
+    }
+
+    // hasUnresolvedEvaluations reports whether board's children or grandchildren are missing an
+    // on-book evaluation -- i.e. one requestServerAnalysis can ask the server to compute. Off-book
+    // boards are excluded: those are handled by queueLocalEvaluations' wasm chain, which needs no
+    // polling since each worker result drives its own re-render.
+    hasUnresolvedEvaluations(board) {
+        const seen = new Set();
+        for (const child of board.getChildren()) {
+            seen.add(child.normalize().toString());
+            for (const grandchild of child.getChildren()) seen.add(grandchild.normalize().toString());
+        }
+        const missing = [...seen].filter((b) => this.needsServerEvaluation(b));
+        const [onBook] = this.splitOffBook(missing);
+        return onBook.length > 0;
+    }
+
+    // startEvalPolling retries requestMissingEvaluations/requestGrandchildrenEvaluations until every
+    // on-book evaluation around the current board has arrived. analyze_request only enqueues a
+    // background job and returns whatever's already computed (normally nothing yet for a position
+    // outside the pre-explored book), so without this the score would never appear until the next
+    // move happens to re-trigger a request. Mirrors PGN mode's startPGNPolling.
+    startEvalPolling() {
+        if (this.evalPollTimer) return;
+        this.evalPollStart = Date.now();
+        const INTERVAL = 1750;
+        const TIMEOUT = 90000;
+        this.evalPollTimer = setInterval(() => {
+            if (this.pgnState === 'graph' || !this.evalMode || !this.hasUnresolvedEvaluations(this.board)) {
+                this.stopEvalPolling();
+                return;
+            }
+            if (Date.now() - this.evalPollStart > TIMEOUT) {
+                this.stopEvalPolling();
+                return;
+            }
+            this.requestMissingEvaluations(this.board);
+            this.requestGrandchildrenEvaluations(this.board);
+        }, INTERVAL);
+    }
+
+    stopEvalPolling() {
+        if (this.evalPollTimer) {
+            clearInterval(this.evalPollTimer);
+            this.evalPollTimer = null;
+        }
+    }
+
+    // splitOffBook partitions boardStrs into [onBook, offBook] for *server* requests: offBook holds positions beyond
+    // levelConfig.maxSavableDiscs, which the server never persists or evaluates (see
+    // internal/book.MaxSavableDiscs) -- those must be evaluated locally instead of requested over
+    // the websocket. Returns [boardStrs, []] unchanged while levelConfig hasn't loaded yet, so
+    // callers fall back to the original all-goes-to-server behavior until it has.
+    splitOffBook(boardStrs) {
+        if (!this.levelConfig) return [boardStrs, []];
+        const onBook = [];
+        const offBook = [];
+        for (const b of boardStrs) {
+            const bucket = this.discCountFromBoardStr(b) > this.levelConfig.maxSavableDiscs ? offBook : onBook;
+            bucket.push(b);
+        }
+        return [onBook, offBook];
+    }
+
+    // _syncLocalEvalGeneration notices that the board whose moves we are evaluating locally has
+    // changed -- the user played, undid, or clicked to another position -- and abandons the
+    // previous board's queued wasm work. Without this, navigating leaves up to a few hundred
+    // queued searches for boards nobody is looking at, and the new position's deeper refinements
+    // queue up behind all of them.
+    //
+    // Queued-but-not-started searches are dropped by the pool; searches already running finish and
+    // store their result (it is still a correct evaluation, and _runLocalEvalLevels' write only
+    // ever deepens what is cached), they just don't continue to the next level.
+    _syncLocalEvalGeneration(board) {
+        const key = board.normalize().toString();
+        if (key === this._localEvalBoardKey) return;
+        this._localEvalBoardKey = key;
+        this._localEvalGeneration++;
+        this._pendingLocalEvals.clear();
+        if (this.edaxWorkerPool) {
+            this.edaxWorkerPool.cancelQueued((tag) => tag !== this._localEvalGeneration);
+        }
+    }
+
+    // queueLocalEvaluations sends boardStrs to the worker pool for asynchronous evaluation via
+    // the client-side WASM evaluator (wasm/edax-eval), one independent LOCAL_EVAL_LEVELS chain
+    // per board (see _runLocalEvalLevels). Returns immediately -- results arrive via worker
+    // messages and trigger a batched re-render through _scheduleLocalEvalRender. A no-op until
+    // initEdaxEval() creates the pool.
+    //
+    // Skips boards that are already queued, that the server has answered for, and that a local
+    // chain already took to the deepest level. A board left part-way up LOCAL_EVAL_LEVELS -- by
+    // _syncLocalEvalGeneration cancelling it as prefetch, say, before the user navigated to it --
+    // resumes at the first level deeper than what it has, rather than being written off.
+    //
+    // `prefetch` marks work for boards that are not on screen (grandchildren), which the pool then
+    // runs only when nothing visible is waiting; see LOCAL_EVAL_PREFETCH_PRIORITY.
+    queueLocalEvaluations(boardStrs, { prefetch = false } = {}) {
+        if (!this.edaxWorkerPool) return;
+        const deepestLevel = LOCAL_EVAL_LEVELS[LOCAL_EVAL_LEVELS.length - 1];
+        const generation = this._localEvalGeneration;
+        for (const boardStr of boardStrs) {
+            if (this._pendingLocalEvals.has(boardStr)) continue;
+            const existing = this.evaluations.get(boardStr);
+            if (existing && (existing.source !== 'wasm' || (existing.level || 0) >= deepestLevel)) continue;
+            const levelIndex = LOCAL_EVAL_LEVELS.findIndex((l) => l > (existing ? existing.level || 0 : 0));
+            const board = OthelloBoard.fromString(boardStr);
+            if (!board) continue;
+            this._pendingLocalEvals.add(boardStr);
+            this._runLocalEvalLevels(boardStr, board, levelIndex, { prefetch, generation });
+        }
+    }
+
+    // _runLocalEvalLevels evaluates boardStr at LOCAL_EVAL_LEVELS[levelIndex], stores the result
+    // and schedules a render, then recurses into the next (deeper) level -- so the displayed
+    // score starts shallow and refines in place rather than blocking on the deepest level. Since
+    // every board's searches are queued with the level as their priority, this comes out as one
+    // shallow-first sweep across all boards, not a race between per-board chains.
+    //
+    // Stops early if a server-sourced ('edax'/'minimax'/'final') evaluation supersedes this board
+    // while the chain is running -- no point spending more worker time refining a wasm score once
+    // a real one has arrived -- or if `generation` is stale, i.e. the user has moved on from the
+    // position this chain was queued for.
+    _runLocalEvalLevels(boardStr, board, levelIndex, { prefetch, generation }) {
+        // Releases boardStr's pending slot, unless a newer generation has re-queued it: then the
+        // slot belongs to that chain, not this (stale) one.
+        const clearPending = () => {
+            if (generation === this._localEvalGeneration) this._pendingLocalEvals.delete(boardStr);
+        };
+
+        const existing = this.evaluations.get(boardStr);
+        if (existing && existing.source !== 'wasm') {
+            clearPending();
+            return;
+        }
+        const level = LOCAL_EVAL_LEVELS[levelIndex];
+        const priority = level + (prefetch ? LOCAL_EVAL_PREFETCH_PRIORITY : 0);
+        this.edaxWorkerPool.evaluate(board.playerBits, board.opponentBits, level, { priority, tag: generation })
+            .then((score) => {
+                const current = this.evaluations.get(boardStr);
+                if (current && current.source !== 'wasm') {
+                    clearPending();
+                    return;
+                }
+                // Only ever deepen: a search that was already running when the position changed
+                // can land after a fresher chain has taken the same board further.
+                if (!current || (current.level || 0) < level) {
+                    this.evaluations.set(boardStr, { board: boardStr, score, level, source: 'wasm' });
+                    this._scheduleLocalEvalRender();
+                }
+
+                const nextIndex = levelIndex + 1;
+                if (nextIndex < LOCAL_EVAL_LEVELS.length && generation === this._localEvalGeneration) {
+                    this._runLocalEvalLevels(boardStr, board, nextIndex, { prefetch, generation });
+                } else {
+                    clearPending();
+                }
+            })
+            .catch(() => {
+                clearPending();
+            });
+    }
+
+    // _scheduleLocalEvalRender batches worker result renders: at most one re-render per animation
+    // frame, even when many evaluations complete in rapid succession.
+    _scheduleLocalEvalRender() {
+        if (this._localEvalRenderPending) return;
+        this._localEvalRenderPending = true;
+        requestAnimationFrame(() => {
+            this._localEvalRenderPending = false;
+            this.renderEvaluations(this.pgnState === 'graph' ? this.pgnDisplayBoard() : this.board);
+        });
     }
 
     requestMissingEvaluations(board) {
         if (!this.evalMode) return;
-        const boards = [...new Set(
-            board.getChildren()
-                .map((child) => child.normalize().toString())
-                .filter((b) => !this.evaluations.has(b)),
-        )];
-        this.wsClient.requestEvaluations(boards);
+        this._syncLocalEvalGeneration(board);
+        const children = [...new Set(board.getChildren().map((child) => child.normalize().toString()))];
+
+        const [onBook] = this.splitOffBook(children.filter((b) => this.needsServerEvaluation(b)));
+        this.requestServerAnalysis(onBook);
+
+        // Every child the server hasn't answered for goes to the local wasm chain, on-book or
+        // not: an on-book position the book hasn't explored yet takes the server seconds to
+        // minutes (analyze_request only enqueues a job), and a level-4 local search costs well
+        // under a millisecond, so there is no reason to show nothing in the meantime.
+        // queueLocalEvaluations skips whatever already has an evaluation or is already queued.
+        this.queueLocalEvaluations(children);
     }
 
     // Prefetch evaluations for grandchildren so they are cached before the user clicks a move.
+    //
+    // Unlike requestMissingEvaluations, on-book grandchildren are not handed to the wasm chain:
+    // there are an order of magnitude more of them than children and none of them is on screen,
+    // while the server can answer for them in one batched request. Off-book grandchildren still go
+    // local, since for those the server is not an option at all -- queued as prefetch, so the
+    // ~100 invisible searches never delay a visible one. Whichever grandchildren the user actually
+    // navigates to become children, and requestMissingEvaluations re-queues them at full priority,
+    // resuming from whatever level the prefetch reached.
     requestGrandchildrenEvaluations(board) {
         if (!this.evalMode) return;
         const seen = new Set();
@@ -595,13 +859,15 @@ class OthelloGame {
         for (const child of board.getChildren()) {
             for (const grandchild of child.getChildren()) {
                 const key = grandchild.normalize().toString();
-                if (!seen.has(key) && !this.evaluations.has(key)) {
+                if (!seen.has(key) && this.needsServerEvaluation(key)) {
                     seen.add(key);
                     missing.push(key);
                 }
             }
         }
-        this.wsClient.requestEvaluations(missing);
+        const [onBook, offBook] = this.splitOffBook(missing);
+        this.requestServerAnalysis(onBook);
+        this.queueLocalEvaluations(offBook, { prefetch: true });
     }
 
     handleEvaluations(evaluations) {
@@ -752,6 +1018,7 @@ class OthelloGame {
     setPGNState(state) {
         const prev = this.pgnState;
         this.pgnState = state;
+        this.stopEvalPolling(); // renderBoard restarts it if state returns to null and it's still needed
 
         const section = document.getElementById('pgn-section');
         const textarea = document.getElementById('pgn-input');
@@ -881,10 +1148,14 @@ class OthelloGame {
         this.wsClient.sendEvent('analyze_request', all, startLevel);
     }
 
-    // pgnRequestLevelRequests sends both request kinds at the priority level for boards not yet
-    // tracked in pendingLevelRequests. Shared by pgnSendRequests's initial batch (via pgnSendRequests
-    // itself, which always (re)stamps the priority level) and pgnRequestDivergedEvals.
-    pgnRequestLevelRequests(list) {
+    // requestServerAnalysis sends both request kinds (evaluation_request + analyze_request) at the
+    // priority level for boards not yet tracked in pendingLevelRequests -- asking the server to
+    // actually compute a board the first time it's needed, not just checking whatever it already
+    // has saved. Used by PGN's divergence exploration (pgnRequestDivergedEvals) and normal-mode
+    // play (requestMissingEvaluations/requestGrandchildrenEvaluations); pgnSendRequests's initial
+    // line-wide batch duplicates this instead of calling it, since it always (re)stamps the
+    // priority level rather than skipping boards already tracked.
+    requestServerAnalysis(list) {
         if (!this.wsClient || !this.levelConfig) return;
         const startLevel = this.levelConfig.priorityLevel;
         for (const s of list) {
@@ -1067,7 +1338,7 @@ class OthelloGame {
     // explored subtree needs the same retry-until-resolved treatment as the PGN line so a slow
     // edax search still gets picked up once it completes.
     pgnRequestDivergedEvals() {
-        this.pgnRequestLevelRequests(this.pgnExploreTargets());
+        this.requestServerAnalysis(this.pgnExploreTargets());
         if (!this.pgnPollTimer) this.startPGNPolling();
     }
 
@@ -1305,5 +1576,5 @@ class OthelloGame {
 if (typeof module === 'undefined') {
     new OthelloGame();
 } else {
-    module.exports = { OthelloBoard, OthelloGame, popcount, rotateBits };
+    module.exports = { OthelloBoard, OthelloGame, popcount, rotateBits, LOCAL_EVAL_LEVELS };
 }

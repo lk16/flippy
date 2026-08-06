@@ -49,6 +49,10 @@ GOROOT_HOST="$(go env GOROOT)"
 # Go installed binaries (used for: migrate, gotestsum, golangci-lint)
 GOBIN_HOST="$(go env GOBIN)"
 
+CARGO_HOME_HOST="$HOME/.cargo"
+RUSTUP_HOME_HOST="$HOME/.rustup"
+
+
 # Load system prompt, linked from CLAUDE.md, one source of truth.
 SYSTEM_PROMPT="$(cat docs/sandbox.md)"
 
@@ -109,6 +113,8 @@ sbx create claude \
     "$GOMODCACHE_HOST":ro \
     "$GOBIN_HOST":ro \
     "$GOROOT_HOST":ro \
+    "$CARGO_HOME_HOST":ro \
+    "$RUSTUP_HOME_HOST":ro \
     "$EDAX_HOST_DIR":ro \
     --clone \
     --name "$SBX_NAME" \

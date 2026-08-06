@@ -1,0 +1,38 @@
+[package]
+name = "edax-eval"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Rust/WASM port of Edax's board, evaluation, and search logic for bit-exact browser-side position evaluation."
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+
+# flate2 is only used by the offline extract_weights bin tool, never by the lib target this crate
+# ships to the browser as wasm -- scoped out of non-wasm32 builds so it can't accidentally bloat
+# that artifact (see TASKS.md Task 9). Also means `cargo build --target wasm32-unknown-unknown`
+# must pass `--lib`: extract_weights itself was never meant to compile for wasm32 anyway.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+flate2 = "1.1.9"
+
+[profile.release]
+lto = true
+codegen-units = 1
+# opt-level = "z" (size-optimized) was the original choice, on the reasoning that a search-speed
+# tradeoff wasn't worth it when the compiled output was only ~32 KB either way. Measured against
+# wasm/edax-eval/bench/bench.js's fixed corpus (compiled wasm, not native, before move ordering
+# was added): opt-level = 3 is both smaller (31,629 vs 35,000 bytes) and ~20% faster
+# (~3450ms vs ~4330ms avg across 3 runs) than "z", so there was no real tradeoff to make --
+# "z"'s extra size-aggressiveness was apparently pessimizing this crate's actual hot loops.
+# Full test suite (incl. the real-Edax differential test) still passes.
+opt-level = 3
+strip = true
+# No `panic = "abort"` here: it breaks linking `cargo test --release`'s test harness binaries
+# (they need unwinding to report a failed assertion without killing the whole test process).
+# It would shrink the wasm build further, but this crate's binary and lib targets share one
+# release profile (Cargo has no per-target profile scoping), so it's not worth losing --release
+# test runs over -- revisit as a wasm32-only override (e.g. via .cargo/config.toml) if size
+# pressure ever justifies it.

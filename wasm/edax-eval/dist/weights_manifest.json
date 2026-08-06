@@ -1,0 +1,15 @@
+{
+  "format": "edax-eval-weights-v1",
+  "transform": "transpose-delta-byteplane",
+  "compression": "gzip",
+  "source_version": 3,
+  "source_release": 2,
+  "source_build": 5,
+  "source_byte_swapped": false,
+  "n_w": 114364,
+  "n_plies": 52,
+  "first_ply": 2,
+  "raw_slice_bytes": 11893856,
+  "raw_slice_checksum_fnv1a64": "0x777da55185f6a219",
+  "compressed_bytes": 4272523
+}

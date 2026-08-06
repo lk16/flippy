@@ -12,6 +12,8 @@ caps:
       - registry-1.docker.io:443         # Docker Hub image pulls (postgres:17, redis:8 via docker-compose.test.yml)
       - auth.docker.io:443               # Docker Hub auth token exchange
       - production.cloudfront.docker.com:443   # Docker Hub blob CDN (NOT "cloudflare" -- easy typo)
+      - archive.ubuntu.com:443           # apt install of gcc/libc6-dev below (C toolchain for wasm/edax-eval native builds)
+      - security.ubuntu.com:443
 
 commands:
   startup:
@@ -22,3 +24,11 @@ commands:
     # nested-Docker root access inside the VM (see sbx setup guide, "Docker
     # Compose" section) -- locking those down breaks that without adding
     # meaningful extra containment.
+    - command: ["sh", "-c", "sudo sed -i 's|http://archive.ubuntu.com|https://archive.ubuntu.com|; s|http://security.ubuntu.com|https://security.ubuntu.com|' /etc/apt/sources.list.d/ubuntu.sources; for i in $(seq 1 30); do sudo apt-get update -qq && break; sleep 1; done && sudo apt-get install -y -qq gcc libc6-dev"]
+      description: >-
+        Install a C toolchain (retry loop past the base image's own async
+        apt-get update holding the lock) so cargo build/test can link the
+        native target -- see docs/sandbox.md's "no C compiler/linker" gap.
+        The sed first: the allowlist above covers :443 only, while the base
+        image's sources default to http://, so without it every apt-get here
+        403s and the install silently leaves the sandbox with no gcc.
