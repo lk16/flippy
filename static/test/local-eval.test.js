@@ -1,11 +1,12 @@
 // Tests for queueLocalEvaluations' incremental-depth refinement: each board is evaluated through
-// LOCAL_EVAL_LEVELS (4, 6, 8, 10) in order, so the UI shows a shallow score quickly and sharpens
-// it as deeper wasm searches complete -- and the searches are queued so that the shallow ones all
-// run first (priority), and so that leaving a position abandons its unstarted work (tag).
+// the rungs of LOCAL_EVAL_LEVELS its empty-square count makes worthwhile (localEvalLevelsFor) in
+// order, so the UI shows a shallow score quickly and sharpens it as deeper wasm searches complete
+// -- and the searches are queued so that the shallow ones all run first (priority), and so that
+// leaving a position abandons its unstarted work (tag).
 // EdaxEvalWorkerPool's side of that contract is tested in wasm/edax-eval/js/pool.test.js.
 const assert = require('node:assert');
 const { test } = require('./framework');
-const { buildGame, buildNormalGame, OthelloBoard, LOCAL_EVAL_LEVELS } = require('./harness');
+const { buildGame, buildNormalGame, OthelloBoard, LOCAL_EVAL_LEVELS, localEvalLevelsFor } = require('./harness');
 const { FORCED_PASS_BOARDS } = require('./fixtures');
 
 function flush() {
@@ -36,7 +37,32 @@ function mockWorkerPool() {
 }
 
 test('LOCAL_EVAL_LEVELS is the documented incremental depth sequence', () => {
-  assert.deepEqual(LOCAL_EVAL_LEVELS, [4, 6, 8, 10]);
+  assert.deepEqual(LOCAL_EVAL_LEVELS, [4, 6, 8, 10, 12, 14, 16]);
+});
+
+test('localEvalLevelsFor: an opening position climbs the whole ladder', () => {
+  assert.deepEqual(localEvalLevelsFor(60), LOCAL_EVAL_LEVELS);
+  // 28 empties is the shallowest position that still searches levels 13-18 at fixed depth.
+  assert.deepEqual(localEvalLevelsFor(28), LOCAL_EVAL_LEVELS);
+});
+
+test('localEvalLevelsFor: stops before rungs that would turn into an endgame solve', () => {
+  // 25-27 empties: level 12 is still a fixed-depth search, 14 and 16 would solve to the end.
+  assert.deepEqual(localEvalLevelsFor(27), [4, 6, 8, 10, 12]);
+  assert.deepEqual(localEvalLevelsFor(25), [4, 6, 8, 10, 12]);
+  // 21-24 empties: even level 12 would solve to the end (selectively, so not even exactly).
+  assert.deepEqual(localEvalLevelsFor(24), [4, 6, 8, 10]);
+  assert.deepEqual(localEvalLevelsFor(21), [4, 6, 8, 10]);
+});
+
+test('localEvalLevelsFor: stops at the rung that solves the position exactly', () => {
+  // Level 10 solves exactly at <= 20 empties, so nothing deeper can improve on it.
+  assert.deepEqual(localEvalLevelsFor(20), [4, 6, 8, 10]);
+  // ...and level 8 already does at <= 16, level 4 at <= 8.
+  assert.deepEqual(localEvalLevelsFor(16), [4, 6, 8]);
+  assert.deepEqual(localEvalLevelsFor(12), [4, 6]);
+  assert.deepEqual(localEvalLevelsFor(8), [4]);
+  assert.deepEqual(localEvalLevelsFor(0), [4]);
 });
 
 test('queueLocalEvaluations: refines a board through LOCAL_EVAL_LEVELS in order', async () => {
@@ -62,6 +88,32 @@ test('queueLocalEvaluations: refines a board through LOCAL_EVAL_LEVELS in order'
 
   assert.equal(pool.calls.length, LOCAL_EVAL_LEVELS.length, 'exactly one evaluate() call per level, no more');
   assert.ok(!game._pendingLocalEvals.has(boardStr), 'no longer pending once the chain completes');
+});
+
+test('queueLocalEvaluations: an endgame board stops at the rung that solves it exactly', async () => {
+  const game = buildGame(FORCED_PASS_BOARDS, { complete: false });
+  const pool = mockWorkerPool();
+  game.edaxWorkerPool = pool;
+
+  // A child with 56 discs, i.e. 8 empties: level 4 already searches to the end of the game, so
+  // levels 6-16 would spend the same seconds recomputing a score that cannot change.
+  const boardStr = game.pgnAllChildStrings.find((s) => game.discCountFromBoardStr(s) === 56);
+  assert.ok(boardStr, 'fixture line reaches 56 discs');
+  game.queueLocalEvaluations([boardStr]);
+  await flush();
+
+  assert.deepEqual(pool.calls.map((c) => c.level), [4]);
+  pool.calls[0].resolve(-4);
+  await flush();
+  await flush();
+
+  assert.equal(pool.calls.length, 1, 'the chain stops rather than climbing on to level 6');
+  assert.equal(game.evaluations.get(boardStr).level, 4);
+  assert.ok(!game._pendingLocalEvals.has(boardStr), 'no longer pending once the chain completes');
+
+  // ...and re-queueing it does not restart the chain either.
+  game.queueLocalEvaluations([boardStr]);
+  assert.equal(pool.calls.length, 1);
 });
 
 test('queueLocalEvaluations: stops refining once a server-sourced evaluation supersedes the board', async () => {

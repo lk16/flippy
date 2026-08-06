@@ -40,7 +40,7 @@ global.fetch = () => Promise.reject(new Error('no network in tests'));
 global.requestAnimationFrame = (cb) => setTimeout(cb, 0);
 
 // ── Load the real classes ────────────────────────────────────────────────────
-const { OthelloBoard, OthelloGame, LOCAL_EVAL_LEVELS } = require('../board.js');
+const { OthelloBoard, OthelloGame, LOCAL_EVAL_LEVELS, localEvalLevelsFor } = require('../board.js');
 
 const DEFAULT_LEVEL_CONFIG = {
   priorityLevel: 10,
@@ -141,4 +141,5 @@ module.exports = {
   graphSegments,
   DEFAULT_LEVEL_CONFIG,
   LOCAL_EVAL_LEVELS,
+  localEvalLevelsFor,
 };
