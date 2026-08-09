@@ -39,6 +39,123 @@ global.WebSocket.OPEN = 1;
 global.fetch = () => Promise.reject(new Error('no network in tests'));
 global.requestAnimationFrame = (cb) => setTimeout(cb, 0);
 
+// ── Cell-aware DOM ───────────────────────────────────────────────────────────
+// The stubs above answer every query with an empty list, which is enough for the pure-data tests
+// but hides *where* a render puts things. installCellDOM() swaps in a document with 64 real cell
+// elements, so a test can assert which squares ended up with a score overlay — the difference
+// between a score under a legal move and a score sitting on top of a disc.
+
+class FakeElement {
+  constructor() {
+    this.children = [];
+    this.parentNode = null;
+    this.dataset = {};
+    this.style = {};
+    this.textContent = '';
+    this.innerHTML = '';
+    this.width = 400;
+    this.height = 200;
+    this._classes = new Set();
+  }
+
+  get className() { return [...this._classes].join(' '); }
+  set className(value) { this._classes = new Set(String(value).split(/\s+/).filter(Boolean)); }
+
+  get classList() {
+    return {
+      add: (...cs) => cs.forEach((c) => this._classes.add(c)),
+      remove: (...cs) => cs.forEach((c) => this._classes.delete(c)),
+      contains: (c) => this._classes.has(c),
+      toggle: (c, force) => {
+        const on = force === undefined ? !this._classes.has(c) : force;
+        if (on) this._classes.add(c); else this._classes.delete(c);
+      },
+    };
+  }
+
+  appendChild(child) { child.parentNode = this; this.children.push(child); return child; }
+
+  removeChild(child) {
+    const i = this.children.indexOf(child);
+    if (i >= 0) this.children.splice(i, 1);
+    child.parentNode = null;
+    return child;
+  }
+
+  remove() { if (this.parentNode) this.parentNode.removeChild(this); }
+
+  querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
+
+  querySelectorAll(selector) { return matchElements(this.children, selector); }
+
+  addEventListener() {}
+  focus() {}
+  getBoundingClientRect() { return { width: 400, height: 200, left: 0, top: 0 }; }
+  getContext() { return new Proxy({}, { get: () => () => {} }); }
+}
+
+// matchElements supports exactly the selector shapes board.js uses: a class chain
+// ('.cell.next-move-played'), a descendant pair ('.cell .score-display') and an attribute lookup
+// ('.cell[data-index="12"]').
+function matchElements(elements, selector) {
+  const parts = selector.trim().split(/\s+/);
+  if (parts.length > 1) {
+    return matchElements(elements, parts[0]).flatMap((el) => matchElements(el.children, parts.slice(1).join(' ')));
+  }
+  const attr = /^(\.[\w-]+)\[data-index="(\d+)"\]$/.exec(selector);
+  if (attr) {
+    return matchElements(elements, attr[1]).filter((el) => el.dataset.index === attr[2]);
+  }
+  const classes = selector.split('.').filter(Boolean);
+  const out = [];
+  for (const el of elements) {
+    if (classes.every((c) => el._classes.has(c))) out.push(el);
+    out.push(...matchElements(el.children, selector));
+  }
+  return out;
+}
+
+// installCellDOM replaces global.document with one holding 64 '.cell' elements (data-index 0..63),
+// as initializeBoard() builds in the browser. Call restore() afterwards so the cheap stubs are
+// back for the other tests.
+function installCellDOM() {
+  const previous = global.document;
+  const cells = [];
+  for (let i = 0; i < 64; i++) {
+    const cell = new FakeElement();
+    cell.className = 'cell';
+    cell.dataset.index = String(i);
+    cells.push(cell);
+  }
+  const byId = new Map();
+
+  global.document = {
+    getElementById: (id) => {
+      if (!byId.has(id)) byId.set(id, new FakeElement());
+      return byId.get(id);
+    },
+    createElement: () => new FakeElement(),
+    querySelector: (selector) => matchElements(cells, selector)[0] || null,
+    querySelectorAll: (selector) => matchElements(cells, selector),
+    addEventListener: () => {},
+  };
+
+  return {
+    cells,
+    // scoredIndices lists the squares currently showing a move score, in ascending order.
+    scoredIndices: () => cells
+      .filter((c) => c.querySelector('.score-display'))
+      .map((c) => Number(c.dataset.index))
+      .sort((a, b) => a - b),
+    // discIndices lists the squares currently holding a disc.
+    discIndices: () => cells
+      .filter((c) => c.querySelector('.piece'))
+      .map((c) => Number(c.dataset.index))
+      .sort((a, b) => a - b),
+    restore: () => { global.document = previous; },
+  };
+}
+
 // ── Load the real classes ────────────────────────────────────────────────────
 const { OthelloBoard, OthelloGame, LOCAL_EVAL_LEVELS } = require('../board.js');
 
@@ -136,6 +253,7 @@ function buildNormalGame(board = new OthelloBoard()) {
 module.exports = {
   OthelloBoard,
   OthelloGame,
+  installCellDOM,
   buildGame,
   buildNormalGame,
   graphSegments,

@@ -520,6 +520,7 @@ class OthelloGame {
         button.textContent = this.evalMode ? 'Hide evals' : 'Show evals';
 
         const currentBoard = this.pgnState === 'graph' ? this.pgnDisplayBoardOriented() : this.board;
+        if (!currentBoard) return;
 
         if (this.evalMode) {
             this.requestMissingEvaluations(currentBoard);
@@ -924,7 +925,7 @@ class OthelloGame {
 
     // renderEvaluations shows each legal move's score (negation of its child's stored score).
     renderEvaluations(board) {
-        if (!this.evalMode) return;
+        if (!this.evalMode || !board) return;
         let bestScore = -Infinity;
         const moveEvaluations = new Map();
         let haveAllEvaluations = true;
