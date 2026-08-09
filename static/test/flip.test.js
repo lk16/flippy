@@ -46,6 +46,26 @@ test('flipping issues no new evaluation requests when children are already cache
   assert.equal(sent.length, 0, 'no requests sent when flipping with fully-cached children');
 });
 
+test('evaluation re-renders use the flipped board, so scores land on the flipped squares', async () => {
+  const game = buildGame(FORCED_PASS_BOARDS);
+  game.pgnCurrentPly = 0;
+  const rendered = [];
+  game.renderEvaluations = (board) => rendered.push(board);
+
+  game.flipped = true;
+  // Every path that re-renders scores without a full pgnRenderCurrentPly: a late evaluation
+  // arriving over the websocket, and a wasm worker result.
+  game.handleEvaluations([{ board: game.pgnChildrenByPly[0][0], score: 42, source: 'edax', level: 24 }]);
+  game._scheduleLocalEvalRender();
+  await new Promise((resolve) => setTimeout(resolve, 1)); // let the rAF-batched render run
+
+  const expected = game.pgnBoards[0].rotate(3).toString();
+  assert.ok(rendered.length > 0, 'expected at least one re-render');
+  for (const board of rendered) {
+    assert.equal(board.toString(), expected, 're-render used the unflipped board');
+  }
+});
+
 test('a click on the flipped board plays the same move as square 63-index', () => {
   const game = buildGame(FORCED_PASS_BOARDS);
   game.pgnCurrentPly = 0;

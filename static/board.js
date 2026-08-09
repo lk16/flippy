@@ -402,7 +402,7 @@ class OthelloGame {
         this.edaxWorkerPool.ready()
             .then(() => {
                 this.requestMissingEvaluations(this.board);
-                this.renderEvaluations(this.pgnState === 'graph' ? this.pgnDisplayBoard() : this.board);
+                this.renderEvaluations(this.pgnState === 'graph' ? this.pgnDisplayBoardOriented() : this.board);
             })
             .catch((error) => {
                 console.error('edax-eval: failed to load WASM evaluator; positions beyond the saved book stay unevaluated', error);
@@ -519,7 +519,7 @@ class OthelloGame {
         const button = document.getElementById('eval-mode-button');
         button.textContent = this.evalMode ? 'Hide evals' : 'Show evals';
 
-        const currentBoard = this.pgnState === 'graph' ? this.pgnBoards[this.pgnCurrentPly] : this.board;
+        const currentBoard = this.pgnState === 'graph' ? this.pgnDisplayBoardOriented() : this.board;
 
         if (this.evalMode) {
             this.requestMissingEvaluations(currentBoard);
@@ -823,7 +823,7 @@ class OthelloGame {
         this._localEvalRenderPending = true;
         requestAnimationFrame(() => {
             this._localEvalRenderPending = false;
-            this.renderEvaluations(this.pgnState === 'graph' ? this.pgnDisplayBoard() : this.board);
+            this.renderEvaluations(this.pgnState === 'graph' ? this.pgnDisplayBoardOriented() : this.board);
         });
     }
 
@@ -886,7 +886,7 @@ class OthelloGame {
             this.pgnUpdateGraphStatus();
             this.pgnRequestLevelUps();
             if (this.evalMode) {
-                this.renderEvaluations(this.pgnDisplayBoard());
+                this.renderEvaluations(this.pgnDisplayBoardOriented());
             }
         } else {
             this.renderEvaluations(this.board);
@@ -1265,6 +1265,15 @@ class OthelloGame {
         return this.pgnBoards[this.pgnCurrentPly];
     }
 
+    // pgnDisplayBoardOriented is pgnDisplayBoard() with the F-key flip applied, i.e. the board as
+    // laid out on screen. Anything mapped onto cells (discs, move scores, best-move circle) must
+    // use it, or the overlay lands on the unflipped squares. No evaluation is recomputed: rotate(3)
+    // leaves normalize() unchanged, so the same cached child evaluations are looked up.
+    pgnDisplayBoardOriented() {
+        const board = this.pgnDisplayBoard();
+        return board && this.flipped ? board.rotate(3) : board;
+    }
+
     // pgnOnSquareClick plays the clicked move on the displayed board (mirrors pgn.py on_move).
     // Clicking the move actually played in the PGN advances the line like arrow-right; any other
     // legal move diverges by pushing the resulting board onto the divergence stack.
@@ -1343,11 +1352,10 @@ class OthelloGame {
     }
 
     pgnRenderCurrentPly() {
-        const underlying = this.pgnDisplayBoard();
-        if (!underlying) return;
-        // Apply the visual flip (rotate(3): square i -> 63-i). Disc counts, turn, moves and
-        // game-over state are all rotation-invariant, so everything below can use `board`.
-        const board = this.flipped ? underlying.rotate(3) : underlying;
+        // Disc counts, turn, moves and game-over state are all rotation-invariant, so everything
+        // below can use the display-oriented (possibly flipped) board.
+        const board = this.pgnDisplayBoardOriented();
+        if (!board) return;
 
         document.querySelectorAll('.cell .score-display').forEach((el) => el.remove());
         document.querySelectorAll('.best-move-circle').forEach((el) => el.remove());
