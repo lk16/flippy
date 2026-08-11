@@ -4,7 +4,7 @@ name: project-network-policy
 displayName: Project minimal network policy
 description: Minimal Anthropic API access + Docker Hub pulls for flippy's test.sh (personal-claude profile)
 
-caps:
+permissions:
   network:
     allow:
       - api.anthropic.com:443            # personal-claude's actual API calls (not auto-included by the claude kit)
@@ -15,7 +15,7 @@ caps:
       - archive.ubuntu.com:443           # apt install of gcc/libc6-dev below (C toolchain for wasm/edax-eval native builds)
       - security.ubuntu.com:443
 
-commands:
+setup:
   startup:
     - command: ["sudo", "rm", "-f", "/usr/local/bin/clipboard-bridge", "/usr/local/bin/sbx-clipboard"]
       description: Remove the clipboard bridge binaries (no documented off-switch exists)
