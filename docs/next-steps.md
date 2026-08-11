@@ -153,6 +153,88 @@ dropping the columns removes the evidence. Stored `depth` is also edax's
 read shallower than the formula — nothing cuts one short today, but the
 validation should warn before it rejects.
 
+## Import the pre-rewrite book archive
+
+Not started. Numbers below come from `old/ignored/edax_1763247601.sql.gz`
+(2,422,020 rows, Nov 2025) against `backups/boards_1786462307.sql.gz`
+(14,121,197 rows) — both gitignored, so re-derive if they move.
+
+### All of it transfers, not half
+
+The old `edax` table stored one row per position with the turn thrown
+away; `boards` stores the turn. That looks like only the parity-matching
+half can be reused. It isn't a constraint at all: **the score depends only
+on `(mover, opponent)`, never on which colour holds which discs.** Three
+independent confirmations:
+
+- **Edax's own representation.** `Board` is `{player, opponent}`
+  (`bit.h:147`). `board_set` (`board.c:101-146`) reads `X` into `player`
+  and `O` into `opponent`, then calls `board_swap_players` if the turn
+  field says `O`. Colour is discarded before the search starts, so a
+  colour-swapped problem line with the flipped turn is bit-identical
+  input.
+- **Measured.** 500 book positions solved at level 14 with `-n-tasks 1`,
+  each as itself and colour-flipped: 500/500 identical scores (67 distinct
+  values). At `-n-tasks 4`, 7/500 differ — but the same file against
+  itself differs in 5/500, so that is parallel-search nondeterminism, not
+  the flip.
+- **In the data.** On the 26,173 covered rows where both books searched at
+  the same `(level, depth, confidence)`, scores agree 94.05% for
+  black-to-move and 93.84% for white-to-move. No colour asymmetry; the 6%
+  gap is that same nondeterminism (77% of it is ±1).
+
+### Mapping the rows
+
+Normalization is unchanged — both minimize `(mover, opponent)` over the 8
+symmetries, with identical flip primitives. Against that one shared rule,
+0 of 2,422,020 old rows and 0 of 14,121,197 new rows come out
+unnormalized, and every row's `disc_count` matches its bitboards. Only the
+encoding differs:
+old is 16 bytes little-endian `(player, opponent)`, new is 17 bytes
+big-endian `(black, white, turn)`.
+
+Turn follows disc parity — even is black to move, odd is white — with
+passes as the only exception, and they are rare (at 30 discs: 1,450,922
+black-to-move rows against 1,028 white). So map an old row to
+`turn = parity`. Writing *both* turns is also always sound and picks up
+the pass positions, at the cost of ~2.4M rows that only a pass line will
+ever look up — dead weight in the row counts, not wrong answers.
+
+### What it buys
+
+Old rows answer 2,366,277 new rows (16.8% of the book), split 1,261,106
+black-to-move and 1,105,171 white-to-move — both parities land, as
+predicted. Only 55,743 old positions are missing from the book entirely.
+The archive is never the weaker of the two: `old.level < new.level` in 0
+of those 2.37M rows (the book is mostly level 16, the archive 32-40).
+
+Against the current targets, counting rows at or above `TargetLevel`:
+
+| | at target |
+|---|---|
+| now | 206,533 (1.5%) |
+| after import | 2,443,707 (17.3%) |
+
+That is **2,237,174 target-level searches avoided**, 15.8% of the book,
+and the expensive kind — level 28-32 rather than the level-16 rows they
+replace. Fairly flat across the board: 22% of the below-target rows at
+15-16 discs, sliding to 14.5% at 30 discs. (12-disc boards are already
+fully covered by `precomputed_boards_12discs.txt`.)
+
+### Import notes
+
+- Recompute `(depth, confidence)` from `(disc_count, level)` rather than
+  copying the old columns — the relation above is exact, and 0 of the
+  14,121,197 current rows disagree with it.
+- 949 old rows (0.04%) carry a `depth` below what their level implies,
+  usually 0 — exactly the cut-short searches the previous section warns
+  about. Their `level` overstates the search that produced the score, so
+  drop them instead of trusting either column.
+- `best_moves` has no counterpart in `boards`; it is dropped on import.
+- Load into a staging table and let the existing
+  `($1, $3) > (level, confidence)` guard in `SaveEvaluation` decide, so a
+  row the book already has at a higher level is not downgraded.
+
 ## Testing gaps
 
 - The websocket client's reconnect/queueing logic has no JS unit tests;
