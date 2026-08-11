@@ -70,11 +70,13 @@ type pgnResponse struct {
 	Boards []string `json:"boards"`
 }
 
-// levelConfigResponse is the JSON body returned by GET /api/level-config.
+// levelConfigResponse is the JSON body returned by GET /api/level-config. TargetLevels carries the
+// whole disc-count tier table rather than a summary of it, so the frontend's notion of a board's
+// target level matches EffectiveTargetLevel exactly -- a board whose target the frontend puts
+// higher than the server's clamp can never reach it, leaving the PGN page reporting a search that
+// never finishes.
 type levelConfigResponse struct {
-	PriorityLevel      int `json:"priority_level"`
-	MaxSavableDiscs    int `json:"max_savable_discs"`
-	LeafDiscs          int `json:"leaf_discs"`
-	TargetLevelLeaf    int `json:"target_level_leaf"`
-	TargetLevelNonLeaf int `json:"target_level_non_leaf"`
+	PriorityLevel   int               `json:"priority_level"`
+	MaxSavableDiscs int               `json:"max_savable_discs"`
+	TargetLevels    []TargetLevelTier `json:"target_levels"`
 }

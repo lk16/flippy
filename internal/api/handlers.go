@@ -397,11 +397,9 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 // determine how many level-increment rounds to request per board.
 func (s *Server) handleLevelConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, levelConfigResponse{
-		PriorityLevel:      PriorityLevel,
-		MaxSavableDiscs:    book.MaxSavableDiscs,
-		LeafDiscs:          book.LeafDiscs,
-		TargetLevelLeaf:    TargetLevel(book.LeafDiscs),
-		TargetLevelNonLeaf: TargetLevel(book.LeafDiscs + 1),
+		PriorityLevel:   PriorityLevel,
+		MaxSavableDiscs: book.MaxSavableDiscs,
+		TargetLevels:    TargetLevelTiers(),
 	})
 }
 
