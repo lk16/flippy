@@ -86,7 +86,7 @@ func main() {
 
 	addr := os.Getenv("FLIPPY_SERVER_ADDR")
 	if addr == "" {
-		addr = ":8080"
+		addr = ":7777"
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

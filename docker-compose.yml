@@ -37,7 +37,7 @@ services:
       dockerfile: cmd/worker/Dockerfile
     network_mode: host
     environment:
-      FLIPPY_SERVER_URL: ${FLIPPY_SERVER_URL:-http://localhost:8080}
+      FLIPPY_SERVER_URL: ${FLIPPY_SERVER_URL:-http://localhost:7777}
       EDAX_PATH: /edax/bin/lEdax-x64
       EDAX_TASKS: ${EDAX_TASKS:-1}
     volumes:
