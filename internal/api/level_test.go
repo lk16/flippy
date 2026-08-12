@@ -7,13 +7,15 @@ import (
 )
 
 func TestTargetLevel(t *testing.T) {
-	require.Equal(t, 32, TargetLevel(12))
-	require.Equal(t, 32, TargetLevel(16))
-	require.Equal(t, 30, TargetLevel(17))
-	require.Equal(t, 30, TargetLevel(20))
-	require.Equal(t, 28, TargetLevel(21))
-	require.Equal(t, 28, TargetLevel(30))
-	require.Equal(t, 28, TargetLevel(64))
+	require.Equal(t, 40, TargetLevel(12))
+	require.Equal(t, 40, TargetLevel(13))
+	require.Equal(t, 36, TargetLevel(14))
+	require.Equal(t, 36, TargetLevel(16))
+	require.Equal(t, 34, TargetLevel(17))
+	require.Equal(t, 34, TargetLevel(20))
+	require.Equal(t, 32, TargetLevel(21))
+	require.Equal(t, 32, TargetLevel(30))
+	require.Equal(t, 32, TargetLevel(64))
 }
 
 // TestTargetLevelTiers_MatchTargetLevel guards the contract handleLevelConfig relies on: the tiers
@@ -39,5 +41,5 @@ func TestTargetLevelTiers_MatchTargetLevel(t *testing.T) {
 // TestTargetLevelTiers_ReturnsACopy makes sure a caller cannot rewrite the table TargetLevel reads.
 func TestTargetLevelTiers_ReturnsACopy(t *testing.T) {
 	TargetLevelTiers()[0].Level = 1
-	require.Equal(t, 32, TargetLevel(4))
+	require.Equal(t, 40, TargetLevel(4))
 }

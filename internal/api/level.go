@@ -15,10 +15,13 @@ type TargetLevelTier struct {
 
 // targetLevelTiers is the single source of truth for TargetLevel, also served to the frontend
 // verbatim by handleLevelConfig so it computes the same targets the server enforces.
+// Levels match the deepest search the pre-rewrite archive holds at each disc count, so an imported
+// row lands exactly at target rather than above or below it (see docs/next-steps.md).
 var targetLevelTiers = []TargetLevelTier{
-	{MaxDiscs: 16, Level: 32},
-	{MaxDiscs: 20, Level: 30},
-	{MaxDiscs: 64, Level: 28},
+	{MaxDiscs: 13, Level: 40},
+	{MaxDiscs: 16, Level: 36},
+	{MaxDiscs: 20, Level: 34},
+	{MaxDiscs: 64, Level: 32},
 }
 
 // TargetLevelTiers returns a copy of the disc-count tiers TargetLevel is defined by.
