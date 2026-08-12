@@ -17,7 +17,7 @@ is required — pick items up when a real need appears.
 - **Stricter evaluation validation**: submitted results check
   level/depth/score bounds, but not the confidence enum
   ({73,87,95,98,99,100}) or an explicit level floor (`TargetLevel` never
-  assigns below 28, so the floor holds by construction, not by input
+  assigns below 32, so the floor holds by construction, not by input
   validation).
 - **PGN illegal-move tolerance**: old auto-inserted a pass when a recorded
   move was illegal, recovering from bad data; our parser errors instead.
@@ -68,16 +68,19 @@ Two things that look obvious and aren't:
 
 ### Drop the two columns
 
-At its target level every board in the book comes out at 73% confidence,
-with `depth = min(level, n_empties)` — six distinct `(depth, confidence)`
-pairs across the whole table:
+At its target level a board in the book stores `depth = level`, until the
+search can already reach the end of the game and depth becomes the empty
+count instead. Confidence is 73% up to 27 discs and 95% past it — ten
+distinct `(depth, confidence)` pairs across the whole table:
 
 | discs | target level | stored |
 |---|---|---|
-| 12-16 | 32 | `32@73%` |
-| 17-20 | 30 | `30@73%` |
-| 21-27 | 28 | `28@73%` |
-| 28-30 | 28 | `36@73%`, `35@73%`, `34@73%` (exact depth) |
+| 12-13 | 40 | `40@73%` |
+| 14-16 | 36 | `36@73%` |
+| 17-20 | 34 | `34@73%` |
+| 21-24 | 32 | `32@73%` |
+| 25-27 | 32 | `39@73%`, `38@73%`, `37@73%` (exact depth) |
+| 28-30 | 32 | `36@95%`, `35@95%`, `34@95%` (exact depth) |
 
 Nothing in SQL reads either column except `SaveEvaluation`'s
 `($1, $3) > (level, confidence)` guard (`internal/db/repository.go:114`),
@@ -98,10 +101,11 @@ the wire for one release and checking against the formula in
 
 ### Skip searches that cannot tell us anything new
 
-The book itself is already tight: over disc counts 12-30, no two levels
-below the target produce the same `(depth, confidence)`, and an exact
-solve at 34 empties needs level 40 — far above the target of 28. So every
-`+2` rung there is real work.
+The book itself is already tight: over disc counts 12-30, no two rungs of
+the `+2` ladder produce the same `(depth, confidence)`, and a full-width
+solve at 34 empties needs level 40 — above the 32 those boards target. So
+every `+2` rung there is real work. (Levels 29 and 31 do repeat 28 and 30
+at 28-30 discs, but the ladder only ever asks for even levels.)
 
 The waste is in the endgame, and PGN review walks straight into it:
 `pgnSendRequests` (`static/board.js`) sends the whole line to the server
@@ -139,7 +143,7 @@ Three fixes fall out:
 - `validateJobResult` (`internal/api/handlers.go:81`) range-checks depth
   and confidence independently; it could assert the exact expected pair.
 - `TargetLevel`'s tiers are expressed in level, which means very different
-  work per board: at level 28 a 21-disc board gets a 28-ply midgame search
+  work per board: at level 32 a 21-disc board gets a 32-ply midgame search
   and a 30-disc board a full 34-empty solve. If the intent is roughly
   equal cost per board, tier on the resulting `(depth, confidence)`.
 - `book validate` (listed under CLI tools above) gets a real check:
@@ -208,18 +212,24 @@ predicted. Only 55,743 old positions are missing from the book entirely.
 The archive is never the weaker of the two: `old.level < new.level` in 0
 of those 2.37M rows (the book is mostly level 16, the archive 32-40).
 
-Against the current targets, counting rows at or above `TargetLevel`:
+`TargetLevel`'s tiers were then set to the archive's own maximum at each
+disc count (40/36/34/32), so an imported row lands exactly at target
+rather than above or below it. Counting rows at or above `TargetLevel`:
 
 | | at target |
 |---|---|
-| now | 206,533 (1.5%) |
-| after import | 2,443,707 (17.3%) |
+| now | 0 |
+| after import | 2,339,191 (16.6%) |
 
-That is **2,237,174 target-level searches avoided**, 15.8% of the book,
-and the expensive kind — level 28-32 rather than the level-16 rows they
-replace. Fairly flat across the board: 22% of the below-target rows at
-15-16 discs, sliding to 14.5% at 30 discs. (12-disc boards are already
-fully covered by `precomputed_boards_12discs.txt`.)
+That is **2,339,191 target-level searches avoided**, and the expensive
+kind — level 32-40 against a book currently sitting mostly at 16. Fairly
+flat across disc counts: every 12-disc board, then ~22% of the rest at
+13-16 discs sliding to 14.5% at 30.
+
+Nothing is at target beforehand because the tiers moved: the 206,533 rows
+that met the old 32/30/28 targets no longer meet 40/36/34/32. That is the
+cost side of matching the archive — the 11.8M rows it does *not* cover now
+need a deeper search than they did before.
 
 ### Import notes
 

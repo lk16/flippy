@@ -164,9 +164,10 @@ const DEFAULT_LEVEL_CONFIG = {
   priorityLevel: 10,
   maxSavableDiscs: 30,
   targetLevels: [
-    { maxDiscs: 16, level: 32 },
-    { maxDiscs: 20, level: 30 },
-    { maxDiscs: 64, level: 28 },
+    { maxDiscs: 13, level: 40 },
+    { maxDiscs: 16, level: 36 },
+    { maxDiscs: 20, level: 34 },
+    { maxDiscs: 64, level: 32 },
   ],
 };
 
