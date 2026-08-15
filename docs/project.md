@@ -25,8 +25,10 @@ stored in Postgres, and browsed via a web frontend.
 ## Stack
 
 - Go (version in `go.mod`); deps: pgx, go-redis, coder/websocket, testify, godotenv
-- Postgres — single `boards` table (position, disc count, level,
-  evaluation); migrations via golang-migrate (`migrations/`)
+- Postgres — single `boards` table (position, disc count, level, score;
+  depth and confidence follow from disc count + level, see
+  `internal/edax.SearchParams`); migrations via golang-migrate
+  (`migrations/`), one-shot operator SQL in `scripts/`
 - Redis — job claims, worker heartbeats, stats cache
 - edax — external binary; `EDAX_PATH` in `.env` (see `.env.sample`)
 - Frontend — Go `html/template` + vanilla JS/CSS in `static/`, no build step
