@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -393,12 +395,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries := make([]statEntry, len(stats))
-	for i, stat := range stats {
-		entries[i] = statEntry{DiscCount: stat.DiscCount, Level: stat.Level, Count: stat.Count}
-	}
-
-	data, err := json.Marshal(entries)
+	data, err := json.Marshal(statEntries(stats))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -410,6 +407,39 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+}
+
+// statEntries turns per-(disc count, level) counts into per-(disc count, depth, confidence) counts.
+// Levels are an implementation detail of how a search is requested: what a board is actually worth
+// is the search it got, so levels describing the same search at the same disc count are merged.
+// Unlearned boards (level 0) are reported as depth 0, confidence 0 rather than what the level table
+// says a zero-level search would be, which would read as a full-confidence result.
+// The result is ordered by disc count, then depth, then confidence.
+func statEntries(stats []db.LevelStat) []statEntry {
+	counts := make(map[statEntry]int, len(stats))
+	for _, stat := range stats {
+		key := statEntry{DiscCount: stat.DiscCount}
+		if stat.Level > 0 {
+			key.Depth, key.Confidence = edax.SearchParams(stat.DiscCount, stat.Level)
+		}
+		counts[key] += stat.Count
+	}
+
+	entries := make([]statEntry, 0, len(counts))
+	for key, count := range counts {
+		key.Count = count
+		entries = append(entries, key)
+	}
+
+	slices.SortFunc(entries, func(a, b statEntry) int {
+		return cmp.Or(
+			cmp.Compare(a.DiscCount, b.DiscCount),
+			cmp.Compare(a.Depth, b.Depth),
+			cmp.Compare(a.Confidence, b.Confidence),
+		)
+	})
+
+	return entries
 }
 
 // handleLevelConfig handles GET /api/level-config: returns the constants the frontend needs to

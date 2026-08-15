@@ -52,11 +52,15 @@ type evaluationResponse struct {
 	Source     string `json:"source"`
 }
 
-// statEntry is one row of the GET /api/stats response.
+// statEntry is one row of the GET /api/stats response: how many boards with DiscCount discs have
+// been searched to Depth at Confidence percent. Levels are not reported -- two levels that search a
+// board identically are one entry -- and unlearned boards report depth 0, confidence 0, since no
+// search was run on them at all.
 type statEntry struct {
-	DiscCount int `json:"disc_count"`
-	Level     int `json:"level"`
-	Count     int `json:"count"`
+	DiscCount  int `json:"disc_count"`
+	Depth      int `json:"depth"`
+	Confidence int `json:"confidence"`
+	Count      int `json:"count"`
 }
 
 // workerResponse is one entry of the GET /api/workers response.

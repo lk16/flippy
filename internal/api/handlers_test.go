@@ -483,7 +483,42 @@ func TestHandleStats_ReturnsCounts(t *testing.T) {
 
 	var entries []statEntry
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &entries))
-	require.Contains(t, entries, statEntry{DiscCount: 12, Level: 0, Count: 1})
+	require.Contains(t, entries, statEntry{DiscCount: 12, Count: 1})
+}
+
+// TestHandleStats_ReportsDerivedSearchParams checks that a learned board is reported by the search
+// it got rather than by the level that was asked for.
+func TestHandleStats_ReportsDerivedSearchParams(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+	board := testBoard(t, 12)
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Score: 2}))
+
+	w := doRequest(t, s, http.MethodGet, "/api/stats", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var entries []statEntry
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &entries))
+	require.Contains(t, entries, statEntry{DiscCount: 12, Depth: 20, Confidence: 73, Count: 1})
+}
+
+// TestStatEntries_MergesLevelsThatMeanTheSameSearch covers the merge and the ordering: at 44 discs
+// every level from 10 up solves the game outright (20@100%), so those levels are one entry, sorted
+// after the shallower searches and after the unlearned boards.
+func TestStatEntries_MergesLevelsThatMeanTheSameSearch(t *testing.T) {
+	entries := statEntries([]db.LevelStat{
+		{DiscCount: 44, Level: 10, Count: 3},
+		{DiscCount: 44, Level: 12, Count: 5},
+		{DiscCount: 44, Level: 8, Count: 2},
+		{DiscCount: 44, Level: 0, Count: 7},
+	})
+
+	require.Equal(t, []statEntry{
+		{DiscCount: 44, Depth: 0, Confidence: 0, Count: 7},
+		{DiscCount: 44, Depth: 8, Confidence: 100, Count: 2},
+		{DiscCount: 44, Depth: 20, Confidence: 100, Count: 8},
+	}, entries)
 }
 
 func TestHandleListWorkers_Empty(t *testing.T) {

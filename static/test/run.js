@@ -11,5 +11,6 @@ require('./flip.test');
 require('./level.test');
 require('./local-eval.test');
 require('./normal-mode.test');
+require('./stats.test');
 
 runAll().then((ok) => process.exit(ok ? 0 : 1));
