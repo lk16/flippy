@@ -39,7 +39,7 @@ func TestHandleWebSocket_EvaluationRequest_ReturnsFoundEvaluations(t *testing.T)
 
 	board := testBoard(t, 12)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Depth: 20, Confidence: 98, Score: 3}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Score: 3}))
 
 	conn := testWebSocket(t, s)
 
@@ -80,7 +80,7 @@ func TestHandleWebSocket_EvaluationRequest_FallsBackToMinimaxCache(t *testing.T)
 	}
 	require.NoError(t, s.repo.AddBoards(ctx, normalizedChildren))
 	for _, child := range normalizedChildren {
-		require.NoError(t, s.repo.SaveEvaluation(ctx, child, db.Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 1}))
+		require.NoError(t, s.repo.SaveEvaluation(ctx, child, db.Evaluation{Level: 20, Score: 1}))
 	}
 	require.NoError(t, s.cache.Rebuild(ctx))
 
@@ -151,7 +151,7 @@ func TestHandleWebSocket_MalformedBoardIsSkippedNotFatal(t *testing.T) {
 
 	board := testBoard(t, 12)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Depth: 20, Confidence: 98, Score: 3}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Score: 3}))
 
 	conn := testWebSocket(t, s)
 
@@ -204,7 +204,7 @@ func TestHandleWebSocket_AnalyzeRequest_EnqueuesMissingBoards(t *testing.T) {
 	// board1 is already evaluated (DB).
 	board1 := testBoard(t, 12)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board1}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board1, db.Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 4}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, board1, db.Evaluation{Level: 20, Score: 4}))
 
 	// board2 has no evaluation.
 	board2 := testBoard(t, 13)
@@ -271,6 +271,109 @@ func TestHandleWebSocket_AnalyzeRequest_ForcedPassEnqueuesPostPassBoard(t *testi
 	// The post-pass board is enqueued; the un-searchable pass board is not.
 	require.Contains(t, pendingBoards, postPassNormalized.String())
 	require.NotContains(t, pendingBoards, passBoard.Normalize().String())
+}
+
+// TestHandleWebSocket_AnalyzeRequest_SameSearchNotEnqueued verifies that a deeper level asking for
+// a search the board already got is answered from the DB instead of queued: at 30 discs levels 28
+// and 29 both mean a 34-ply search at 73%.
+func TestHandleWebSocket_AnalyzeRequest_SameSearchNotEnqueued(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	board := testBoard(t, 30)
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 28, Score: 7}))
+
+	conn := testWebSocket(t, s)
+
+	require.NoError(t, wsjson.Write(ctx, conn, wsIncoming{
+		ID: 1, Event: "analyze_request",
+		Data: mustMarshal(t, wsEvaluationRequest{Boards: []string{board.String()}, Level: 29}),
+	}))
+
+	var resp wsOutgoing
+	require.NoError(t, wsjson.Read(ctx, conn, &resp))
+
+	// The stored evaluation comes straight back...
+	data := resp.Data.(map[string]any)
+	evaluations := data["evaluations"].([]any)
+	require.Len(t, evaluations, 1)
+	entry := evaluations[0].(map[string]any)
+	require.Equal(t, float64(7), entry["score"])
+	require.Equal(t, float64(34), entry["depth"])
+	require.Equal(t, float64(73), entry["confidence"])
+
+	// ... and no job is queued to compute it again.
+	pending, err := s.dequeuePriority(ctx, 10)
+	require.NoError(t, err)
+	require.Empty(t, pending)
+}
+
+// TestHandleWebSocket_AnalyzeRequest_FinalResultNotEnqueued verifies that a board already searched
+// to the end of the game is never re-queued, however deep a level is requested. At 44 discs every
+// level from 10 up solves the 20 remaining empties outright.
+func TestHandleWebSocket_AnalyzeRequest_FinalResultNotEnqueued(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	// Past MaxSavableDiscs, so the ephemeral analysis cache is where its evaluation lives.
+	board := testBoard(t, 44)
+	s.setAnalysisResult(ctx, board.String(), evaluationResponse{
+		Level: 10, Depth: 20, Confidence: 100, Score: 6, Source: evaluationSourceEdax,
+	})
+
+	s.handleAnalyzeRequest(ctx, []string{board.String()}, 28)
+
+	pending, err := s.dequeuePriority(ctx, 10)
+	require.NoError(t, err)
+	require.Empty(t, pending)
+}
+
+// TestSearchAddsNothing covers when a requested level describes work the stored evaluation already
+// did, and when it does not.
+func TestSearchAddsNothing(t *testing.T) {
+	tests := []struct {
+		name      string
+		eval      evaluationResponse
+		discCount int
+		level     int
+		want      bool
+	}{
+		{
+			name:      "same depth and confidence at a deeper level",
+			eval:      evaluationResponse{Level: 28, Depth: 34, Confidence: 73},
+			discCount: 30,
+			level:     29,
+			want:      true,
+		},
+		{
+			name:      "deeper level buys more confidence",
+			eval:      evaluationResponse{Level: 28, Depth: 34, Confidence: 73},
+			discCount: 30,
+			level:     32,
+			want:      false,
+		},
+		{
+			name:      "stored result already ran the game out",
+			eval:      evaluationResponse{Level: 10, Depth: 20, Confidence: 100},
+			discCount: 44,
+			level:     28,
+			want:      true,
+		},
+		{
+			name:      "midgame search that a deeper level extends",
+			eval:      evaluationResponse{Level: 10, Depth: 10, Confidence: 100},
+			discCount: 12,
+			level:     12,
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, searchAddsNothing(tt.eval, tt.discCount, tt.level))
+		})
+	}
 }
 
 // TestHandleWebSocket_AnalyzeRequest_GameOverNotEnqueued verifies that a game-over board (neither
@@ -340,7 +443,7 @@ func TestHandleWebSocket_AnalyzeRequest_SameShapeAsEvaluationRequest(t *testing.
 
 	board := testBoard(t, 12)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 3}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Score: 3}))
 
 	conn := testWebSocket(t, s)
 

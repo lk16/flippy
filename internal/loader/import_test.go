@@ -68,7 +68,7 @@ func TestImportGames_DoesNotOverwriteLearnedEvaluation(t *testing.T) {
 	_, err := ImportGames(ctx, repo, []*othello.Game{game})
 	require.NoError(t, err)
 
-	learned := db.Evaluation{Level: 24, Depth: 24, Confidence: 100, Score: 3}
+	learned := db.Evaluation{Level: 24, Score: 3}
 	require.NoError(t, repo.SaveEvaluation(ctx, board, learned))
 
 	_, err = ImportGames(ctx, repo, []*othello.Game{game})

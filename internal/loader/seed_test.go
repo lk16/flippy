@@ -57,7 +57,7 @@ func TestSeedBoards_IdempotentDoesNotOverwriteLearnedEvaluation(t *testing.T) {
 	require.NoError(t, SeedBoards(ctx, repo))
 
 	sample := othello.PrecomputedBoards12()[0]
-	want := db.Evaluation{Level: 24, Depth: 24, Confidence: 100, Score: 5}
+	want := db.Evaluation{Level: 24, Score: 5}
 	require.NoError(t, repo.SaveEvaluation(ctx, sample, want))
 
 	require.NoError(t, SeedBoards(ctx, repo))

@@ -80,7 +80,7 @@ func TestCache_Rebuild_BackfillsFromLearnedLeaves(t *testing.T) {
 	for i, child := range normalizedChildren {
 		score := (i % 129) - 64
 		require.NoError(t, repo.SaveEvaluation(ctx, child, db.Evaluation{
-			Level: 20, Depth: 20, Confidence: 100, Score: score,
+			Level: 20, Score: score,
 		}))
 		childScores[child.Board()] = score
 	}
@@ -117,7 +117,7 @@ func TestCache_Rebuild_IncompleteLeavesLeaveBoardUncovered(t *testing.T) {
 
 	// Learn only the first child: coverage of board11 is incomplete.
 	require.NoError(t, repo.SaveEvaluation(ctx, normalizedChildren[0], db.Evaluation{
-		Level: 20, Depth: 20, Confidence: 100, Score: 1,
+		Level: 20, Score: 1,
 	}))
 
 	c := NewCache(repo)
@@ -145,7 +145,7 @@ func TestCache_Rebuild_ReflectsNewlyLearnedLeaves(t *testing.T) {
 
 	// Learn only the first child, rebuild: incomplete, board11 is a miss.
 	require.NoError(t, repo.SaveEvaluation(ctx, normalizedChildren[0], db.Evaluation{
-		Level: 20, Depth: 20, Confidence: 100, Score: 1,
+		Level: 20, Score: 1,
 	}))
 	require.NoError(t, c.Rebuild(ctx))
 	_, ok := c.Get(board11.Board())
@@ -155,7 +155,7 @@ func TestCache_Rebuild_ReflectsNewlyLearnedLeaves(t *testing.T) {
 	// exactly the "recompute whenever a 12-disc evaluation is saved" case.
 	for _, child := range normalizedChildren[1:] {
 		require.NoError(t, repo.SaveEvaluation(ctx, child, db.Evaluation{
-			Level: 20, Depth: 20, Confidence: 100, Score: 1,
+			Level: 20, Score: 1,
 		}))
 	}
 	require.NoError(t, c.Rebuild(ctx))

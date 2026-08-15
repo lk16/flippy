@@ -48,8 +48,8 @@ var testDistinctBoards = othellotest.DistinctBoards
 
 func TestEvaluation_IsLearned(t *testing.T) {
 	require.False(t, Evaluation{}.IsLearned())
-	require.False(t, Evaluation{Depth: 5, Confidence: 50, Score: 2}.IsLearned())
-	require.True(t, Evaluation{Level: 16, Depth: 16, Confidence: 100, Score: 3}.IsLearned())
+	require.False(t, Evaluation{Score: 2}.IsLearned())
+	require.True(t, Evaluation{Level: 16, Score: 3}.IsLearned())
 }
 
 func TestRepository_AddBoards_GetBoard(t *testing.T) {
@@ -70,7 +70,7 @@ func TestRepository_AddBoards_DoesNotOverwriteExisting(t *testing.T) {
 	board := testBoard(t, 12)
 
 	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
-	saved := Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 4}
+	saved := Evaluation{Level: 20, Score: 4}
 	require.NoError(t, repo.SaveEvaluation(ctx, board, saved))
 
 	// Adding the same board again must not clobber the evaluation just saved.
@@ -170,7 +170,7 @@ func TestRepository_SaveEvaluation_Updates(t *testing.T) {
 
 	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
 
-	want := Evaluation{Level: 24, Depth: 24, Confidence: 98, Score: -6}
+	want := Evaluation{Level: 24, Score: -6}
 	require.NoError(t, repo.SaveEvaluation(ctx, board, want))
 
 	got, err := repo.GetBoard(ctx, board.Board())
@@ -178,21 +178,22 @@ func TestRepository_SaveEvaluation_Updates(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
-func TestRepository_SaveEvaluation_HigherConfidenceSameLevelUpdates(t *testing.T) {
+// TestRepository_SaveEvaluation_LowerLevelIsNoOp checks that a shallower search never overwrites a
+// deeper one, whatever score it found.
+func TestRepository_SaveEvaluation_LowerLevelIsNoOp(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 	board := testBoard(t, 12)
 
 	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
-	first := Evaluation{Level: 20, Depth: 20, Confidence: 90, Score: 2}
-	require.NoError(t, repo.SaveEvaluation(ctx, board, first))
+	deep := Evaluation{Level: 24, Score: 2}
+	require.NoError(t, repo.SaveEvaluation(ctx, board, deep))
 
-	better := Evaluation{Level: 20, Depth: 20, Confidence: 95, Score: 3}
-	require.NoError(t, repo.SaveEvaluation(ctx, board, better))
+	require.NoError(t, repo.SaveEvaluation(ctx, board, Evaluation{Level: 20, Score: 3}))
 
 	got, err := repo.GetBoard(ctx, board.Board())
 	require.NoError(t, err)
-	require.Equal(t, better, got)
+	require.Equal(t, deep, got)
 }
 
 func TestRepository_SaveEvaluation_NoOpWhenNotBetter(t *testing.T) {
@@ -201,12 +202,12 @@ func TestRepository_SaveEvaluation_NoOpWhenNotBetter(t *testing.T) {
 	board := testBoard(t, 12)
 
 	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
-	first := Evaluation{Level: 20, Depth: 20, Confidence: 90, Score: 2}
+	first := Evaluation{Level: 20, Score: 2}
 	require.NoError(t, repo.SaveEvaluation(ctx, board, first))
 
-	// Same (level, confidence): not an improvement, so this is a no-op, not
-	// an error.
-	require.NoError(t, repo.SaveEvaluation(ctx, board, first))
+	// Same level: the same search, so this is a no-op, not an error -- even if the score differs
+	// (parallel edax searches are not bit-for-bit deterministic).
+	require.NoError(t, repo.SaveEvaluation(ctx, board, Evaluation{Level: 20, Score: 3}))
 
 	got, err := repo.GetBoard(ctx, board.Board())
 	require.NoError(t, err)
@@ -222,8 +223,8 @@ func TestRepository_ListLearnable_OrdersByDiscCountThenLevel(t *testing.T) {
 	board13, board13Other := board13s[0], board13s[1]
 
 	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board12, board13, board13Other}))
-	require.NoError(t, repo.SaveEvaluation(ctx, board13, Evaluation{Level: 10, Depth: 10, Confidence: 100, Score: 0}))
-	require.NoError(t, repo.SaveEvaluation(ctx, board13Other, Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 0}))
+	require.NoError(t, repo.SaveEvaluation(ctx, board13, Evaluation{Level: 10, Score: 0}))
+	require.NoError(t, repo.SaveEvaluation(ctx, board13Other, Evaluation{Level: 20, Score: 0}))
 
 	results, err := repo.ListLearnable(ctx, 12, 30, 12, 24, 24, 10)
 	require.NoError(t, err)
@@ -246,7 +247,7 @@ func TestRepository_ListLearnable_LeafLevelDoesNotStarveDeeperCandidates(t *test
 	leafBoards := testDistinctBoards(t, 12, 5)
 	require.NoError(t, repo.AddBoards(ctx, leafBoards))
 	for _, board := range leafBoards {
-		require.NoError(t, repo.SaveEvaluation(ctx, board, Evaluation{Level: 24, Depth: 24, Confidence: 100, Score: 0}))
+		require.NoError(t, repo.SaveEvaluation(ctx, board, Evaluation{Level: 24, Score: 0}))
 	}
 
 	board13 := testBoard(t, 13)
@@ -270,7 +271,7 @@ func TestRepository_ListLearnable_MinDiscsAboveLeafDiscsKeepsLeafThreshold(t *te
 	board13 := testBoard(t, 13)
 	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board13}))
 	// Above deeperLevel (16) but below leafLevel (24): distinguishes the two thresholds.
-	require.NoError(t, repo.SaveEvaluation(ctx, board13, Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 0}))
+	require.NoError(t, repo.SaveEvaluation(ctx, board13, Evaluation{Level: 20, Score: 0}))
 
 	// minDiscs (13) equals board13's disc count but leafDiscs is still 12, so board13 must be judged
 	// against deeperLevel (16), not leafLevel (24); a bug binding the leaf check to minDiscs instead of
@@ -323,13 +324,13 @@ func TestRepository_EvaluatedBoards_OnlyReturnsLearnedBoards(t *testing.T) {
 	learned, unlearned := boards[0], boards[1]
 
 	require.NoError(t, repo.AddBoards(ctx, boards))
-	require.NoError(t, repo.SaveEvaluation(ctx, learned, Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 5}))
+	require.NoError(t, repo.SaveEvaluation(ctx, learned, Evaluation{Level: 20, Score: 5}))
 
 	results, err := repo.EvaluatedBoards(ctx, 12)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	require.Equal(t, learned, results[0].Board)
-	require.Equal(t, Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 5}, results[0].Evaluation)
+	require.Equal(t, Evaluation{Level: 20, Score: 5}, results[0].Evaluation)
 
 	require.NotContains(t, results, BoardEvaluation{Board: unlearned})
 }
@@ -341,8 +342,8 @@ func TestRepository_EvaluatedBoards_FiltersByDiscCount(t *testing.T) {
 	board12 := testBoard(t, 12)
 	board13 := testBoard(t, 13)
 	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board12, board13}))
-	require.NoError(t, repo.SaveEvaluation(ctx, board12, Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 0}))
-	require.NoError(t, repo.SaveEvaluation(ctx, board13, Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 0}))
+	require.NoError(t, repo.SaveEvaluation(ctx, board12, Evaluation{Level: 20, Score: 0}))
+	require.NoError(t, repo.SaveEvaluation(ctx, board13, Evaluation{Level: 20, Score: 0}))
 
 	results, err := repo.EvaluatedBoards(ctx, 12)
 	require.NoError(t, err)
@@ -367,7 +368,7 @@ func TestRepository_Stats(t *testing.T) {
 	board13 := testBoard(t, 13)
 
 	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board12a, board12b, board13}))
-	require.NoError(t, repo.SaveEvaluation(ctx, board12a, Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 0}))
+	require.NoError(t, repo.SaveEvaluation(ctx, board12a, Evaluation{Level: 20, Score: 0}))
 
 	stats, err := repo.Stats(ctx)
 	require.NoError(t, err)
@@ -375,23 +376,4 @@ func TestRepository_Stats(t *testing.T) {
 	require.Contains(t, stats, LevelStat{DiscCount: 12, Level: 0, Count: 1})
 	require.Contains(t, stats, LevelStat{DiscCount: 12, Level: 20, Count: 1})
 	require.Contains(t, stats, LevelStat{DiscCount: 13, Level: 0, Count: 1})
-}
-
-func TestRepository_SaveEvaluation_NoOpWhenLevelLowerDespiteHigherConfidence(t *testing.T) {
-	repo := testRepository(t)
-	ctx := context.Background()
-	board := testBoard(t, 12)
-
-	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
-	first := Evaluation{Level: 20, Depth: 20, Confidence: 90, Score: 2}
-	require.NoError(t, repo.SaveEvaluation(ctx, board, first))
-
-	// Lower level beats higher confidence in the lexicographic comparison:
-	// this must not update, even though confidence is higher.
-	worse := Evaluation{Level: 19, Depth: 19, Confidence: 100, Score: 1}
-	require.NoError(t, repo.SaveEvaluation(ctx, board, worse))
-
-	got, err := repo.GetBoard(ctx, board.Board())
-	require.NoError(t, err)
-	require.Equal(t, first, got)
 }

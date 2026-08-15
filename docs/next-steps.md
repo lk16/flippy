@@ -15,10 +15,11 @@ is required — pick items up when a real need appears.
   on the API and separate Basic Auth on the HTML admin pages.
 - **`GET /version`**: no version/build-info endpoint.
 - **Stricter evaluation validation**: submitted results check
-  level/depth/score bounds, but not the confidence enum
-  ({73,87,95,98,99,100}) or an explicit level floor (`TargetLevel` never
-  assigns below 32, so the floor holds by construction, not by input
-  validation).
+  level/score bounds, but not an explicit level floor (`TargetLevel`
+  never assigns below 32, so the floor holds by construction, not by
+  input validation). Depth and confidence are checked against the level
+  table but only warned about (`checkReportedSearchParams`), never
+  rejected.
 - **PGN illegal-move tolerance**: old auto-inserted a pass when a recorded
   move was illegal, recovering from bad data; our parser errors instead.
   Only matters if a real-world PGN turns up that needs it.
@@ -35,127 +36,44 @@ is required — pick items up when a real need appears.
 - **Config niceties**: no `PROJECT_ROOT` placeholder substitution in env
   vars, no `LOG_LEVEL` verbosity control.
 
-## Derive depth and confidence from disc count + level
+## Depth and confidence: what is left
 
-Not started. Research below; the numbers come from replaying the ported
-`depth_and_selectivity` over every (level, empties) pair.
+Landed: `edax.SearchParams` derives both from `(disc_count, level)`,
+migration 000002 dropped the columns, the stats page groups by the
+resulting search, and `handleAnalyzeRequest` skips a level that means a
+search the board already got. What is still open:
 
-### The relation
-
-Edax's `search_global_init` (`search.c:161-346`) maps `(level, n_empties)`
-to `(depth, selectivity)`, and `selectivity_table` (`search.c:104-111`)
-maps the selectivity index to a percentage — the `{73,87,95,98,99,100}`
-enum. Both are ported verbatim in
-`wasm/edax-eval/src/search.rs` (`depth_and_selectivity`,
-`SELECTIVITY_TABLE`), with a spot-check test against the C table.
-
-`n_empties = 64 - disc_count`, so **`(disc_count, level)` determines
-`(depth, confidence)` exactly**. Confirmed against a real edax run:
-`internal/edax/parser_test.go`'s fixture is the 60-empty start position at
-level 20 and edax prints `20@73%`, which is
-`depth_and_selectivity(20, 60)`.
-
-Two things that look obvious and aren't:
-
-- **100% confidence does not mean solved.** It means `NO_SELECTIVITY` — no
-  forward pruning. A level-4 search of a 24-disc board reports `4@100%`.
-  The "nothing left to learn" predicate is
-  `depth == 64 - disc_count && confidence == 100`, i.e. the search reached
-  the end of the game full-width. Only then is the score final.
-- **`(depth, confidence)` is not monotone in level.** At 25+ empties,
-  level 10 gives `10@100%` and level 11 gives `11@73%`. Level orders
-  results; confidence on its own does not.
-
-### Drop the two columns
-
-At its target level a board in the book stores `depth = level`, until the
-search can already reach the end of the game and depth becomes the empty
-count instead. Confidence is 73% up to 27 discs and 95% past it — ten
-distinct `(depth, confidence)` pairs across the whole table:
-
-| discs | target level | stored |
-|---|---|---|
-| 12-13 | 40 | `40@73%` |
-| 14-16 | 36 | `36@73%` |
-| 17-20 | 34 | `34@73%` |
-| 21-24 | 32 | `32@73%` |
-| 25-27 | 32 | `39@73%`, `38@73%`, `37@73%` (exact depth) |
-| 28-30 | 32 | `36@95%`, `35@95%`, `34@95%` (exact depth) |
-
-Nothing in SQL reads either column except `SaveEvaluation`'s
-`($1, $3) > (level, confidence)` guard (`internal/db/repository.go:114`),
-and that half is already dead: same board + same level ⇒ same confidence,
-so the tuple compare reduces to `$1 > level`. Everything else just
-`SELECT`s them through (`GetBoard`, `ListLearnable`, `EvaluatedBoards`).
-
-So: a migration dropping `depth` and `confidence`, plus a Go
-`edax.SearchParams(discCount, level) (depth, confidence int)` — the same
-port as the Rust one, tested against the same table — computed on read in
-`scanBoardEvaluations`. A lookup table + FK works too, but the key would
-be `(disc_count, level)` and `boards` already stores both, so it buys a
-constraint and no space; prefer it only if SQL ever needs to filter on
-depth or confidence. `jobResultRequest.Depth/Confidence`
-(`internal/api/types.go`) become derivable the same way — worth keeping on
-the wire for one release and checking against the formula in
-`validateJobResult` before removing.
-
-### Skip searches that cannot tell us anything new
-
-The book itself is already tight: over disc counts 12-30, no two rungs of
-the `+2` ladder produce the same `(depth, confidence)`, and a full-width
-solve at 34 empties needs level 40 — above the 32 those boards target. So
-every `+2` rung there is real work. (Levels 29 and 31 do repeat 28 and 30
-at 28-30 discs, but the ladder only ever asks for even levels.)
-
-The waste is in the endgame, and PGN review walks straight into it:
-`pgnSendRequests` (`static/board.js`) sends the whole line to the server
-without `splitOffBook`, so a 44-disc board gets analyzed at levels 10, 12,
-… 28 — ten jobs, all returning the identical `20@100%` exact solve,
-because at 20 empties every level from 10 up solves the game outright.
-
-| discs | empties | levels 4 → 28 |
-|---|---|---|
-| 32 | 32 | `4@100%` … `10@100%`, `12@73%` … `20@73%`, `32@73%`, `32@95%` |
-| 40 | 24 | `4@100%` … `10@100%`, `24@98%`, `24@100%` from level 20 up |
-| 44 | 20 | `4@100%`, `6@100%`, `8@100%`, then `20@100%` from level 10 up |
-| 56 | 8 | `8@100%` at every level from 4 up |
-
-Three fixes fall out:
-
-- `handleAnalyzeRequest` (`internal/api/websocket.go`) should skip a board
-  whose stored evaluation is already final
-  (`depth == n_empties && confidence == 100`) — no level can improve it —
-  and otherwise clamp the requested level down to the lowest one yielding
-  the same `(depth, confidence)`, collapsing distinct levels that mean the
-  same search.
-- `isAtTarget` (`static/board.js`) should count a final result as at
-  target whatever its level, so `pgnRequestLevelUps` stops climbing. The
-  client-side counterpart already landed: `localEvalLevelsFor` picks the
-  wasm ladder's rungs from the same relation.
 - The priority queue dedups by board string only
-  (`internal/api/priority.go:41-54`), so two requests at different levels
+  (`internal/api/priority.go`), so two requests at different levels
   collapse to whichever arrived first. Keying on the resulting
   `(depth, confidence)` instead would also merge different-level requests
   that describe the same search.
-
-### Also worth a look
-
-- `validateJobResult` (`internal/api/handlers.go:81`) range-checks depth
-  and confidence independently; it could assert the exact expected pair.
 - `TargetLevel`'s tiers are expressed in level, which means very different
   work per board: at level 32 a 21-disc board gets a 32-ply midgame search
   and a 30-disc board a full 34-empty solve. If the intent is roughly
   equal cost per board, tier on the resulting `(depth, confidence)`.
 - `book validate` (listed under CLI tools above) gets a real check:
   recompute `(depth, confidence)` from `(disc_count, level)` and flag rows
-  that disagree.
+  that disagree — for a book, now, only in the sense of flagging a level
+  the current edax would answer differently.
 
-Risk to weigh first: the relation is edax-4.5.1-specific. An upgrade that
-retunes `search_global_init` silently reinterprets every stored row, and
-dropping the columns removes the evidence. Stored `depth` is also edax's
-*reported* depth from its last printed line, so a search cut short would
-read shallower than the formula — nothing cuts one short today, but the
-validation should warn before it rejects.
+Two things that look obvious and aren't, worth re-reading before touching
+any of this:
+
+- **100% confidence does not mean solved.** It means `NO_SELECTIVITY` — no
+  forward pruning. A level-4 search of a 24-disc board reports `4@100%`.
+  The "nothing left to learn" predicate is `edax.IsFinal`:
+  `depth == 64 - disc_count && confidence == 100`.
+- **`(depth, confidence)` is not monotone in level.** At 25+ empties,
+  level 10 gives `10@100%` and level 11 gives `11@73%`. Level orders
+  results; confidence on its own does not.
+
+Standing risk: the relation is edax-4.5.1-specific. An upgrade that
+retunes `search_global_init` reinterprets every stored row, and the
+columns that were the evidence are gone. What is left is the warning in
+`checkReportedSearchParams` (a worker's reported pair vs. the formula)
+and `scripts/verify_derived_columns.sql` for a book still carrying the
+old columns.
 
 ## Import the pre-rewrite book archive
 
@@ -233,17 +151,17 @@ need a deeper search than they did before.
 
 ### Import notes
 
-- Recompute `(depth, confidence)` from `(disc_count, level)` rather than
-  copying the old columns — the relation above is exact, and 0 of the
-  14,121,197 current rows disagree with it.
+- Drop the old `depth`/`confidence` columns on import: `boards` no longer
+  has them (they follow from `(disc_count, level)`, exactly — 0 of the
+  14,121,197 rows the book held at the time disagreed).
 - 949 old rows (0.04%) carry a `depth` below what their level implies,
   usually 0 — exactly the cut-short searches the previous section warns
   about. Their `level` overstates the search that produced the score, so
   drop them instead of trusting either column.
 - `best_moves` has no counterpart in `boards`; it is dropped on import.
-- Load into a staging table and let the existing
-  `($1, $3) > (level, confidence)` guard in `SaveEvaluation` decide, so a
-  row the book already has at a higher level is not downgraded.
+- Load into a staging table and let the existing `$1 > level` guard in
+  `SaveEvaluation` decide, so a row the book already has at a higher level
+  is not downgraded.
 
 ## Testing gaps
 

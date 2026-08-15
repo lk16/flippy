@@ -136,19 +136,19 @@ func TestClient_SubmitJobResult_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, jobs, 1)
 
-	eval := edax.Evaluation{Depth: 24, Confidence: 100, Score: 6}
+	eval := edax.Evaluation{Depth: 24, Confidence: 73, Score: 6}
 	require.NoError(t, client.SubmitJobResult(ctx, board.String(), 24, eval))
 
 	stored, err := repo.GetBoard(ctx, board.Board())
 	require.NoError(t, err)
-	require.Equal(t, db.Evaluation{Level: 24, Depth: 24, Confidence: 100, Score: 6}, stored)
+	require.Equal(t, db.Evaluation{Level: 24, Score: 6}, stored)
 }
 
 func TestClient_SubmitJobResult_BoardNotFound(t *testing.T) {
 	client, _ := testClient(t, "w1")
 
 	board := testBoard(t, 12)
-	eval := edax.Evaluation{Depth: 24, Confidence: 100, Score: 6}
+	eval := edax.Evaluation{Depth: 24, Confidence: 73, Score: 6}
 	err := client.SubmitJobResult(context.Background(), board.String(), 24, eval)
 	require.Error(t, err)
 }

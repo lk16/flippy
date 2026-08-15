@@ -76,7 +76,7 @@ func TestServer_ClaimJobs_SkipsFullyLearnedBoards(t *testing.T) {
 	board := testBoard(t, 12)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
 	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{
-		Level: TargetLevel(12), Depth: 24, Confidence: 100, Score: 0,
+		Level: TargetLevel(12), Score: 0,
 	}))
 
 	jobs, err := s.claimJobs(ctx, "worker-1", 1)
@@ -98,7 +98,7 @@ func TestServer_ClaimJobs_LeafBoardsDoNotStarveDeeperCandidates(t *testing.T) {
 	require.NoError(t, s.repo.AddBoards(ctx, leafBoards))
 	for _, board := range leafBoards {
 		require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{
-			Level: TargetLevel(12), Depth: 24, Confidence: 100, Score: 0,
+			Level: TargetLevel(12), Score: 0,
 		}))
 	}
 
@@ -142,7 +142,7 @@ func TestServer_ClaimJobs_AdvancesFloorPastFullyLearnedDiscCount(t *testing.T) {
 	board12 := testBoard(t, 12)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board12}))
 	require.NoError(t, s.repo.SaveEvaluation(ctx, board12, db.Evaluation{
-		Level: TargetLevel(12), Depth: 24, Confidence: 100, Score: 0,
+		Level: TargetLevel(12), Score: 0,
 	}))
 
 	board13 := testBoard(t, 13)
@@ -165,7 +165,7 @@ func TestServer_ClaimJobs_AdvancesFloorToHighestClaimedDiscCountInBatch(t *testi
 	board12 := testBoard(t, 12)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board12}))
 	require.NoError(t, s.repo.SaveEvaluation(ctx, board12, db.Evaluation{
-		Level: TargetLevel(12), Depth: 24, Confidence: 100, Score: 0,
+		Level: TargetLevel(12), Score: 0,
 	}))
 
 	board13 := testBoard(t, 13)

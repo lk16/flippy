@@ -13,6 +13,7 @@ import (
 
 	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
+	"github.com/lk16/flippy/internal/edax"
 	"github.com/lk16/flippy/internal/othello"
 )
 
@@ -107,14 +108,14 @@ func TestHandleSubmitJobResult_Success(t *testing.T) {
 	require.True(t, claimed)
 
 	reqBody := jobResultRequest{
-		WorkerID: "w1", Board: board.String(), Level: 24, Depth: 24, Confidence: 100, Score: 4,
+		WorkerID: "w1", Board: board.String(), Level: 24, Depth: 24, Confidence: 73, Score: 4,
 	}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	eval, err := s.repo.GetBoard(ctx, board.Board())
 	require.NoError(t, err)
-	require.Equal(t, db.Evaluation{Level: 24, Depth: 24, Confidence: 100, Score: 4}, eval)
+	require.Equal(t, db.Evaluation{Level: 24, Score: 4}, eval)
 
 	// Claim must be released: another worker can now claim the same board.
 	claimed, err = s.tryClaim(ctx, board.String(), "w2")
@@ -144,7 +145,7 @@ func TestHandleSubmitJobResult_RebuildsMinimaxCache(t *testing.T) {
 	// leaf it depends on is learned.
 	for _, child := range normalizedChildren {
 		reqBody := jobResultRequest{
-			WorkerID: "w1", Board: child.String(), Level: 24, Depth: 24, Confidence: 100, Score: 1,
+			WorkerID: "w1", Board: child.String(), Level: 24, Depth: 24, Confidence: 73, Score: 1,
 		}
 		w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -165,14 +166,14 @@ func TestHandleSubmitJobResult_InvalidBody(t *testing.T) {
 func TestHandleSubmitJobResult_MissingWorkerID(t *testing.T) {
 	s := testServer(t)
 	board := testBoard(t, 12)
-	reqBody := jobResultRequest{Board: board.String(), Level: 24, Depth: 24, Confidence: 100, Score: 0}
+	reqBody := jobResultRequest{Board: board.String(), Level: 24, Depth: 24, Confidence: 73, Score: 0}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestHandleSubmitJobResult_InvalidBoard(t *testing.T) {
 	s := testServer(t)
-	reqBody := jobResultRequest{WorkerID: "w1", Board: "garbage", Level: 24, Depth: 24, Confidence: 100, Score: 0}
+	reqBody := jobResultRequest{WorkerID: "w1", Board: "garbage", Level: 24, Depth: 24, Confidence: 73, Score: 0}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
@@ -186,32 +187,16 @@ func TestHandleSubmitJobResult_OutOfRangeValues(t *testing.T) {
 	}{
 		{
 			name: "score too high",
-			req:  jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: 24, Confidence: 100, Score: 100},
+			req:  jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: 24, Confidence: 73, Score: 100},
 		},
 		{
 			name: "non-positive level",
 			req:  jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 0, Depth: 24, Confidence: 100, Score: 0},
 		},
 		{
-			name: "negative depth",
-			req:  jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: -1, Confidence: 100, Score: 0},
-		},
-		{
-			name: "depth too high",
-			req:  jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: 61, Confidence: 100, Score: 0},
-		},
-		{
 			// Would overflow the smallint column and 500 without an upper bound.
 			name: "level above smallint-safe max",
 			req:  jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 100000, Depth: 24, Confidence: 100, Score: 0},
-		},
-		{
-			name: "confidence negative",
-			req:  jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: 24, Confidence: -1, Score: 0},
-		},
-		{
-			name: "confidence above 100",
-			req:  jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: 24, Confidence: 100000, Score: 0},
 		},
 	}
 
@@ -224,10 +209,29 @@ func TestHandleSubmitJobResult_OutOfRangeValues(t *testing.T) {
 	}
 }
 
+// TestHandleSubmitJobResult_AcceptsMismatchedSearchParams checks that a result whose reported
+// depth/confidence disagree with edax's level table is still stored: the mismatch is only worth a
+// warning (see checkReportedSearchParams), and the score it came with is a real search result.
+func TestHandleSubmitJobResult_AcceptsMismatchedSearchParams(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+	board := testBoard(t, 12)
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+
+	// A level-24 search of a 12-disc board is 24@73%, not 30@98%.
+	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: 30, Confidence: 98, Score: 4}
+	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	stored, err := s.repo.GetBoard(ctx, board.Board())
+	require.NoError(t, err)
+	require.Equal(t, db.Evaluation{Level: 24, Score: 4}, stored)
+}
+
 func TestHandleSubmitJobResult_BoardNotFound(t *testing.T) {
 	s := testServer(t)
 	board := testBoard(t, 12)
-	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: 24, Confidence: 100, Score: 0}
+	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: 24, Confidence: 73, Score: 0}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
@@ -347,7 +351,7 @@ func TestHandleGetBoard_Success(t *testing.T) {
 	ctx := context.Background()
 	board := testBoard(t, 12)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Depth: 20, Confidence: 98, Score: 2}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Score: 2}))
 
 	target := "/api/boards?board=" + url.QueryEscape(board.Board().String())
 	w := doRequest(t, s, http.MethodGet, target, nil)
@@ -355,7 +359,8 @@ func TestHandleGetBoard_Success(t *testing.T) {
 
 	var resp evaluationResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	require.Equal(t, evaluationResponse{Level: 20, Depth: 20, Confidence: 98, Score: 2, Source: evaluationSourceEdax}, resp)
+	// Depth and confidence are not stored: a level-20 search of a 12-disc board is 20@73%.
+	require.Equal(t, evaluationResponse{Level: 20, Depth: 20, Confidence: 73, Score: 2, Source: evaluationSourceEdax}, resp)
 }
 
 func TestHandleGetBoard_FallsBackToMinimaxCache(t *testing.T) {
@@ -372,7 +377,7 @@ func TestHandleGetBoard_FallsBackToMinimaxCache(t *testing.T) {
 	}
 	require.NoError(t, s.repo.AddBoards(ctx, normalizedChildren))
 	for _, child := range normalizedChildren {
-		require.NoError(t, s.repo.SaveEvaluation(ctx, child, db.Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 1}))
+		require.NoError(t, s.repo.SaveEvaluation(ctx, child, db.Evaluation{Level: 20, Score: 1}))
 	}
 	require.NoError(t, s.cache.Rebuild(ctx))
 
@@ -403,7 +408,7 @@ func TestHandleGetBoard_ResolvesForcedPass(t *testing.T) {
 	normalizedPassed := passed.Normalize()
 
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{normalizedPassed}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, normalizedPassed, db.Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 5}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, normalizedPassed, db.Evaluation{Level: 20, Score: 5}))
 
 	target := "/api/boards?board=" + url.QueryEscape(board.String())
 	w := doRequest(t, s, http.MethodGet, target, nil)
@@ -411,7 +416,11 @@ func TestHandleGetBoard_ResolvesForcedPass(t *testing.T) {
 
 	var resp evaluationResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	require.Equal(t, evaluationResponse{Level: 20, Depth: 20, Confidence: 100, Score: -5, Source: evaluationSourceEdax}, resp)
+	// The search params come from the board that was actually searched, i.e. the one after the pass.
+	depth, confidence := edax.SearchParams(normalizedPassed.CountDiscs(), 20)
+	require.Equal(t,
+		evaluationResponse{Level: 20, Depth: depth, Confidence: confidence, Score: -5, Source: evaluationSourceEdax},
+		resp)
 }
 
 // TestHandleGetBoard_GameOver covers a board where neither player has a
@@ -474,7 +483,42 @@ func TestHandleStats_ReturnsCounts(t *testing.T) {
 
 	var entries []statEntry
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &entries))
-	require.Contains(t, entries, statEntry{DiscCount: 12, Level: 0, Count: 1})
+	require.Contains(t, entries, statEntry{DiscCount: 12, Count: 1})
+}
+
+// TestHandleStats_ReportsDerivedSearchParams checks that a learned board is reported by the search
+// it got rather than by the level that was asked for.
+func TestHandleStats_ReportsDerivedSearchParams(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+	board := testBoard(t, 12)
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Score: 2}))
+
+	w := doRequest(t, s, http.MethodGet, "/api/stats", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var entries []statEntry
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &entries))
+	require.Contains(t, entries, statEntry{DiscCount: 12, Depth: 20, Confidence: 73, Count: 1})
+}
+
+// TestStatEntries_MergesLevelsThatMeanTheSameSearch covers the merge and the ordering: at 44 discs
+// every level from 10 up solves the game outright (20@100%), so those levels are one entry, sorted
+// after the shallower searches and after the unlearned boards.
+func TestStatEntries_MergesLevelsThatMeanTheSameSearch(t *testing.T) {
+	entries := statEntries([]db.LevelStat{
+		{DiscCount: 44, Level: 10, Count: 3},
+		{DiscCount: 44, Level: 12, Count: 5},
+		{DiscCount: 44, Level: 8, Count: 2},
+		{DiscCount: 44, Level: 0, Count: 7},
+	})
+
+	require.Equal(t, []statEntry{
+		{DiscCount: 44, Depth: 0, Confidence: 0, Count: 7},
+		{DiscCount: 44, Depth: 8, Confidence: 100, Count: 2},
+		{DiscCount: 44, Depth: 20, Confidence: 100, Count: 8},
+	}, entries)
 }
 
 func TestHandleListWorkers_Empty(t *testing.T) {

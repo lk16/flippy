@@ -9,6 +9,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
+	"github.com/lk16/flippy/internal/edax"
 	"github.com/lk16/flippy/internal/othello"
 )
 
@@ -123,17 +124,22 @@ func (s *Server) handleAnalyzeRequest(ctx context.Context, boardStrings []string
 		}
 
 		normalized := board.Normalize()
+		discCount := normalized.CountDiscs()
 
 		// Cap the requested level at the effective target for this board so a malicious client
 		// cannot request arbitrarily deep searches and consume excessive worker CPU.
-		clampedLevel := min(level, EffectiveTargetLevel(normalized.CountDiscs()))
+		clampedLevel := min(level, EffectiveTargetLevel(discCount))
 
 		// Skip if the board already has a sufficient evaluation.
 		// Minimax and final-score results are always sufficient regardless of requested level.
-		// Edax results are sufficient only if their level meets or exceeds what was requested.
+		// Edax results are sufficient if their level meets or exceeds what was requested, or if
+		// the requested level describes a search they already are (searchAddsNothing).
 		eval, ok, err := s.lookupEvaluation(ctx, board)
 		if err == nil && ok {
 			if eval.Source != evaluationSourceEdax || eval.Level >= clampedLevel {
+				continue
+			}
+			if searchAddsNothing(eval, discCount, clampedLevel) {
 				continue
 			}
 		}
@@ -143,6 +149,21 @@ func (s *Server) handleAnalyzeRequest(ctx context.Context, boardStrings []string
 			slog.Warn("failed to enqueue priority board", "board", normalized.String(), "error", err)
 		}
 	}
+}
+
+// searchAddsNothing reports whether searching a board with discCount discs at level would return
+// the evaluation it already has: either the level resolves to the same (depth, confidence) that
+// evaluation was searched at -- levels are not one search each, and the endgame collapses whole
+// runs of them onto the same solve -- or the stored result already ran the game out, which no
+// level can improve on. Either way the answer is already in hand, so nothing is queued and the
+// caller is served the stored evaluation.
+func searchAddsNothing(eval evaluationResponse, discCount, level int) bool {
+	if edax.IsFinal(discCount, eval.Level) {
+		return true
+	}
+
+	depth, confidence := edax.SearchParams(discCount, level)
+	return eval.Depth == depth && eval.Confidence == confidence
 }
 
 // lookupEvaluations looks up evaluations for a batch of board strings, skipping malformed or unevaluated ones.

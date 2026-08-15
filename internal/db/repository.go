@@ -19,11 +19,10 @@ type querier interface {
 }
 
 // Evaluation is the current edax evaluation state stored for a Board; the zero value means unlearned.
+// Depth and confidence are not stored: they follow from (disc count, level) via edax.SearchParams.
 type Evaluation struct {
-	Level      int
-	Depth      int
-	Confidence int
-	Score      int
+	Level int
+	Score int
 }
 
 // IsLearned reports whether e is an actual edax result rather than the not-yet-learned zero value.
@@ -86,9 +85,9 @@ func (r *Repository) GetBoard(ctx context.Context, board othello.Board) (Evaluat
 
 	var eval Evaluation
 	err := r.db.QueryRow(ctx,
-		`SELECT level, depth, confidence, score FROM boards WHERE position = $1`,
+		`SELECT level, score FROM boards WHERE position = $1`,
 		normalized.Board().Bytes(),
-	).Scan(&eval.Level, &eval.Depth, &eval.Confidence, &eval.Score)
+	).Scan(&eval.Level, &eval.Score)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Evaluation{}, ErrBoardNotFound
@@ -100,8 +99,8 @@ func (r *Repository) GetBoard(ctx context.Context, board othello.Board) (Evaluat
 	return eval, nil
 }
 
-// SaveEvaluation updates an existing board's evaluation, but only if (level, confidence) improves on
-// what's stored; a non-improving result is a silent no-op. Never inserts a row: ErrBoardNotFound if none exists.
+// SaveEvaluation updates an existing board's evaluation, but only if its level improves on what's
+// stored; a non-improving result is a silent no-op. Never inserts a row: ErrBoardNotFound if none exists.
 func (r *Repository) SaveEvaluation(ctx context.Context, board othello.NormalizedBoard, eval Evaluation) error {
 	position := board.Board().Bytes()
 
@@ -110,12 +109,12 @@ func (r *Repository) SaveEvaluation(ctx context.Context, board othello.Normalize
 	err := r.db.QueryRow(ctx,
 		`WITH updated AS (
 			UPDATE boards
-			SET level = $1, depth = $2, confidence = $3, score = $4
-			WHERE position = $5 AND ($1::smallint, $3::smallint) > (level, confidence)
+			SET level = $1, score = $2
+			WHERE position = $3 AND $1::smallint > level
 			RETURNING position
 		 )
-		 SELECT EXISTS (SELECT 1 FROM boards WHERE position = $5)`,
-		eval.Level, eval.Depth, eval.Confidence, eval.Score, position,
+		 SELECT EXISTS (SELECT 1 FROM boards WHERE position = $3)`,
+		eval.Level, eval.Score, position,
 	).Scan(&exists)
 	if err != nil {
 		return fmt.Errorf("failed to save evaluation: %w", err)
@@ -140,7 +139,7 @@ type BoardEvaluation struct {
 // skipping a prefix it already knows is fully learned, without changing which disc count counts as leaf.
 func (r *Repository) ListLearnable(ctx context.Context, minDiscs, maxDiscs, leafDiscs, leafLevel, deeperLevel, limit int) ([]BoardEvaluation, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT position, level, depth, confidence, score
+		`SELECT position, level, score
 		 FROM boards
 		 WHERE disc_count BETWEEN $1 AND $2
 		   AND level < CASE WHEN disc_count = $3 THEN $4::smallint ELSE $5::smallint END
@@ -164,7 +163,7 @@ func (r *Repository) ListLearnable(ctx context.Context, minDiscs, maxDiscs, leaf
 // EvaluatedBoards returns every learned (level > 0) board with exactly discCount discs.
 func (r *Repository) EvaluatedBoards(ctx context.Context, discCount int) ([]BoardEvaluation, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT position, level, depth, confidence, score
+		`SELECT position, level, score
 		 FROM boards
 		 WHERE disc_count = $1 AND level > 0`,
 		discCount,
@@ -182,13 +181,13 @@ func (r *Repository) EvaluatedBoards(ctx context.Context, discCount int) ([]Boar
 	return results, nil
 }
 
-// scanBoardEvaluations scans rows of (position, level, depth, confidence, score) into BoardEvaluations.
+// scanBoardEvaluations scans rows of (position, level, score) into BoardEvaluations.
 func scanBoardEvaluations(rows pgx.Rows) ([]BoardEvaluation, error) {
 	var results []BoardEvaluation
 	for rows.Next() {
 		var position []byte
 		var eval Evaluation
-		if err := rows.Scan(&position, &eval.Level, &eval.Depth, &eval.Confidence, &eval.Score); err != nil {
+		if err := rows.Scan(&position, &eval.Level, &eval.Score); err != nil {
 			return nil, fmt.Errorf("failed to scan board: %w", err)
 		}
 
