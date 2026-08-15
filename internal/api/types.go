@@ -8,7 +8,9 @@ type jobResponse struct {
 	Level int    `json:"level"`
 }
 
-// jobResultRequest is the JSON body POSTed to /api/jobs/result.
+// jobResultRequest is the JSON body POSTed to /api/jobs/result. Depth and Confidence are what edax
+// printed; neither is stored, since (disc count, level) already determines both. They are kept on
+// the wire so checkReportedSearchParams can catch an edax whose level table differs from ours.
 type jobResultRequest struct {
 	WorkerID   string `json:"worker_id"`
 	Board      string `json:"board"`
@@ -40,7 +42,8 @@ const evaluationSourceMinimax = "minimax"
 // evaluationSourceFinal marks an evaluationResponse as a board's actual final score.
 const evaluationSourceFinal = "final"
 
-// evaluationResponse is the JSON shape of an evaluation, returned by GET /api/boards.
+// evaluationResponse is the JSON shape of an evaluation, returned by GET /api/boards. Depth and
+// Confidence are derived from (disc count, level) via edax.SearchParams, not stored per board.
 type evaluationResponse struct {
 	Level      int    `json:"level"`
 	Depth      int    `json:"depth"`

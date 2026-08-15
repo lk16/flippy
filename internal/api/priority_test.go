@@ -159,7 +159,7 @@ func TestHandleSubmitJobResult_PriorityLowDiscPersists(t *testing.T) {
 
 	eval, err := s.repo.GetBoard(ctx, board.Board())
 	require.NoError(t, err)
-	require.Equal(t, db.Evaluation{Level: PriorityLevel, Depth: PriorityLevel, Confidence: 100, Score: 6}, eval)
+	require.Equal(t, db.Evaluation{Level: PriorityLevel, Score: 6}, eval)
 }
 
 // TestHandleSubmitJobResult_PriorityLowDiscNoRowAddsAndSaves verifies the AddBoards+retry path:
@@ -185,7 +185,7 @@ func TestHandleSubmitJobResult_PriorityLowDiscNoRowAddsAndSaves(t *testing.T) {
 
 	eval, err := s.repo.GetBoard(ctx, board.Board())
 	require.NoError(t, err)
-	require.Equal(t, db.Evaluation{Level: PriorityLevel, Depth: PriorityLevel, Confidence: 100, Score: -4}, eval)
+	require.Equal(t, db.Evaluation{Level: PriorityLevel, Score: -4}, eval)
 }
 
 // TestHandleSubmitJobResult_NonPriorityBoardNotFoundStill404 ensures the existing 404 path
@@ -194,7 +194,7 @@ func TestHandleSubmitJobResult_NonPriorityBoardNotFoundStill404(t *testing.T) {
 	s := testServer(t)
 	board := testBoard(t, 12)
 	// No priority claim, no DB row.
-	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: 24, Confidence: 100, Score: 0}
+	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: 24, Confidence: 73, Score: 0}
 	w := doRequest(t, s, "POST", "/api/jobs/result", reqBody)
 	require.Equal(t, 404, w.Code)
 }

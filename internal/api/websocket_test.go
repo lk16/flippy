@@ -39,7 +39,7 @@ func TestHandleWebSocket_EvaluationRequest_ReturnsFoundEvaluations(t *testing.T)
 
 	board := testBoard(t, 12)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Depth: 20, Confidence: 98, Score: 3}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Score: 3}))
 
 	conn := testWebSocket(t, s)
 
@@ -80,7 +80,7 @@ func TestHandleWebSocket_EvaluationRequest_FallsBackToMinimaxCache(t *testing.T)
 	}
 	require.NoError(t, s.repo.AddBoards(ctx, normalizedChildren))
 	for _, child := range normalizedChildren {
-		require.NoError(t, s.repo.SaveEvaluation(ctx, child, db.Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 1}))
+		require.NoError(t, s.repo.SaveEvaluation(ctx, child, db.Evaluation{Level: 20, Score: 1}))
 	}
 	require.NoError(t, s.cache.Rebuild(ctx))
 
@@ -151,7 +151,7 @@ func TestHandleWebSocket_MalformedBoardIsSkippedNotFatal(t *testing.T) {
 
 	board := testBoard(t, 12)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Depth: 20, Confidence: 98, Score: 3}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Score: 3}))
 
 	conn := testWebSocket(t, s)
 
@@ -204,7 +204,7 @@ func TestHandleWebSocket_AnalyzeRequest_EnqueuesMissingBoards(t *testing.T) {
 	// board1 is already evaluated (DB).
 	board1 := testBoard(t, 12)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board1}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board1, db.Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 4}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, board1, db.Evaluation{Level: 20, Score: 4}))
 
 	// board2 has no evaluation.
 	board2 := testBoard(t, 13)
@@ -340,7 +340,7 @@ func TestHandleWebSocket_AnalyzeRequest_SameShapeAsEvaluationRequest(t *testing.
 
 	board := testBoard(t, 12)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Depth: 20, Confidence: 100, Score: 3}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Score: 3}))
 
 	conn := testWebSocket(t, s)
 

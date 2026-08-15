@@ -13,6 +13,7 @@ import (
 
 	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
+	"github.com/lk16/flippy/internal/edax"
 	"github.com/lk16/flippy/internal/othello"
 )
 
@@ -78,21 +79,35 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 // out-of-range value is a clean 400 rather than a Postgres error surfaced as a 500.
 const maxLevel = 60
 
-// validateJobResult checks that a submitted evaluation's values are within sane bounds.
+// validateJobResult checks that a submitted evaluation's stored values are within sane bounds.
 func validateJobResult(req jobResultRequest) error {
 	if req.Level <= 0 || req.Level > maxLevel {
 		return fmt.Errorf("level must be between 1 and %d", maxLevel)
-	}
-	if req.Depth < 0 || req.Depth > 60 {
-		return errors.New("depth out of range")
-	}
-	if req.Confidence < 0 || req.Confidence > 100 {
-		return errors.New("confidence out of range")
 	}
 	if req.Score < -64 || req.Score > 64 {
 		return errors.New("score out of range")
 	}
 	return nil
+}
+
+// checkReportedSearchParams logs when the depth/confidence a worker reports differ from what
+// edax.SearchParams derives from (disc count, level). Neither is stored -- deriving them is only
+// sound as long as the worker's edax agrees with the ported search_global_init, and this is the one
+// place that comparison can still be made. A mismatch means an edax build that retuned the level
+// table, so it's worth knowing about, but the score is still a real result: warn, don't reject.
+// Workers that send neither field are silently accepted.
+func checkReportedSearchParams(req jobResultRequest, discCount int) {
+	if req.Depth == 0 && req.Confidence == 0 {
+		return
+	}
+
+	depth, confidence := edax.SearchParams(discCount, req.Level)
+	if req.Depth != depth || req.Confidence != confidence {
+		slog.Warn("worker reported search params that disagree with edax's level table",
+			"board", req.Board, "level", req.Level, "disc_count", discCount,
+			"reported_depth", req.Depth, "reported_confidence", req.Confidence,
+			"derived_depth", depth, "derived_confidence", confidence)
+	}
 }
 
 // handleSubmitJobResult handles POST /api/jobs/result: stores a worker's evaluation and releases its claim.
@@ -125,11 +140,15 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	eval := db.Evaluation{Level: req.Level, Depth: req.Depth, Confidence: req.Confidence, Score: req.Score}
+	discCount := normalized.CountDiscs()
+	checkReportedSearchParams(req, discCount)
+
+	eval := db.Evaluation{Level: req.Level, Score: req.Score}
+	depth, confidence := edax.SearchParams(discCount, req.Level)
 
 	// Always cache the result ephemerally so lookupEvaluation can find it regardless of DB eligibility.
 	s.setAnalysisResult(r.Context(), normalized.String(), evaluationResponse{
-		Level: req.Level, Depth: req.Depth, Confidence: req.Confidence, Score: req.Score,
+		Level: req.Level, Depth: depth, Confidence: confidence, Score: req.Score,
 		Source: evaluationSourceEdax,
 	})
 
@@ -140,7 +159,6 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 	}
 
 	savedToDB := false
-	discCount := normalized.CountDiscs()
 
 	if isPriority {
 		if discCount <= book.MaxSavableDiscs {
@@ -246,10 +264,11 @@ func (s *Server) lookupEvaluation(ctx context.Context, board othello.Board) (eva
 
 	eval, err := s.repo.GetBoard(ctx, board)
 	if err == nil && eval.IsLearned() {
+		depth, confidence := edax.SearchParams(board.CountDiscs(), eval.Level)
 		return evaluationResponse{
 			Level:      eval.Level,
-			Depth:      eval.Depth,
-			Confidence: eval.Confidence,
+			Depth:      depth,
+			Confidence: confidence,
 			Score:      eval.Score,
 			Source:     evaluationSourceEdax,
 		}, true, nil
