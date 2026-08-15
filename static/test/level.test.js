@@ -46,6 +46,40 @@ test('isAtTarget: minimax/final results are always at target regardless of level
   assert.equal(game.isAtTarget(s), true);
 });
 
+test('isAtTarget: a search that ran the game out is at target whatever its level', () => {
+  const game = buildGame(FORCED_PASS_BOARDS, { complete: false });
+  const s = game.pgnBoards[40].normalize().toString(); // 44 discs, so 20 empties
+  const target = game.targetLevelForBoard(s);
+
+  // Level 10 solves all 20 empties outright: depth 20 at full width, which no level can improve on.
+  game.evaluations.set(s, { board: s, score: 1, source: 'edax', level: 10, depth: 20, confidence: 100 });
+  assert.ok(10 < target, 'the level is below target, so only the search itself can end the climb');
+  assert.equal(game.isAtTarget(s), true);
+
+  // Same depth but selective: the search did not run the game out at full width.
+  game.evaluations.set(s, { board: s, score: 1, source: 'edax', level: 10, depth: 20, confidence: 98 });
+  assert.equal(game.isAtTarget(s), false);
+
+  // Deep, but short of the game's end.
+  game.evaluations.set(s, { board: s, score: 1, source: 'edax', level: 10, depth: 18, confidence: 100 });
+  assert.equal(game.isAtTarget(s), false);
+});
+
+test('pgnRequestLevelUps: does not climb past a search that ran the game out', () => {
+  const game = buildGame(FORCED_PASS_BOARDS, { complete: false });
+  const sent = [];
+  game.wsClient = { sendEvent: (event, boards, level) => sent.push({ event, boards, level }) };
+
+  for (const s of game.pgnAllChildStrings) {
+    const empties = 64 - game.discCountFromBoardStr(s);
+    if (empties === 0) continue; // a full board is game over, not a search result
+    game.evaluations.set(s, { board: s, score: 1, source: 'edax', level: 10, depth: empties, confidence: 100 });
+  }
+  game.pgnRequestLevelUps();
+
+  assert.deepEqual(sent, []);
+});
+
 test('shouldUpdateEval: never downgrades minimax/final to edax; edax only upgrades on higher level', () => {
   const game = buildGame(FORCED_PASS_BOARDS, { complete: false });
   const final = { source: 'final', score: 5, level: 0 };

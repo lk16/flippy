@@ -486,11 +486,22 @@ class OthelloGame {
         return (tier || tiers[tiers.length - 1]).level;
     }
 
+    // evalIsFinal reports whether an evaluation searched the game out at full width: depth reached
+    // every empty square with no forward pruning, so the score is the game-theoretic result and no
+    // deeper level can change it. Mirrors edax.IsFinal, which is what makes the server skip such a
+    // board however deep a search is asked for -- without this the level ladder would climb toward
+    // a target the board can never report reaching.
+    evalIsFinal(boardStr, e) {
+        if (!e || !e.depth || e.confidence !== 100) return false;
+        return e.depth + this.discCountFromBoardStr(boardStr) === 64;
+    }
+
     // isAtTarget returns true when a board has reached its target evaluation level.
     isAtTarget(boardStr) {
         const e = this.evaluations.get(boardStr);
         if (!e) return false;
         if (e.source === 'minimax' || e.source === 'final') return true;
+        if (this.evalIsFinal(boardStr, e)) return true;
         return (e.level || 0) >= this.targetLevelForBoard(boardStr);
     }
 
@@ -942,10 +953,11 @@ class OthelloGame {
         for (const boardStr of this.pgnAllChildStrings) {
             const e = this.evaluations.get(boardStr);
             if (!e) continue; // no evaluation yet — will be picked up later
-            if (e.source === 'minimax' || e.source === 'final') continue; // always sufficient
+            // Covers minimax/final results, searches that already ran the game out, and boards at
+            // their target level: for all of them a deeper search would come back with the same score.
+            if (this.isAtTarget(boardStr)) continue;
             const target = this.targetLevelForBoard(boardStr);
             const current = e.level || 0;
-            if (current >= target) continue; // already at target
 
             // Never past the target: the server clamps to it anyway (handleAnalyzeRequest), so
             // asking for more would leave pendingLevelRequests -- and the level the status line
