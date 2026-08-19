@@ -40,7 +40,7 @@ func TestClaimJob_PriorityDrainedFirst(t *testing.T) {
 
 	// Enqueue a different board as priority.
 	pBoard := testBoard(t, 14)
-	require.NoError(t, s.enqueuePriority(ctx, pBoard.String(), PriorityLevel))
+	require.NoError(t, s.enqueuePriority(ctx, pBoard.String(), PriorityLevel, ""))
 
 	job, ok, err := s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
@@ -74,7 +74,7 @@ func TestClaimJob_PrioritySkipsNoMovesBoard(t *testing.T) {
 	normalizedNoMove := noMoveBoard.Normalize()
 
 	// Enqueue it in the priority queue (server shouldn't claim it).
-	require.NoError(t, s.enqueuePriority(ctx, normalizedNoMove.String(), PriorityLevel))
+	require.NoError(t, s.enqueuePriority(ctx, normalizedNoMove.String(), PriorityLevel, ""))
 
 	// Add a normal DB board too.
 	dbBoard := testBoard(t, 12)
@@ -93,10 +93,99 @@ func TestClaimJob_PriorityDeduplicates(t *testing.T) {
 	ctx := context.Background()
 
 	pBoard := testBoard(t, 14)
-	require.NoError(t, s.enqueuePriority(ctx, pBoard.String(), PriorityLevel))
-	require.NoError(t, s.enqueuePriority(ctx, pBoard.String(), PriorityLevel)) // duplicate — should be ignored
+	require.NoError(t, s.enqueuePriority(ctx, pBoard.String(), PriorityLevel, ""))
+	require.NoError(t, s.enqueuePriority(ctx, pBoard.String(), PriorityLevel, "")) // duplicate — should be ignored
 
 	require.Len(t, drainPriority(t, s), 1)
+}
+
+// TestDequeuePriority_DropsEntriesFromDeadConnections verifies that an entry queued by a since-
+// closed websocket connection is discarded at dequeue and removed from the pending set.
+func TestDequeuePriority_DropsEntriesFromDeadConnections(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	connID := s.registerConn()
+	board := testBoard(t, 14)
+	require.NoError(t, s.enqueuePriority(ctx, board.String(), PriorityLevel, connID))
+	s.unregisterConn(connID)
+
+	_, ok, err := s.dequeuePriority(ctx)
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	// Removed from the pending set too, so the board can be re-queued.
+	isMember, err := s.redis.SIsMember(ctx, priorityPendingKey, board.String()).Result()
+	require.NoError(t, err)
+	require.False(t, isMember)
+}
+
+// TestDequeuePriority_KeepsEntriesFromLiveConnections verifies that entries whose connection is
+// still open come through, including when they sit behind a dead connection's entry.
+func TestDequeuePriority_KeepsEntriesFromLiveConnections(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	deadConn := s.registerConn()
+	liveConn := s.registerConn()
+
+	deadBoard := testBoard(t, 14)
+	liveBoard := testBoard(t, 15)
+	require.NoError(t, s.enqueuePriority(ctx, deadBoard.String(), PriorityLevel, deadConn))
+	require.NoError(t, s.enqueuePriority(ctx, liveBoard.String(), PriorityLevel, liveConn))
+	s.unregisterConn(deadConn)
+
+	entry, ok, err := s.dequeuePriority(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, liveBoard.String(), entry.Board)
+
+	_, ok, err = s.dequeuePriority(ctx)
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+// TestDequeuePriority_DedupeIsByBoardOnly documents the chosen semantics: dedupe keys on the board
+// alone, so a board queued first by a connection that then dies is dropped even though a second,
+// still-live connection asked for it too. That client's next analyze_request re-queues the board,
+// so the loss heals itself.
+func TestDequeuePriority_DedupeIsByBoardOnly(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	connA := s.registerConn()
+	connB := s.registerConn()
+	board := testBoard(t, 14)
+
+	require.NoError(t, s.enqueuePriority(ctx, board.String(), PriorityLevel, connA))
+	require.NoError(t, s.enqueuePriority(ctx, board.String(), PriorityLevel, connB)) // deduped: still tagged connA
+	s.unregisterConn(connA)
+
+	_, ok, err := s.dequeuePriority(ctx)
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	// connB re-requesting after the drop queues the board again.
+	require.NoError(t, s.enqueuePriority(ctx, board.String(), PriorityLevel, connB))
+	entry, ok, err := s.dequeuePriority(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, board.String(), entry.Board)
+}
+
+// TestDequeuePriority_UntaggedEntriesAreNeverDropped covers entries with no connection ID (legacy
+// format): they cannot be matched to a live connection, so they always come through.
+func TestDequeuePriority_UntaggedEntriesAreNeverDropped(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	board := testBoard(t, 14)
+	require.NoError(t, s.enqueuePriority(ctx, board.String(), PriorityLevel, ""))
+
+	entry, ok, err := s.dequeuePriority(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, board.String(), entry.Board)
 }
 
 // TestHandleSubmitJobResult_PriorityHighDiscSkipsPersistence verifies that a priority job for

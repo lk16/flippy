@@ -319,7 +319,7 @@ func TestHandleWebSocket_AnalyzeRequest_FinalResultNotEnqueued(t *testing.T) {
 		Level: 10, Depth: 20, Confidence: 100, Score: 6, Source: evaluationSourceEdax,
 	})
 
-	s.handleAnalyzeRequest(ctx, []string{board.String()}, 28)
+	s.handleAnalyzeRequest(ctx, []string{board.String()}, 28, "")
 
 	pending := drainPriority(t, s)
 	require.Empty(t, pending)

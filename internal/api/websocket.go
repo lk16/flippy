@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -45,6 +46,31 @@ type wsEvaluationResponse struct {
 	Evaluations []wsEvaluation `json:"evaluations"`
 }
 
+// registerConn allocates a connection ID and marks it live.
+func (s *Server) registerConn() string {
+	s.connsMu.Lock()
+	defer s.connsMu.Unlock()
+	s.lastConnID++
+	id := strconv.FormatInt(s.lastConnID, 10)
+	s.liveConns[id] = struct{}{}
+	return id
+}
+
+// unregisterConn marks a connection ID as no longer live.
+func (s *Server) unregisterConn(id string) {
+	s.connsMu.Lock()
+	defer s.connsMu.Unlock()
+	delete(s.liveConns, id)
+}
+
+// connLive reports whether a connection ID is still live.
+func (s *Server) connLive(id string) bool {
+	s.connsMu.Lock()
+	defer s.connsMu.Unlock()
+	_, ok := s.liveConns[id]
+	return ok
+}
+
 // handleWebSocket handles GET /ws: a persistent connection for batched evaluation lookups.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, nil)
@@ -52,6 +78,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = conn.CloseNow() }()
+
+	connID := s.registerConn()
+	defer s.unregisterConn(connID)
 
 	ctx := r.Context()
 
@@ -87,7 +116,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				level = PriorityLevel
 			}
 
-			s.handleAnalyzeRequest(ctx, req.Boards, level)
+			s.handleAnalyzeRequest(ctx, req.Boards, level, connID)
 
 			// Respond with whatever is already available, using the same shape as evaluation_request.
 			outgoing := wsOutgoing{
@@ -101,8 +130,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleAnalyzeRequest enqueues boards not yet at the requested edax search level.
-func (s *Server) handleAnalyzeRequest(ctx context.Context, boardStrings []string, level int) {
+// handleAnalyzeRequest enqueues boards not yet at the requested edax search level, tagging each
+// queue entry with the requesting connection so the work is dropped if the requester disconnects.
+func (s *Server) handleAnalyzeRequest(ctx context.Context, boardStrings []string, level int, connID string) {
 	for _, bs := range boardStrings {
 		board, err := othello.ParseBoard(bs)
 		if err != nil {
@@ -145,7 +175,7 @@ func (s *Server) handleAnalyzeRequest(ctx context.Context, boardStrings []string
 		}
 
 		// Enqueue the normalized form so the claim key and queue entry are consistent.
-		if err := s.enqueuePriority(ctx, normalized.String(), clampedLevel); err != nil {
+		if err := s.enqueuePriority(ctx, normalized.String(), clampedLevel, connID); err != nil {
 			slog.Warn("failed to enqueue priority board", "board", normalized.String(), "error", err)
 		}
 	}
