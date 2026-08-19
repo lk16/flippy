@@ -65,30 +65,26 @@ func (s *Server) enqueuePriority(ctx context.Context, board string, level int) e
 	return nil
 }
 
-// dequeuePriority pops up to count entries from the priority queue (FIFO), removing each from the
-// pending set. Returns fewer than count entries if the queue is empty.
+// dequeuePriority pops the oldest entry from the priority queue (FIFO), removing it from the
+// pending set; ok is false when the queue is empty.
 // Entries that are plain board strings (legacy format) are treated as PriorityLevel.
-func (s *Server) dequeuePriority(ctx context.Context, count int) ([]priorityEntry, error) {
-	var entries []priorityEntry
-	for range count {
-		data, err := s.redis.RPop(ctx, priorityQueueKey).Result()
-		if err == redis.Nil {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to dequeue priority board: %w", err)
-		}
-
-		var entry priorityEntry
-		if jsonErr := json.Unmarshal([]byte(data), &entry); jsonErr != nil {
-			// Legacy format: plain board string.
-			entry = priorityEntry{Board: data, Level: PriorityLevel}
-		}
-
-		_ = s.redis.SRem(ctx, priorityPendingKey, entry.Board).Err()
-		entries = append(entries, entry)
+func (s *Server) dequeuePriority(ctx context.Context) (priorityEntry, bool, error) {
+	data, err := s.redis.RPop(ctx, priorityQueueKey).Result()
+	if err == redis.Nil {
+		return priorityEntry{}, false, nil
 	}
-	return entries, nil
+	if err != nil {
+		return priorityEntry{}, false, fmt.Errorf("failed to dequeue priority board: %w", err)
+	}
+
+	var entry priorityEntry
+	if jsonErr := json.Unmarshal([]byte(data), &entry); jsonErr != nil {
+		// Legacy format: plain board string.
+		entry = priorityEntry{Board: data, Level: PriorityLevel}
+	}
+
+	_ = s.redis.SRem(ctx, priorityPendingKey, entry.Board).Err()
+	return entry, true, nil
 }
 
 // setPriorityClaim marks board as priority-originated by setting a short-lived Redis key alongside the

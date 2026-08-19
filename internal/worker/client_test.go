@@ -69,41 +69,29 @@ func testClient(t *testing.T, workerID string) (*Client, *db.Repository) {
 // legal move (or pass) from start until it has exactly discs discs.
 var testBoard = othellotest.Board
 
-func TestClient_GetJobs_NoJobAvailable(t *testing.T) {
+func TestClient_GetJob_NoJobAvailable(t *testing.T) {
 	client, _ := testClient(t, "w1")
 
-	jobs, err := client.GetJobs(context.Background(), 1)
+	_, ok, err := client.GetJob(context.Background())
 	require.NoError(t, err)
-	require.Empty(t, jobs)
+	require.False(t, ok)
 }
 
-func TestClient_GetJobs_ReturnsJob(t *testing.T) {
+func TestClient_GetJob_ReturnsJob(t *testing.T) {
 	client, repo := testClient(t, "w1")
 	ctx := context.Background()
 
 	board := testBoard(t, 12)
 	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
 
-	jobs, err := client.GetJobs(ctx, 1)
+	job, ok, err := client.GetJob(ctx)
 	require.NoError(t, err)
-	require.Len(t, jobs, 1)
-	require.Equal(t, board.String(), jobs[0].Board)
-	require.Positive(t, jobs[0].Level)
+	require.True(t, ok)
+	require.Equal(t, board.String(), job.Board)
+	require.Positive(t, job.Level)
 }
 
-func TestClient_GetJobs_ReturnsUpToCountJobs(t *testing.T) {
-	client, repo := testClient(t, "w1")
-	ctx := context.Background()
-
-	boards := testDistinctClientBoards(t, 12, 3)
-	require.NoError(t, repo.AddBoards(ctx, boards))
-
-	jobs, err := client.GetJobs(ctx, 2)
-	require.NoError(t, err)
-	require.Len(t, jobs, 2)
-}
-
-func TestClient_GetJobs_TwoWorkersGetDistinctJobs(t *testing.T) {
+func TestClient_GetJob_TwoWorkersGetDistinctJobs(t *testing.T) {
 	client1, repo := testClient(t, "w1")
 	// Same server/DB as client1, different worker identity: testClient
 	// gives each caller its own isolated Postgres transaction, which two
@@ -114,15 +102,15 @@ func TestClient_GetJobs_TwoWorkersGetDistinctJobs(t *testing.T) {
 	boards := testDistinctClientBoards(t, 12, 2)
 	require.NoError(t, repo.AddBoards(ctx, boards))
 
-	jobs1, err := client1.GetJobs(ctx, 1)
+	job1, ok, err := client1.GetJob(ctx)
 	require.NoError(t, err)
-	require.Len(t, jobs1, 1)
+	require.True(t, ok)
 
-	jobs2, err := client2.GetJobs(ctx, 1)
+	job2, ok, err := client2.GetJob(ctx)
 	require.NoError(t, err)
-	require.Len(t, jobs2, 1)
+	require.True(t, ok)
 
-	require.NotEqual(t, jobs1[0].Board, jobs2[0].Board)
+	require.NotEqual(t, job1.Board, job2.Board)
 }
 
 func TestClient_SubmitJobResult_Success(t *testing.T) {
@@ -132,9 +120,9 @@ func TestClient_SubmitJobResult_Success(t *testing.T) {
 	board := testBoard(t, 12)
 	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
 
-	jobs, err := client.GetJobs(ctx, 1)
+	_, ok, err := client.GetJob(ctx)
 	require.NoError(t, err)
-	require.Len(t, jobs, 1)
+	require.True(t, ok)
 
 	eval := edax.Evaluation{Depth: 24, Confidence: 73, Score: 6}
 	require.NoError(t, client.SubmitJobResult(ctx, board.String(), 24, eval))
@@ -155,7 +143,21 @@ func TestClient_SubmitJobResult_BoardNotFound(t *testing.T) {
 
 func TestClient_Heartbeat_Success(t *testing.T) {
 	client, _ := testClient(t, "w1")
-	require.NoError(t, client.Heartbeat(context.Background()))
+	require.NoError(t, client.Heartbeat(context.Background(), ""))
+}
+
+func TestClient_Heartbeat_WithClaimedBoard(t *testing.T) {
+	client, repo := testClient(t, "w1")
+	ctx := context.Background()
+
+	board := testBoard(t, 12)
+	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+
+	job, ok, err := client.GetJob(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	require.NoError(t, client.Heartbeat(ctx, job.Board))
 }
 
 func TestClient_ReleaseJob_AllowsAnotherWorkerToClaimIt(t *testing.T) {
@@ -166,16 +168,16 @@ func TestClient_ReleaseJob_AllowsAnotherWorkerToClaimIt(t *testing.T) {
 	board := testBoard(t, 12)
 	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
 
-	jobs, err := client1.GetJobs(ctx, 1)
+	job, ok, err := client1.GetJob(ctx)
 	require.NoError(t, err)
-	require.Len(t, jobs, 1)
+	require.True(t, ok)
 
-	require.NoError(t, client1.ReleaseJob(ctx, jobs[0].Board))
+	require.NoError(t, client1.ReleaseJob(ctx, job.Board))
 
-	jobs2, err := client2.GetJobs(ctx, 1)
+	job2, ok, err := client2.GetJob(ctx)
 	require.NoError(t, err)
-	require.Len(t, jobs2, 1)
-	require.Equal(t, jobs[0].Board, jobs2[0].Board)
+	require.True(t, ok)
+	require.Equal(t, job.Board, job2.Board)
 }
 
 // testDistinctClientBoards returns n distinct NormalizedBoards with exactly

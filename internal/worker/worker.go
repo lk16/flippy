@@ -17,12 +17,6 @@ const (
 	defaultNoJobSleep        = 10 * time.Second
 	defaultErrorSleep        = 10 * time.Second
 
-	// defaultJobBatchSize is how many jobs a single GetJobs call tries to claim at once, and the
-	// capacity of the local prefetch queue; defaultJobLowWater is the queue level (in jobs remaining)
-	// at which a top-up is triggered, so the queue is refilled before it actually runs dry.
-	defaultJobBatchSize = 10
-	defaultJobLowWater  = 3
-
 	// defaultStatsInterval is how often throughput (boards/sec, sec/board since start) is logged.
 	defaultStatsInterval = 10 * time.Second
 
@@ -33,10 +27,10 @@ const (
 
 // apiClient is the subset of Client's behavior Worker depends on, so tests can inject a fake.
 type apiClient interface {
-	GetJobs(ctx context.Context, count int) ([]Job, error)
+	GetJob(ctx context.Context) (Job, bool, error)
 	SubmitJobResult(ctx context.Context, board string, level int, eval edax.Evaluation) error
 	ReleaseJob(ctx context.Context, board string) error
-	Heartbeat(ctx context.Context) error
+	Heartbeat(ctx context.Context, board string) error
 }
 
 // evaluator is the subset of *edax.Process's behavior Worker depends on, so tests can inject a fake.
@@ -44,11 +38,8 @@ type evaluator interface {
 	Evaluate(board othello.Board, level int) (edax.Evaluation, error)
 }
 
-// Worker repeatedly claims jobs from the API, evaluates them with edax, and submits the results.
-//
-// Jobs are claimed in batches into a local prefetch queue (jobs) rather than one at a time, so
-// evaluation doesn't have to wait on a network round trip between jobs; a background goroutine
-// (runRefill) tops the queue back up once it drops to jobLowWater, signaled via refill.
+// Worker repeatedly claims one job at a time from the API, evaluates it with edax, and submits the
+// result.
 type Worker struct {
 	api  apiClient
 	edax evaluator
@@ -56,12 +47,12 @@ type Worker struct {
 	heartbeatInterval time.Duration
 	noJobSleep        time.Duration
 	errorSleep        time.Duration
-	jobBatchSize      int
-	jobLowWater       int
 	statsInterval     time.Duration
 
-	jobs   chan Job
-	refill chan struct{}
+	// claimed is the board this worker currently holds a claim on ("" if none), so the heartbeat can
+	// refresh it and shutdown can release it.
+	mu      sync.Mutex
+	claimed string
 
 	jobsCompleted atomic.Int64
 }
@@ -74,27 +65,19 @@ func New(api apiClient, edax evaluator) *Worker {
 		heartbeatInterval: defaultHeartbeatInterval,
 		noJobSleep:        defaultNoJobSleep,
 		errorSleep:        defaultErrorSleep,
-		jobBatchSize:      defaultJobBatchSize,
-		jobLowWater:       defaultJobLowWater,
 		statsInterval:     defaultStatsInterval,
-		jobs:              make(chan Job, defaultJobBatchSize),
-		refill:            make(chan struct{}, 1),
 	}
 }
 
-// Run blocks running the job, refill, and heartbeat loops until ctx is canceled; callers must close
+// Run blocks running the job, heartbeat, and stats loops until ctx is canceled; callers must close
 // the edax process separately to interrupt a blocked evaluation, since ctx cancellation alone can't.
 func (w *Worker) Run(ctx context.Context) {
 	var wg sync.WaitGroup
-	wg.Add(4)
+	wg.Add(3)
 
 	go func() {
 		defer wg.Done()
 		w.runHeartbeat(ctx)
-	}()
-	go func() {
-		defer wg.Done()
-		w.runRefill(ctx)
 	}()
 	go func() {
 		defer wg.Done()
@@ -107,20 +90,26 @@ func (w *Worker) Run(ctx context.Context) {
 
 	wg.Wait()
 
-	w.releaseQueuedJobs()
+	// Release the claim still held after a shutdown mid-job, so another worker doesn't have to wait
+	// out claimTTL.
+	if board := w.claimedBoard(); board != "" {
+		w.releaseJob(board)
+		w.setClaimedBoard("")
+	}
 }
 
-// releaseQueuedJobs releases claims for jobs still sitting in the local prefetch queue once Run's
-// loops have all stopped, so a shutdown doesn't leave them claimed until claimTTL naturally expires.
-func (w *Worker) releaseQueuedJobs() {
-	for {
-		select {
-		case job := <-w.jobs:
-			w.releaseJob(job.Board)
-		default:
-			return
-		}
-	}
+// setClaimedBoard records the board this worker currently holds a claim on ("" for none).
+func (w *Worker) setClaimedBoard(board string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.claimed = board
+}
+
+// claimedBoard returns the board this worker currently holds a claim on, or "".
+func (w *Worker) claimedBoard() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.claimed
 }
 
 // releaseJob best-effort releases this worker's claim on board.
@@ -172,8 +161,9 @@ func (w *Worker) logStats(start time.Time) {
 }
 
 // runHeartbeat sends a heartbeat immediately, then every heartbeatInterval, until ctx is canceled.
+// Each heartbeat reports the currently claimed board so the server can refresh its claim TTL.
 func (w *Worker) runHeartbeat(ctx context.Context) {
-	if err := w.api.Heartbeat(ctx); err != nil {
+	if err := w.api.Heartbeat(ctx, w.claimedBoard()); err != nil {
 		slog.Error("failed to send heartbeat", "error", err)
 	}
 
@@ -185,119 +175,72 @@ func (w *Worker) runHeartbeat(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := w.api.Heartbeat(ctx); err != nil {
+			if err := w.api.Heartbeat(ctx, w.claimedBoard()); err != nil {
 				slog.Error("failed to send heartbeat", "error", err)
 			}
 		}
 	}
 }
 
-// runRefill keeps the jobs queue topped up to jobBatchSize until ctx is canceled. While the queue is
-// full it waits for a low-water signal from dequeueJob (or ctx cancellation) before fetching again;
-// once fetching, it retries immediately as long as the server keeps returning a full batch (more work
-// is likely queued right away), and backs off otherwise (including on error or an empty result) so it
-// doesn't hammer the server when supply is scarce.
-func (w *Worker) runRefill(ctx context.Context) {
+// runJobs claims and processes one job at a time until ctx is canceled, sleeping between attempts
+// when no job is available or claiming fails.
+func (w *Worker) runJobs(ctx context.Context) {
 	for ctx.Err() == nil {
-		need := w.jobBatchSize - len(w.jobs)
-		if need <= 0 {
-			select {
-			case <-ctx.Done():
-				return
-			case <-w.refill:
-			}
-			continue
-		}
-
-		jobs, err := w.api.GetJobs(ctx, need)
+		job, ok, err := w.api.GetJob(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			slog.Error("failed to get jobs", "error", err)
+			slog.Error("failed to get job", "error", err)
 			sleep(ctx, w.errorSleep)
 			continue
 		}
-
-		for _, job := range jobs {
-			select {
-			case w.jobs <- job:
-			case <-ctx.Done():
-				return
-			}
-		}
-
-		if len(jobs) < need {
+		if !ok {
 			sleep(ctx, w.noJobSleep)
+			continue
+		}
+
+		w.setClaimedBoard(job.Board)
+		if stillClaimed := w.processJob(ctx, job); !stillClaimed {
+			w.setClaimedBoard("")
 		}
 	}
 }
 
-// runJobs repeatedly dequeues and processes one job at a time until ctx is canceled.
-func (w *Worker) runJobs(ctx context.Context) {
-	for ctx.Err() == nil {
-		w.runOneJob(ctx)
-	}
-}
-
-// dequeueJob waits for a job from the queue, signaling runRefill once the queue drops to jobLowWater;
-// it returns false only once ctx is canceled.
-func (w *Worker) dequeueJob(ctx context.Context) (Job, bool) {
-	select {
-	case job := <-w.jobs:
-		if len(w.jobs) <= w.jobLowWater {
-			select {
-			case w.refill <- struct{}{}:
-			default:
-			}
-		}
-		return job, true
-	case <-ctx.Done():
-		return Job{}, false
-	}
-}
-
-// runOneJob dequeues and processes a single job.
-func (w *Worker) runOneJob(ctx context.Context) {
-	job, ok := w.dequeueJob(ctx)
-	if !ok {
-		return
-	}
-	w.processJob(ctx, job)
-}
-
-// processJob evaluates and submits job, sleeping before returning on failure.
-func (w *Worker) processJob(ctx context.Context, job Job) {
+// processJob evaluates and submits job, sleeping before returning on failure. It reports whether the
+// worker still holds the claim on job's board, which is only the case after a shutdown mid-job; the
+// caller releases it then.
+func (w *Worker) processJob(ctx context.Context, job Job) (stillClaimed bool) {
 	board, err := othello.ParseBoard(job.Board)
 	if err != nil {
 		// The server always sends valid boards; this indicates a protocol mismatch, not a runtime fluke.
 		slog.Error("received unparseable board from server", "board", job.Board, "error", err)
-		return
+		return false
 	}
 
 	eval, err := w.edax.Evaluate(board, job.Level)
 	if err != nil {
 		if ctx.Err() != nil {
-			// Shutdown closed the edax process mid-evaluation; release rather than leaving the claim
-			// to expire via claimTTL.
-			w.releaseJob(job.Board)
-			return
+			// Shutdown closed the edax process mid-evaluation; the claim is still held and Run
+			// releases it.
+			return true
 		}
 		slog.Error("failed to evaluate job", "error", err)
 		sleep(ctx, w.errorSleep)
-		return
+		return false
 	}
 
 	if err := w.api.SubmitJobResult(ctx, job.Board, job.Level, eval); err != nil {
 		if ctx.Err() != nil {
-			return
+			return true
 		}
 		slog.Error("failed to submit job result", "error", err)
 		sleep(ctx, w.errorSleep)
-		return
+		return false
 	}
 
 	w.jobsCompleted.Add(1)
+	return false
 }
 
 // sleep waits for d or until ctx is canceled, whichever comes first.

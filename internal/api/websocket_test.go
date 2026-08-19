@@ -228,8 +228,7 @@ func TestHandleWebSocket_AnalyzeRequest_EnqueuesMissingBoards(t *testing.T) {
 	require.Equal(t, board1.String(), entry["board"])
 
 	// board2 (normalized) should be in the priority queue.
-	pending, err := s.dequeuePriority(ctx, 10)
-	require.NoError(t, err)
+	pending := drainPriority(t, s)
 	pendingBoards := make([]string, len(pending))
 	for i, e := range pending {
 		pendingBoards[i] = e.Board
@@ -261,8 +260,7 @@ func TestHandleWebSocket_AnalyzeRequest_ForcedPassEnqueuesPostPassBoard(t *testi
 	require.NoError(t, wsjson.Read(ctx, conn, &resp))
 	require.Equal(t, 1, resp.ID)
 
-	pending, err := s.dequeuePriority(ctx, 10)
-	require.NoError(t, err)
+	pending := drainPriority(t, s)
 	pendingBoards := make([]string, len(pending))
 	for i, e := range pending {
 		pendingBoards[i] = e.Board
@@ -304,8 +302,7 @@ func TestHandleWebSocket_AnalyzeRequest_SameSearchNotEnqueued(t *testing.T) {
 	require.Equal(t, float64(73), entry["confidence"])
 
 	// ... and no job is queued to compute it again.
-	pending, err := s.dequeuePriority(ctx, 10)
-	require.NoError(t, err)
+	pending := drainPriority(t, s)
 	require.Empty(t, pending)
 }
 
@@ -324,8 +321,7 @@ func TestHandleWebSocket_AnalyzeRequest_FinalResultNotEnqueued(t *testing.T) {
 
 	s.handleAnalyzeRequest(ctx, []string{board.String()}, 28)
 
-	pending, err := s.dequeuePriority(ctx, 10)
-	require.NoError(t, err)
+	pending := drainPriority(t, s)
 	require.Empty(t, pending)
 }
 
@@ -397,8 +393,7 @@ func TestHandleWebSocket_AnalyzeRequest_GameOverNotEnqueued(t *testing.T) {
 	var resp wsOutgoing
 	require.NoError(t, wsjson.Read(ctx, conn, &resp))
 
-	pending, err := s.dequeuePriority(ctx, 10)
-	require.NoError(t, err)
+	pending := drainPriority(t, s)
 	require.Empty(t, pending)
 }
 
@@ -424,8 +419,7 @@ func TestHandleWebSocket_AnalyzeRequest_NoDuplicatesInQueue(t *testing.T) {
 	send(2) // same board again
 
 	// Only one entry must be in the queue.
-	dequeued, err := s.dequeuePriority(ctx, 10)
-	require.NoError(t, err)
+	dequeued := drainPriority(t, s)
 	count := 0
 	for _, entry := range dequeued {
 		if entry.Board == board.String() {

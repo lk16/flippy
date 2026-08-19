@@ -26,11 +26,13 @@ type releaseJobRequest struct {
 	Board    string `json:"board"`
 }
 
-// heartbeatRequest is the JSON body POSTed to /api/workers/heartbeat.
+// heartbeatRequest is the JSON body POSTed to /api/workers/heartbeat. Board is the board the worker
+// currently holds a claim on, if any, so the server can refresh that claim's TTL.
 type heartbeatRequest struct {
 	WorkerID  string `json:"worker_id"`
 	Hostname  string `json:"hostname"`
 	GitCommit string `json:"git_commit"`
+	Board     string `json:"board,omitempty"`
 }
 
 // evaluationSourceEdax marks an evaluationResponse as a directly-learned edax result.

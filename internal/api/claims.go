@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -39,50 +38,10 @@ const (
 	workerFieldLastActive        = "last_active"
 )
 
-// claimKeyPrefix namespaces the per-board claim keys (see claimKey).
-const claimKeyPrefix = "claim:"
-
 // claimKey is the redis key holding the worker ID that currently holds board's job, if any.
 func claimKey(board string) string {
-	return claimKeyPrefix + board
+	return "claim:" + board
 }
-
-// workerClaimsKey is the redis SET key holding every board a worker currently has claimed. It's kept
-// outside the "worker:*" namespace so listWorkers' SCAN (which HGETALLs each match) never hits it.
-func workerClaimsKey(workerID string) string {
-	return "worker_claims:" + workerID
-}
-
-// releaseClaimScript deletes a claim key only if it still holds the expected worker ID, so a worker
-// finishing after its claim TTL expired (and the board was re-claimed by another worker) can't delete
-// the new owner's claim. Returns 1 if it deleted the key, 0 otherwise.
-var releaseClaimScript = redis.NewScript(`
-if redis.call("get", KEYS[1]) == ARGV[1] then
-	return redis.call("del", KEYS[1])
-end
-return 0
-`)
-
-// refreshClaimsScript refreshes the TTL of every claim key in a worker's claims set that the worker
-// still owns, pruning from the set any board a claim has since expired on (and possibly been
-// re-claimed by another worker), then refreshes the set's own TTL. This keeps every claim in a
-// multi-board batch alive for as long as the worker keeps heartbeating, not just the last one.
-// KEYS[1] = worker claims set; ARGV[1] = worker ID; ARGV[2] = TTL ms; ARGV[3] = claim key prefix.
-var refreshClaimsScript = redis.NewScript(`
-local boards = redis.call("smembers", KEYS[1])
-for _, board in ipairs(boards) do
-	local key = ARGV[3] .. board
-	if redis.call("get", key) == ARGV[1] then
-		redis.call("pexpire", key, ARGV[2])
-	else
-		redis.call("srem", KEYS[1], board)
-	end
-end
-if redis.call("scard", KEYS[1]) > 0 then
-	redis.call("pexpire", KEYS[1], ARGV[2])
-end
-return "OK"
-`)
 
 // workerKey is the redis key of the hash describing a worker's hostname, git commit, stats, and claimed board.
 func workerKey(workerID string) string {
@@ -104,8 +63,6 @@ func (s *Server) tryClaim(ctx context.Context, board, workerID string) (bool, er
 		workerFieldLastActive, time.Now().Format(time.RFC3339Nano),
 	)
 	pipe.Expire(ctx, workerKey(workerID), claimTTL)
-	pipe.SAdd(ctx, workerClaimsKey(workerID), board)
-	pipe.Expire(ctx, workerClaimsKey(workerID), claimTTL)
 	if _, err := pipe.Exec(ctx); err != nil {
 		return false, fmt.Errorf("failed to record worker claim: %w", err)
 	}
@@ -115,17 +72,23 @@ func (s *Server) tryClaim(ctx context.Context, board, workerID string) (bool, er
 
 // releaseClaim releases workerID's claim on board; best-effort since claims also expire via claimTTL.
 // The claim key is only deleted if it still belongs to workerID, so a late release can't revoke a claim
-// another worker took over after this one's TTL expired.
+// another worker took over after this one's TTL expired. GET-then-DEL is not atomic: another worker
+// could re-claim between the two, and the DEL would revoke its claim. Worst case is one duplicated
+// evaluation, which is acceptable.
 func (s *Server) releaseClaim(ctx context.Context, board, workerID string) error {
-	if err := releaseClaimScript.Run(ctx, s.redis, []string{claimKey(board)}, workerID).Err(); err != nil {
+	owner, err := s.redis.Get(ctx, claimKey(board)).Result()
+	if err == redis.Nil || (err == nil && owner != workerID) {
+		return nil
+	}
+	if err != nil {
 		return fmt.Errorf("failed to release claim: %w", err)
 	}
 
 	pipe := s.redis.TxPipeline()
-	pipe.SRem(ctx, workerClaimsKey(workerID), board)
+	pipe.Del(ctx, claimKey(board))
 	pipe.Expire(ctx, workerKey(workerID), claimTTL)
 	if _, err := pipe.Exec(ctx); err != nil {
-		return fmt.Errorf("failed to clear worker claim: %w", err)
+		return fmt.Errorf("failed to release claim: %w", err)
 	}
 
 	return nil
@@ -170,8 +133,10 @@ func (s *Server) recordJobCompletion(ctx context.Context, workerID string) error
 	return nil
 }
 
-// heartbeat records workerID as active and refreshes its claim, if it has one.
-func (s *Server) heartbeat(ctx context.Context, workerID, hostname, gitCommit string) error {
+// heartbeat records workerID as active and refreshes its claim on board, if it reports one. The
+// GET-compare-EXPIRE is not atomic: the claim could expire and be re-claimed between the two calls,
+// extending the new owner's claim. Worst case is one duplicated evaluation, which is acceptable.
+func (s *Server) heartbeat(ctx context.Context, workerID, hostname, gitCommit, board string) error {
 	pipe := s.redis.TxPipeline()
 	pipe.HSet(ctx, workerKey(workerID),
 		workerFieldHostname, hostname,
@@ -183,14 +148,20 @@ func (s *Server) heartbeat(ctx context.Context, workerID, hostname, gitCommit st
 		return fmt.Errorf("failed to record heartbeat: %w", err)
 	}
 
-	// Refresh every board the worker still holds, not just one, so a claimed batch doesn't lose its
-	// claims mid-evaluation (see refreshClaimsScript).
-	err := refreshClaimsScript.Run(ctx, s.redis,
-		[]string{workerClaimsKey(workerID)},
-		workerID, claimTTL.Milliseconds(), claimKeyPrefix,
-	).Err()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		return fmt.Errorf("failed to refresh worker claims: %w", err)
+	if board == "" {
+		return nil
+	}
+
+	owner, err := s.redis.Get(ctx, claimKey(board)).Result()
+	if err == redis.Nil || (err == nil && owner != workerID) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to refresh worker claim: %w", err)
+	}
+
+	if err := s.redis.Expire(ctx, claimKey(board), claimTTL).Err(); err != nil {
+		return fmt.Errorf("failed to refresh worker claim: %w", err)
 	}
 
 	return nil

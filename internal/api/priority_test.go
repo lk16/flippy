@@ -13,13 +13,28 @@ import (
 	"github.com/lk16/flippy/internal/othello"
 )
 
-// TestClaimJobs_PriorityDrainedFirst verifies that priority-queue boards are returned before
+// drainPriority pops every entry currently in the priority queue.
+func drainPriority(t *testing.T, s *Server) []priorityEntry {
+	t.Helper()
+
+	var entries []priorityEntry
+	for {
+		entry, ok, err := s.dequeuePriority(context.Background())
+		require.NoError(t, err)
+		if !ok {
+			return entries
+		}
+		entries = append(entries, entry)
+	}
+}
+
+// TestClaimJob_PriorityDrainedFirst verifies that priority-queue boards are returned before
 // any ListLearnable candidates.
-func TestClaimJobs_PriorityDrainedFirst(t *testing.T) {
+func TestClaimJob_PriorityDrainedFirst(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	// Put a learnabled board in the DB so ListLearnable has something to offer.
+	// Put a learnable board in the DB so ListLearnable has something to offer.
 	dbBoard := testBoard(t, 12)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{dbBoard}))
 
@@ -27,36 +42,21 @@ func TestClaimJobs_PriorityDrainedFirst(t *testing.T) {
 	pBoard := testBoard(t, 14)
 	require.NoError(t, s.enqueuePriority(ctx, pBoard.String(), PriorityLevel))
 
-	jobs, err := s.claimJobs(ctx, "worker-1", 2)
+	job, ok, err := s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(jobs), 1)
-	// First job must be the priority board.
-	require.Equal(t, pBoard, jobs[0].Board)
-	require.Equal(t, PriorityLevel, jobs[0].Level)
+	require.True(t, ok)
+	require.Equal(t, pBoard, job.Board)
+	require.Equal(t, PriorityLevel, job.Level)
+
+	// The next claim falls back to the DB board.
+	job, ok, err = s.claimJob(ctx, "worker-1")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, dbBoard, job.Board)
 }
 
-// TestClaimJobs_PriorityRespectsTotalCount ensures priority + DB jobs together don't exceed count.
-func TestClaimJobs_PriorityRespectsTotalCount(t *testing.T) {
-	s := testServer(t)
-	ctx := context.Background()
-
-	// Add enough DB boards.
-	dbBoards := testDistinctBoards(t, 12, 3)
-	require.NoError(t, s.repo.AddBoards(ctx, dbBoards))
-
-	// Enqueue 2 priority boards.
-	pBoards := testDistinctBoards(t, 14, 2)
-	for _, b := range pBoards {
-		require.NoError(t, s.enqueuePriority(ctx, b.String(), PriorityLevel))
-	}
-
-	jobs, err := s.claimJobs(ctx, "worker-1", 2)
-	require.NoError(t, err)
-	require.Len(t, jobs, 2)
-}
-
-// TestClaimJobs_PrioritySkipsNoMovesBoard ensures boards with no legal move are skipped in the priority path.
-func TestClaimJobs_PrioritySkipsNoMovesBoard(t *testing.T) {
+// TestClaimJob_PrioritySkipsNoMovesBoard ensures boards with no legal move are skipped in the priority path.
+func TestClaimJob_PrioritySkipsNoMovesBoard(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
@@ -80,16 +80,15 @@ func TestClaimJobs_PrioritySkipsNoMovesBoard(t *testing.T) {
 	dbBoard := testBoard(t, 12)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{dbBoard}))
 
-	jobs, err := s.claimJobs(ctx, "worker-1", 2)
+	// The no-move board is skipped; the claim falls through to the DB board.
+	job, ok, err := s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
-	// The no-move board must not be in the jobs.
-	for _, j := range jobs {
-		require.NotEqual(t, normalizedNoMove, j.Board)
-	}
+	require.True(t, ok)
+	require.Equal(t, dbBoard, job.Board)
 }
 
-// TestClaimJobs_PriorityDeduplicates verifies that enqueuePriority skips duplicates.
-func TestClaimJobs_PriorityDeduplicates(t *testing.T) {
+// TestClaimJob_PriorityDeduplicates verifies that enqueuePriority skips duplicates.
+func TestClaimJob_PriorityDeduplicates(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
@@ -97,9 +96,7 @@ func TestClaimJobs_PriorityDeduplicates(t *testing.T) {
 	require.NoError(t, s.enqueuePriority(ctx, pBoard.String(), PriorityLevel))
 	require.NoError(t, s.enqueuePriority(ctx, pBoard.String(), PriorityLevel)) // duplicate — should be ignored
 
-	entries, err := s.dequeuePriority(ctx, 10)
-	require.NoError(t, err)
-	require.Len(t, entries, 1)
+	require.Len(t, drainPriority(t, s), 1)
 }
 
 // TestHandleSubmitJobResult_PriorityHighDiscSkipsPersistence verifies that a priority job for

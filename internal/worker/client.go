@@ -45,36 +45,32 @@ type jobResponse struct {
 	Level int    `json:"level"`
 }
 
-// GetJobs claims up to count available jobs; it may return fewer than count, including none.
-func (c *Client) GetJobs(ctx context.Context, count int) ([]Job, error) {
-	target := fmt.Sprintf("%s/api/jobs?worker_id=%s&count=%d", c.baseURL, url.QueryEscape(c.workerID), count)
+// GetJob claims one available job; ok is false when the server has none.
+func (c *Client) GetJob(ctx context.Context) (job Job, ok bool, err error) {
+	target := fmt.Sprintf("%s/api/jobs?worker_id=%s", c.baseURL, url.QueryEscape(c.workerID))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build request: %w", err)
+		return Job{}, false, fmt.Errorf("failed to build request: %w", err)
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
+		return Job{}, false, fmt.Errorf("failed to send request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	switch resp.StatusCode {
 	case http.StatusNoContent:
-		return nil, nil
+		return Job{}, false, nil
 	case http.StatusOK:
-		var jrs []jobResponse
-		if err := json.NewDecoder(resp.Body).Decode(&jrs); err != nil {
-			return nil, fmt.Errorf("failed to decode jobs response: %w", err)
+		var jr jobResponse
+		if err := json.NewDecoder(resp.Body).Decode(&jr); err != nil {
+			return Job{}, false, fmt.Errorf("failed to decode job response: %w", err)
 		}
-		jobs := make([]Job, len(jrs))
-		for i, jr := range jrs {
-			jobs[i] = Job(jr)
-		}
-		return jobs, nil
+		return Job(jr), true, nil
 	default:
-		return nil, fmt.Errorf("unexpected status %d from GET /api/jobs", resp.StatusCode)
+		return Job{}, false, fmt.Errorf("unexpected status %d from GET /api/jobs", resp.StatusCode)
 	}
 }
 
@@ -118,14 +114,16 @@ type heartbeatRequest struct {
 	WorkerID  string `json:"worker_id"`
 	Hostname  string `json:"hostname"`
 	GitCommit string `json:"git_commit"`
+	Board     string `json:"board,omitempty"`
 }
 
-// Heartbeat reports this worker as active and refreshes its job claim, if it has one.
-func (c *Client) Heartbeat(ctx context.Context) error {
+// Heartbeat reports this worker as active, refreshing its claim on board ("" for none).
+func (c *Client) Heartbeat(ctx context.Context, board string) error {
 	return c.post(ctx, "/api/workers/heartbeat", heartbeatRequest{
 		WorkerID:  c.workerID,
 		Hostname:  c.hostname,
 		GitCommit: c.gitCommit,
+		Board:     board,
 	})
 }
 

@@ -34,34 +34,6 @@ func TestServer_TryClaim_DistinctBoardsBothSucceed(t *testing.T) {
 	require.True(t, ok)
 }
 
-func TestServer_TryClaim_RecordsClaimedBoardOnWorker(t *testing.T) {
-	s := testServer(t)
-	ctx := context.Background()
-
-	ok, err := s.tryClaim(ctx, "board-a", "worker-1")
-	require.NoError(t, err)
-	require.True(t, ok)
-
-	isMember, err := s.redis.SIsMember(ctx, workerClaimsKey("worker-1"), "board-a").Result()
-	require.NoError(t, err)
-	require.True(t, isMember)
-}
-
-func TestServer_TryClaim_RecordsEveryBoardInBatch(t *testing.T) {
-	s := testServer(t)
-	ctx := context.Background()
-
-	for _, board := range []string{"board-a", "board-b", "board-c"} {
-		ok, err := s.tryClaim(ctx, board, "worker-1")
-		require.NoError(t, err)
-		require.True(t, ok)
-	}
-
-	members, err := s.redis.SMembers(ctx, workerClaimsKey("worker-1")).Result()
-	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"board-a", "board-b", "board-c"}, members)
-}
-
 func TestServer_ReleaseClaim_AllowsReclaim(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
@@ -75,21 +47,6 @@ func TestServer_ReleaseClaim_AllowsReclaim(t *testing.T) {
 	ok, err = s.tryClaim(ctx, "board-a", "worker-2")
 	require.NoError(t, err)
 	require.True(t, ok)
-}
-
-func TestServer_ReleaseClaim_ClearsClaimedBoardOnWorker(t *testing.T) {
-	s := testServer(t)
-	ctx := context.Background()
-
-	ok, err := s.tryClaim(ctx, "board-a", "worker-1")
-	require.NoError(t, err)
-	require.True(t, ok)
-
-	require.NoError(t, s.releaseClaim(ctx, "board-a", "worker-1"))
-
-	isMember, err := s.redis.SIsMember(ctx, workerClaimsKey("worker-1"), "board-a").Result()
-	require.NoError(t, err)
-	require.False(t, isMember)
 }
 
 func TestServer_ReleaseClaim_NoActiveClaimIsNoop(t *testing.T) {
@@ -173,43 +130,16 @@ func TestServer_Heartbeat_RefreshesClaimTTL(t *testing.T) {
 
 	require.NoError(t, s.redis.Expire(ctx, claimKey("board-a"), time.Second).Err())
 
-	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1"))
+	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1", "board-a"))
 
 	ttl, err := s.redis.TTL(ctx, claimKey("board-a")).Result()
 	require.NoError(t, err)
 	require.Greater(t, ttl, time.Second)
 }
 
-// TestServer_Heartbeat_RefreshesAllClaimsInBatch covers the multi-claim case:
-// a worker that claimed several boards in one batch must have every claim's TTL
-// refreshed on heartbeat, not just one, so none expire mid-evaluation and get
-// re-claimed by another worker.
-func TestServer_Heartbeat_RefreshesAllClaimsInBatch(t *testing.T) {
-	s := testServer(t)
-	ctx := context.Background()
-
-	boards := []string{"board-a", "board-b", "board-c"}
-	for _, board := range boards {
-		ok, err := s.tryClaim(ctx, board, "worker-1")
-		require.NoError(t, err)
-		require.True(t, ok)
-		// Shorten every claim's TTL so a missed refresh would be visible.
-		require.NoError(t, s.redis.Expire(ctx, claimKey(board), time.Second).Err())
-	}
-
-	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1"))
-
-	for _, board := range boards {
-		ttl, err := s.redis.TTL(ctx, claimKey(board)).Result()
-		require.NoError(t, err)
-		require.Greater(t, ttl, time.Second, "claim %s should have been refreshed", board)
-	}
-}
-
 // TestServer_Heartbeat_DoesNotRefreshClaimTakenOverByAnotherWorker covers a
-// board whose claim expired and was re-claimed by another worker while it was
-// still listed in the first worker's claims set: the first worker's heartbeat
-// must not extend the new owner's claim, and must prune the stale entry.
+// board whose claim expired and was re-claimed by another worker: the first
+// worker's heartbeat must not extend the new owner's claim.
 func TestServer_Heartbeat_DoesNotRefreshClaimTakenOverByAnotherWorker(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
@@ -221,24 +151,19 @@ func TestServer_Heartbeat_DoesNotRefreshClaimTakenOverByAnotherWorker(t *testing
 	// worker-2 takes over the board (as if worker-1's TTL had lapsed).
 	require.NoError(t, s.redis.Set(ctx, claimKey("board-a"), "worker-2", time.Second).Err())
 
-	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1"))
+	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1", "board-a"))
 
-	// worker-2's short TTL must be left untouched, and board-a pruned from
-	// worker-1's claims set.
+	// worker-2's short TTL must be left untouched.
 	ttl, err := s.redis.TTL(ctx, claimKey("board-a")).Result()
 	require.NoError(t, err)
 	require.LessOrEqual(t, ttl, time.Second)
-
-	isMember, err := s.redis.SIsMember(ctx, workerClaimsKey("worker-1"), "board-a").Result()
-	require.NoError(t, err)
-	require.False(t, isMember)
 }
 
 func TestServer_Heartbeat_RecordsHostnameAndGitCommit(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1"))
+	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1", ""))
 
 	values, err := s.redis.HGetAll(ctx, workerKey("worker-1")).Result()
 	require.NoError(t, err)
@@ -249,7 +174,12 @@ func TestServer_Heartbeat_RecordsHostnameAndGitCommit(t *testing.T) {
 
 func TestServer_Heartbeat_IdleWorkerIsNotAnError(t *testing.T) {
 	s := testServer(t)
-	require.NoError(t, s.heartbeat(context.Background(), "worker-unknown", "host-1", "commit-1"))
+	require.NoError(t, s.heartbeat(context.Background(), "worker-unknown", "host-1", "commit-1", ""))
+}
+
+func TestServer_Heartbeat_UnclaimedBoardIsNotAnError(t *testing.T) {
+	s := testServer(t)
+	require.NoError(t, s.heartbeat(context.Background(), "worker-1", "host-1", "commit-1", "board-a"))
 }
 
 func TestServer_ListWorkers_Empty(t *testing.T) {
@@ -264,10 +194,10 @@ func TestServer_ListWorkers_OrdersByPositionsComputedDescending(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1"))
+	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1", ""))
 	require.NoError(t, s.recordJobCompletion(ctx, "worker-1"))
 
-	require.NoError(t, s.heartbeat(ctx, "worker-2", "host-2", "commit-2"))
+	require.NoError(t, s.heartbeat(ctx, "worker-2", "host-2", "commit-2", ""))
 	require.NoError(t, s.recordJobCompletion(ctx, "worker-2"))
 	require.NoError(t, s.recordJobCompletion(ctx, "worker-2"))
 
@@ -282,8 +212,8 @@ func TestServer_ListWorkers_TiesBreakByMostRecentlyActive(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1"))
-	require.NoError(t, s.heartbeat(ctx, "worker-2", "host-2", "commit-2"))
+	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1", ""))
+	require.NoError(t, s.heartbeat(ctx, "worker-2", "host-2", "commit-2", ""))
 
 	workers, err := s.listWorkers(ctx)
 	require.NoError(t, err)
@@ -296,12 +226,10 @@ func TestServer_ListWorkers_IncludesClaimAndPositionsComputed(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1"))
+	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1", ""))
 	require.NoError(t, s.recordJobCompletion(ctx, "worker-1"))
 
-	// A worker with an active claim has a "worker_claims:<id>" SET key; listing
-	// workers (which SCANs "worker:*" and HGETALLs each match) must not trip over
-	// it with a WRONGTYPE error.
+	// An active claim key must not confuse listWorkers' SCAN over "worker:*".
 	ok, err := s.tryClaim(ctx, "board-a", "worker-1")
 	require.NoError(t, err)
 	require.True(t, ok)

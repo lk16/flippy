@@ -37,35 +37,13 @@ func doRequest(t *testing.T, s *Server, method, target string, body any) *httpte
 
 func TestHandleGetJob_MissingWorkerID(t *testing.T) {
 	s := testServer(t)
-	w := doRequest(t, s, http.MethodGet, "/api/jobs?count=1", nil)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestHandleGetJob_MissingCount(t *testing.T) {
-	s := testServer(t)
-	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1", nil)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestHandleGetJob_CountOutOfRange(t *testing.T) {
-	s := testServer(t)
-
-	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1&count=0", nil)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-
-	w = doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1&count=11", nil)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestHandleGetJob_CountNotAnInteger(t *testing.T) {
-	s := testServer(t)
-	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1&count=abc", nil)
+	w := doRequest(t, s, http.MethodGet, "/api/jobs", nil)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestHandleGetJob_NoJobsAvailable(t *testing.T) {
 	s := testServer(t)
-	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1&count=1", nil)
+	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1", nil)
 	require.Equal(t, http.StatusNoContent, w.Code)
 }
 
@@ -74,27 +52,31 @@ func TestHandleGetJob_ReturnsJob(t *testing.T) {
 	board := testBoard(t, 12)
 	require.NoError(t, s.repo.AddBoards(context.Background(), []othello.NormalizedBoard{board}))
 
-	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1&count=1", nil)
+	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1", nil)
 	require.Equal(t, http.StatusOK, w.Code)
 
-	var resp []jobResponse
+	var resp jobResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	require.Len(t, resp, 1)
-	require.Equal(t, board.String(), resp[0].Board)
-	require.Equal(t, TargetLevel(12), resp[0].Level)
+	require.Equal(t, board.String(), resp.Board)
+	require.Equal(t, TargetLevel(12), resp.Level)
 }
 
-func TestHandleGetJob_ReturnsUpToCountJobs(t *testing.T) {
+func TestHandleGetJob_RepeatedRequestsReturnDistinctJobs(t *testing.T) {
 	s := testServer(t)
-	boards := testDistinctBoards(t, 12, 3)
+	boards := testDistinctBoards(t, 12, 2)
 	require.NoError(t, s.repo.AddBoards(context.Background(), boards))
 
-	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1&count=2", nil)
+	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1", nil)
 	require.Equal(t, http.StatusOK, w.Code)
+	var first jobResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &first))
 
-	var resp []jobResponse
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	require.Len(t, resp, 2)
+	w = doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+	var second jobResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &second))
+
+	require.NotEqual(t, first.Board, second.Board)
 }
 
 func TestHandleSubmitJobResult_Success(t *testing.T) {
@@ -530,7 +512,7 @@ func TestHandleListWorkers_Empty(t *testing.T) {
 
 func TestHandleListWorkers_ReturnsActiveWorkers(t *testing.T) {
 	s := testServer(t)
-	require.NoError(t, s.heartbeat(context.Background(), "w1", "host-1", "commit-1"))
+	require.NoError(t, s.heartbeat(context.Background(), "w1", "host-1", "commit-1", ""))
 
 	w := doRequest(t, s, http.MethodGet, "/api/workers", nil)
 	require.Equal(t, http.StatusOK, w.Code)

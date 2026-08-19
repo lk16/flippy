@@ -18,20 +18,17 @@ type Job struct {
 	Level int
 }
 
-// claimJobs atomically claims up to count of the lowest disc-count/level learnable boards not already
-// claimed; it may return fewer than count if there aren't enough candidates, including zero.
-// Priority-queue boards (from interactive analysis requests) are drained first.
-func (s *Server) claimJobs(ctx context.Context, workerID string, count int) ([]Job, error) {
-	var jobs []Job
-
-	// Drain up to count entries from the priority queue before falling back to ListLearnable.
-	priorityEntries, err := s.dequeuePriority(ctx, count)
-	if err != nil {
-		return nil, fmt.Errorf("failed to drain priority queue: %w", err)
-	}
-
-	for _, entry := range priorityEntries {
-		if len(jobs) >= count {
+// claimJob atomically claims one board for workerID: the oldest claimable priority-queue board
+// (from interactive analysis requests) if any, else the lowest disc-count/level learnable board.
+// ok is false when nothing is claimable.
+func (s *Server) claimJob(ctx context.Context, workerID string) (job Job, ok bool, err error) {
+	// Drain the priority queue before falling back to ListLearnable.
+	for {
+		entry, found, err := s.dequeuePriority(ctx)
+		if err != nil {
+			return Job{}, false, fmt.Errorf("failed to drain priority queue: %w", err)
+		}
+		if !found {
 			break
 		}
 
@@ -53,7 +50,7 @@ func (s *Server) claimJobs(ctx context.Context, workerID string, count int) ([]J
 
 		claimed, err := s.tryClaim(ctx, entry.Board, workerID)
 		if err != nil {
-			return nil, err
+			return Job{}, false, err
 		}
 		if !claimed {
 			continue
@@ -63,18 +60,12 @@ func (s *Server) claimJobs(ctx context.Context, workerID string, count int) ([]J
 			slog.Warn("failed to set priority claim marker", "board", entry.Board, "error", err)
 		}
 
-		jobs = append(jobs, Job{Board: normalized, Level: entry.Level})
-	}
-
-	// Fall back to ListLearnable for whatever slots remain.
-	remaining := count - len(jobs)
-	if remaining == 0 {
-		return jobs, nil
+		return Job{Board: normalized, Level: entry.Level}, true, nil
 	}
 
 	floor, err := s.getJobFloor(ctx, book.LeafDiscs)
 	if err != nil {
-		return nil, err
+		return Job{}, false, err
 	}
 
 	candidates, err := s.repo.ListLearnable(ctx,
@@ -83,16 +74,10 @@ func (s *Server) claimJobs(ctx context.Context, workerID string, count int) ([]J
 		jobCandidateBatch,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list candidate boards: %w", err)
+		return Job{}, false, fmt.Errorf("failed to list candidate boards: %w", err)
 	}
 
-	maxClaimedDiscs := floor
-
 	for _, candidate := range candidates {
-		if len(jobs) >= count {
-			break
-		}
-
 		// edax crashes on a position with no legal move.
 		if !candidate.Board.HasMoves() {
 			continue
@@ -104,30 +89,25 @@ func (s *Server) claimJobs(ctx context.Context, workerID string, count int) ([]J
 			continue
 		}
 
-		board := candidate.Board.String()
-
-		claimed, err := s.tryClaim(ctx, board, workerID)
+		claimed, err := s.tryClaim(ctx, candidate.Board.String(), workerID)
 		if err != nil {
-			return nil, err
+			return Job{}, false, err
 		}
 		if !claimed {
 			continue
 		}
 
-		jobs = append(jobs, Job{Board: candidate.Board, Level: target})
-		if discCount > maxClaimedDiscs {
-			maxClaimedDiscs = discCount
+		// A claim strictly above floor is proof nothing claimable remains below it, so it's safe to
+		// stop rescanning; never lower the floor here (see getJobFloor/jobFloorTTL for how a floor
+		// stuck above newly-imported boards self-heals).
+		if discCount > floor {
+			if err := s.setJobFloor(ctx, discCount); err != nil {
+				slog.Warn("failed to advance job floor cache", "error", err)
+			}
 		}
+
+		return Job{Board: candidate.Board, Level: target}, true, nil
 	}
 
-	// A claim strictly above floor is proof nothing claimable remains at floor in this batch, so it's
-	// safe to stop rescanning it; never lower the floor here (see getJobFloor/jobFloorTTL for how a
-	// floor stuck above newly-imported boards self-heals).
-	if maxClaimedDiscs > floor {
-		if err := s.setJobFloor(ctx, maxClaimedDiscs); err != nil {
-			slog.Warn("failed to advance job floor cache", "error", err)
-		}
-	}
-
-	return jobs, nil
+	return Job{}, false, nil
 }
