@@ -22,19 +22,10 @@
 // from Edax 4.5.1 (https://github.com/abulmo/edax-reversi), also licensed
 // under GPLv3.
 
-// Node-runnable smoke test for edax-eval.js, exercising the real wasm module end to end (not a
-// mock): builds a wasm32 binary via cargo, generates a structurally-valid (but not real-weights)
-// gzip blob the same shape DecompressionStream('gzip') would hand instantiate() after a real
-// fetch, and checks the alloc/init_weights/evaluate protocol round-trips and reports errors
-// correctly. Deliberately separate from static/test/'s framework (run.js/framework.js): that
-// suite tests static/'s browser JS, which this isn't wired into yet (TASKS.md Task 10).
-//
+// Node-runnable smoke test for edax-eval.js against the real wasm module: checks the
+// alloc/init_weights/evaluate protocol round-trips and reports errors, using synthetic weights.
 // Requires: `cargo build --manifest-path wasm/edax-eval/Cargo.toml --target wasm32-unknown-unknown
-// --lib --release` already run (this script does not build it, to keep it fast to iterate on and
-// to match how a real page would just fetch a prebuilt .wasm).
-//
-// Weight *correctness* (bit-exactness against real Edax) is Task 8's job
-// (tests/differential.rs) -- this only tests the JS loading/plumbing layer.
+// --lib --release` already run. Weight correctness is tests/differential.rs's job.
 
 const fs = require('fs');
 const path = require('path');
@@ -61,16 +52,14 @@ const START_PLAYER = 0x0000000810000000n;
 const START_OPPONENT = 0x0000001008000000n;
 
 function syntheticGzippedWeightsBlob() {
-    // Structurally valid (right length) but not real trained weights -- see this file's header
-    // comment on why that's fine here.
+    // Structurally valid (right length) but not real trained weights.
     const raw = Buffer.alloc(WEIGHTS_BLOB_LEN);
     for (let i = 0; i < raw.length; i++) raw[i] = (i * 7 + 3) % 256;
     return zlib.gzipSync(raw);
 }
 
 async function decompressGzip(gzipped) {
-    // Exercises the same DecompressionStream('gzip') API load() uses, not Node's zlib module, so
-    // this test covers the actual browser-facing code path.
+    // Uses the same DecompressionStream('gzip') API load() uses, not Node's zlib module.
     const stream = new Blob([gzipped]).stream().pipeThrough(new DecompressionStream('gzip'));
     return new Uint8Array(await new Response(stream).arrayBuffer());
 }
@@ -112,18 +101,15 @@ async function main() {
     });
 
     await test('evaluate() accepts every supported level', async () => {
-        // Levels each map to their own depth/selectivity (search::depth_and_selectivity); the
-        // scores themselves are meaningless here (synthetic weights), so this only pins the ABI:
-        // no level in 0..=60 hits a sentinel. That levels genuinely differ in *result* is checked
-        // against the real weights, in dist-freshness.test.js.
+        // Pins the ABI only: no level in 0..=60 hits a sentinel (scores are meaningless with
+        // synthetic weights; real-weight behavior is checked in dist-freshness.test.js).
         const edax = await EdaxEval.instantiate(wasmBytes, weightsBytes);
         for (const level of [0, 1, 4, 10]) {
             const score = edax.evaluate(START_PLAYER, START_OPPONENT, level);
             assert.ok(score >= -64 && score <= 64, `level ${level}: score ${score} should be in [-64, 64]`);
         }
-        // Levels 11+ are checked on a 5-empties board instead: from the starting position they
-        // mean "solve the whole game exactly", which does not finish in a test's lifetime. Same
-        // position and reasoning as search.rs's accepts_levels_zero_through_sixty.
+        // Levels 11+ use a 5-empties board: from the start position they would solve the whole
+        // game exactly (same position as search.rs's accepts_levels_zero_through_sixty).
         for (const level of [11, 60]) {
             const score = edax.evaluate(0x007ee4d2aadcbe7cn, 0x7e011b2d55234180n, level);
             assert.ok(score >= -64 && score <= 64, `level ${level}: score ${score} should be in [-64, 64]`);

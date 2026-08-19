@@ -14,10 +14,8 @@ import (
 	"github.com/lk16/flippy/internal/othello/othellotest"
 )
 
-// testServer returns a Server backed by a Postgres transaction (rolled back
-// when the test ends) and a flushed redis database, isolating it from other
-// tests. It skips the test if FLIPPY_POSTGRES_URL or FLIPPY_REDIS_URL isn't
-// set.
+// testServer returns a Server backed by a rolled-back Postgres transaction and a flushed redis
+// database, skipping the test if FLIPPY_POSTGRES_URL or FLIPPY_REDIS_URL isn't set.
 func testServer(t *testing.T) *Server {
 	t.Helper()
 
@@ -59,10 +57,8 @@ func testServer(t *testing.T) *Server {
 // legal move (or pass) from start until it has exactly discs discs.
 var testBoard = othellotest.Board
 
-// testPassRequiredBoard returns a Board, reached by always playing the
-// first available move from the starting position, where the player to
-// move has no legal move but the opponent does after the forced pass (as
-// opposed to a game-ending double pass).
+// testPassRequiredBoard returns a Board where the player to move must pass but the game is not
+// over.
 func testPassRequiredBoard(t *testing.T) othello.Board {
 	t.Helper()
 

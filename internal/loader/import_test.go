@@ -35,9 +35,8 @@ func TestImportGames_AddsExtractedBoards(t *testing.T) {
 	}
 }
 
-// TestImportGames_CountReflectsOnlyNewlyInserted covers the reported count:
-// re-importing the same games must report 0 added (every board already
-// exists), not the extracted board count again.
+// TestImportGames_CountReflectsOnlyNewlyInserted: re-importing the same games must report 0
+// added, not the extracted board count again.
 func TestImportGames_CountReflectsOnlyNewlyInserted(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
@@ -118,9 +117,8 @@ func TestImportPGNFiles_AddsBoards(t *testing.T) {
 	require.Positive(t, count)
 }
 
-// TestImportPGNFiles_NoResultField covers PGN exports (some older
-// OthelloQuest files) that omit the Result field entirely; ImportPGNFiles
-// must still import them rather than erroring.
+// TestImportPGNFiles_NoResultField covers PGN exports (some older OthelloQuest files) that omit
+// the Result field entirely; they must still import.
 func TestImportPGNFiles_NoResultField(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
@@ -150,8 +148,8 @@ func TestImportPGNFiles_MissingFile(t *testing.T) {
 	require.Error(t, err)
 }
 
-// encodeWTBRecord builds a single 68-byte WTHOR game record for moves,
-// encoding each move as row*10+col with row/col 1-based.
+// encodeWTBRecord builds a single 68-byte WTHOR game record, encoding each move as row*10+col
+// with row/col 1-based.
 func encodeWTBRecord(moves []int) []byte {
 	const (
 		recordSize = 68
@@ -167,8 +165,7 @@ func encodeWTBRecord(moves []int) []byte {
 	return record
 }
 
-// encodeWTB builds a minimal WTHOR archive with one game per entry of
-// gamesMoves, matching the format ParseWTB decodes.
+// encodeWTB builds a minimal WTHOR archive with one game per entry of gamesMoves.
 func encodeWTB(gamesMoves [][]int) []byte {
 	const headerSize = 16
 

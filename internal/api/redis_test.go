@@ -472,10 +472,8 @@ func TestDequeuePriority_KeepsEntriesFromLiveConnections(t *testing.T) {
 	require.False(t, ok)
 }
 
-// TestDequeuePriority_DedupeIsByBoardOnly documents the chosen semantics: dedupe keys on the board
-// alone, so a board queued first by a connection that then dies is dropped even though a second,
-// still-live connection asked for it too. That client's next analyze_request re-queues the board,
-// so the loss heals itself.
+// Dedupe keys on the board alone: an entry whose first requester died is dropped even if a live
+// connection asked too; that client's next request re-queues it.
 func TestDequeuePriority_DedupeIsByBoardOnly(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()

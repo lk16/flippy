@@ -6,9 +6,8 @@ import (
 	"strings"
 )
 
-// ParsePGNLenient parses content as one or more PGN games, extracting only the move sequence from
-// each game and ignoring metadata entirely. Use this when metadata fields (Site, Date, ratings)
-// may be absent or unknown — for example, when parsing user-submitted PGN in the web API.
+// ParsePGNLenient parses content as PGN games, keeping only moves and ignoring metadata; use it
+// when metadata fields may be absent, e.g. for user-submitted PGN in the web API.
 func ParsePGNLenient(content string) ([]*Game, error) {
 	if strings.TrimSpace(content) == "" {
 		return nil, nil
@@ -42,7 +41,7 @@ func ParsePGNLenient(content string) ([]*Game, error) {
 				}
 				inHeader = true
 			}
-			continue // skip all metadata lines
+			continue
 		}
 		inHeader = false
 		moveLines = append(moveLines, line)
@@ -143,9 +142,8 @@ func parsePGNMoves(lines []string) ([]int, error) {
 		}
 
 		for _, word := range strings.Fields(line) {
-			// Skip move-number prefixes ("1.") and result tokens: the
-			// digit-based ones ("1-0", "0-1", "1/2-1/2") and PGN's "*"
-			// terminator for an unfinished or ongoing game.
+			// Skip move-number prefixes ("1."), digit result tokens ("1-0", "1/2-1/2"),
+			// and PGN's "*" terminator for an unfinished game.
 			if word[0] >= '0' && word[0] <= '9' {
 				continue
 			}

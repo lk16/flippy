@@ -21,37 +21,25 @@
 // from Edax 4.5.1 (https://github.com/abulmo/edax-reversi), also licensed
 // under GPLv3.
 
-//! Weight loader/unpacker (`TASKS.md` Task 4): reconstructs the full,
-//! per-ply `Eval_weight` tables from the packed, symmetry-reduced weights
-//! shipped in the [`crate::weights_transform`]-encoded blob, by porting
-//! `eval_open`'s unpacking logic verbatim (`eval.c:459-698`).
-//!
-//! Edax exploits mirror symmetry (board reflections) to store roughly half
-//! the distinct feature weight values: [`build_symmetry_packing`] ports
-//! `set_eval_packing`/`set_opponent_feature` (`eval.c:496-630`), the pure
-//! index arithmetic that assigns each of a feature's 3^n raw states to one
-//! of far fewer packed slots; [`unpack`] ports `eval_open`'s per-ply loop
-//! (`eval.c:661-697`) that uses those tables to expand the packed weights
-//! read from a `eval.dat`-derived raw slice (the same `raw` shape Task 2's
-//! `weights_transform::decode` produces) into full lookup tables.
+//! Weight loader/unpacker: reconstructs the full per-ply `Eval_weight` tables from the packed,
+//! mirror-symmetry-reduced weights in the [`crate::weights_transform`]-encoded blob.
+//! [`build_symmetry_packing`] ports `set_eval_packing`/`set_opponent_feature`
+//! (`eval.c:496-630`); [`unpack`] ports `eval_open`'s per-ply loop (`eval.c:661-697`).
 
-/// Number of squares per feature type, and the packed-weight offset within a ply's `n_w`-length
-/// block where that feature's packed values start (`eval.c:459`, `EVAL_PACKED_OFS`). Order:
-/// C9, C10, S10 (x2: S100/S101 share packed storage), S8 (x4: S8x4), S7, S6, S5, S4, S0.
+/// Packed-weight offset per feature type within a ply's `n_w`-length block (`eval.c:459`,
+/// `EVAL_PACKED_OFS`). Order: C9, C10, S10 x2, S8 x4, S7, S6, S5, S4, S0.
 const EVAL_PACKED_OFS: [usize; 13] = [
     0, 10206, 40095, 69741, 99387, 102708, 106029, 109350, 112671, 113805, 114183, 114318, 114363,
 ];
 
-/// Feature-increment tables used by [`set_eval_packing`] to compute each state's mirror index
-/// (`eval.c:578-580`). `KD_S10`/`KD_C10` are sliced from an offset for smaller features, matching
-/// the C pointer arithmetic `kd_S10 + n`.
+/// Feature-increment tables for mirror-index computation (`eval.c:578-580`); sliced from an
+/// offset for smaller features, matching the C pointer arithmetic `kd_S10 + n`.
 const KD_S10: [i32; 10] = [19683, 6561, 2187, 729, 243, 81, 27, 9, 3, 1];
 const KD_C10: [i32; 10] = [19683, 6561, 2187, 729, 81, 243, 27, 9, 3, 1];
 const KD_C9: [i32; 9] = [1, 9, 3, 81, 27, 243, 2187, 729, 6561];
 
-/// Feature symmetry packing indices, one instance per board-parity ("`P[ply & 1]`" in `eval.c`):
-/// for each feature type, maps a raw base-3 state index to its packed (mirror-reduced) slot.
-/// Direct port of `SymetryPacking` (`eval.c:466-476`).
+/// Per-parity symmetry packing indices (`P[ply & 1]` in `eval.c`): raw base-3 state →
+/// mirror-reduced packed slot. Port of `SymetryPacking` (`eval.c:466-476`).
 struct SymmetryPacking {
     c10: Vec<u16>, // 59049
     s10: Vec<u16>, // 59049
@@ -63,18 +51,11 @@ struct SymmetryPacking {
     s4: Vec<u16>,  // 81
 }
 
-/// Assigns packed (mirror-reduced) indices for one feature type. `pe[l]` receives the packed
-/// index for raw state `l`; states that are mirror images of an earlier (smaller) state reuse its
-/// index instead of getting a new one, via the scratch table `t` (indexed by each state's mirror
-/// index `k`, computed by the running `kd`-weighted accumulator). Returns the next unused packed
-/// index (so the final call's return value is the feature's total packed slot count).
-///
-/// Line-by-line port of `set_eval_packing` (`eval.c:522-552`) — deliberately literal rather than
-/// simplified, since this is dense index arithmetic where a "cleanup" is exactly how a subtle
-/// transcription bug would hide. Verified instead by its *output*: for every feature type, `n`
-/// after the top-level call must equal the packed sizes `EVAL_PACKED_OFS`'s gaps document (e.g.
-/// C9: 19683 raw states -> 10206 packed), an invariant a bug in this arithmetic would almost
-/// certainly break (see the unit tests below).
+/// Assigns packed (mirror-reduced) indices for one feature type: `pe[l]` gets raw state `l`'s
+/// packed index, mirror images reuse the earlier state's index via scratch `t`; returns the next
+/// unused packed index. Line-by-line port of `set_eval_packing` (`eval.c:522-552`), deliberately
+/// literal — verified by output instead (packed sizes must match `EVAL_PACKED_OFS`'s gaps, see
+/// the tests).
 #[allow(clippy::too_many_arguments)]
 fn set_eval_packing(
     pe: &mut [u16],
@@ -123,9 +104,7 @@ fn set_eval_packing(
     n
 }
 
-/// Runs [`set_eval_packing`] for one feature type: `size` raw states, `kd` its feature-increment
-/// table. The scratch table only ever needs `size` slots (see `set_eval_packing`'s doc comment for
-/// why per-call reuse across feature types is unnecessary, unlike `eval_open`'s single shared `T`).
+/// Runs [`set_eval_packing`] for one feature type of `size` raw states.
 fn pack_feature(size: usize, kd: &[i32]) -> Vec<u16> {
     let mut pe = vec![0u16; size];
     let mut t = vec![0i32; size];
@@ -133,12 +112,9 @@ fn pack_feature(size: usize, kd: &[i32]) -> Vec<u16> {
     pe
 }
 
-/// Maps a raw base-3 feature state to the same state viewed from the opponent's perspective:
-/// every digit (a square's disc: 0 = player, 1 = opponent, 2 = empty) is swapped `0 <-> 1`, `2`
-/// unchanged, digit positions (place values) unchanged. Direct port of `set_opponent_feature`
-/// (`eval.c:496-508`), which builds this as a 59049-entry table (`OPPONENT_FEATURE`) via recursive
-/// DFS rather than the closed-form digit-swap above — both compute the same function; see the
-/// `opponent_feature_matches_digit_swap` test for the derivation/proof that they agree everywhere.
+/// Maps a raw base-3 state to the opponent's view: each digit swapped `0 <-> 1`, `2` unchanged.
+/// Port of `set_opponent_feature` (`eval.c:496-508`); the digit-swap test proves the recursive
+/// construction equals the closed form.
 fn set_opponent_feature(p: &mut [u16], pos: &mut usize, o: i32, d: i32) {
     let d = d - 1;
     if d != 0 {
@@ -161,10 +137,9 @@ fn build_opponent_feature() -> Vec<u16> {
     table
 }
 
-/// Builds both parities' symmetry packing tables (`P[0]`, `P[1]` in `eval_open`, `eval.c:596-630`):
-/// `P[0]` packs each feature's raw states directly; `P[1]` is `P[0]` re-indexed through the
-/// opponent-feature table, giving the same packed slots viewed from the other side, needed because
-/// `eval_open` alternates between them ply by ply (`P[ply & 1]`, since the mover alternates too).
+/// Builds both parities' packing tables (`P[0]`/`P[1]`, `eval.c:596-630`): `P[0]` packs raw
+/// states directly, `P[1]` re-indexes through the opponent-feature table; `eval_open` alternates
+/// between them ply by ply.
 fn build_symmetry_packing() -> [SymmetryPacking; 2] {
     let opponent_feature = build_opponent_feature();
 
@@ -231,8 +206,7 @@ fn build_symmetry_packing() -> [SymmetryPacking; 2] {
     ]
 }
 
-/// Fully unpacked feature weight table for one ply. Direct port of `Eval_weight`
-/// (`eval.h:47-55`), minus the `S0` guard-alignment concern that struct layout served in C.
+/// Fully unpacked feature weight table for one ply. Port of `Eval_weight` (`eval.h:47-55`).
 pub struct EvalWeight {
     pub s0: i16,
     /// Length 19683.
@@ -249,14 +223,9 @@ pub struct EvalWeight {
     pub s7654: Vec<i16>,
 }
 
-/// Unpacks `raw` (ply-major packed weights, `raw[ply * n_w + i]`, exactly [`crate::weights_transform::decode`]'s
-/// output shape) into one [`EvalWeight`] per ply. Direct port of `eval_open`'s per-ply unpacking
-/// loop (`eval.c:661-697`), given already-extracted, host-endian weights (byte-swapping, if the
-/// source `eval.dat` needed it, already happened in Task 2's extraction tool). The per-feature
-/// loops below index `pp`/`EVAL_PACKED_OFS` manually rather than through iterator/zip adaptors for
-/// the same reason [`set_eval_packing`]'s doc comment gives: this is index arithmetic ported
-/// line-for-line from `eval.c`, and its correctness is checked against the real `eval.dat` (see
-/// this module's tests), not by how idiomatic the loop shape looks.
+/// Unpacks `raw` (ply-major, [`crate::weights_transform::decode`]'s host-endian output shape)
+/// into one [`EvalWeight`] per ply. Port of `eval_open`'s per-ply loop (`eval.c:661-697`);
+/// indexing kept line-for-line literal for the same reason as [`set_eval_packing`].
 pub fn unpack(raw: &[i16], n_w: usize, n_plies: usize) -> Vec<EvalWeight> {
     assert_eq!(
         raw.len(),
@@ -269,9 +238,8 @@ pub fn unpack(raw: &[i16], n_w: usize, n_plies: usize) -> Vec<EvalWeight> {
     (0..n_plies)
         .map(|ply| {
             let w = &raw[ply * n_w..(ply + 1) * n_w];
-            // eval.c:596: `pp = *P + (ply & 1)`. `ply` here is already offset to start at the
-            // real ply 2 (see weights_transform's FIRST_PLY), so parity must account for that:
-            // real_ply = ply + FIRST_PLY, and FIRST_PLY = 2 is even, so parity is unaffected.
+            // eval.c:596: `pp = *P + (ply & 1)`. `ply` 0 here is real ply 2 (even), so parity
+            // carries over unaffected.
             let pp = &packing[ply & 1];
 
             let c9 = (0..19683)
@@ -330,14 +298,8 @@ pub fn unpack(raw: &[i16], n_w: usize, n_plies: usize) -> Vec<EvalWeight> {
 mod tests {
     use super::*;
 
-    /// `EVAL_PACKED_OFS`'s gaps between consecutive offsets are the packed sizes Edax's own source
-    /// documents (`eval.c:461`'s commented-out `EVAL_PACKED_SIZE`): C9 packs 19683 raw states down
-    /// to 10206, C10/S10 pack 59049 down to 29889/29646, S8 6561->3321, S7 2187->1134, S6
-    /// 729->378, S5 243->135, S4 81->45. Getting `set_eval_packing`'s dense index arithmetic wrong
-    /// would need to coincidentally still produce every one of these exact counts to pass
-    /// undetected, so this is strong evidence the port is correct even without a live Edax dump to
-    /// compare against (per TASKS.md Task 4's "cross-check ... end-to-end via Task 8 instead if
-    /// dumping internal state is inconvenient").
+    /// Packed sizes must match `eval.c:461`'s documented `EVAL_PACKED_SIZE` constants — a bug in
+    /// `set_eval_packing`'s index arithmetic would almost certainly break these exact counts.
     #[test]
     fn packed_sizes_match_edax_documented_constants() {
         assert_eq!(pack_feature(19683, &KD_C9).iter().max().unwrap() + 1, 10206);
@@ -368,8 +330,7 @@ mod tests {
         assert_eq!(pack_feature(81, &KD_S10[6..]).iter().max().unwrap() + 1, 45);
     }
 
-    /// Every packed index must actually be used (no gaps): the set of assigned indices for a
-    /// feature of `size` raw states packed into `packed_size` slots must be exactly `0..packed_size`.
+    /// Every packed index must be used: assigned indices must be exactly `0..packed_size`.
     #[test]
     fn packed_indices_have_no_gaps() {
         for (size, kd, packed_size) in [
@@ -394,13 +355,8 @@ mod tests {
         }
     }
 
-    /// Proves `set_opponent_feature`'s recursive DFS construction (production code) computes the
-    /// same function as a direct closed-form per-digit swap (test-only, independent implementation):
-    /// for `j`'s 10 base-3 digits (digit `i` at place value `3^i`), each digit is remapped
-    /// `0 -> 1, 1 -> 0, 2 -> 2` and reassembled at the same place values. Derived by hand-expanding
-    /// `set_opponent_feature`'s recursion (`o_new = (o + swap(digit)) * 3` per non-leaf digit,
-    /// `o_final = o + swap(digit)` at the leaf) and confirmed exhaustively here across all 3^10
-    /// states, rather than assumed.
+    /// Proves `set_opponent_feature`'s recursive construction equals an independent closed-form
+    /// per-digit swap (`0 -> 1, 1 -> 0, 2 -> 2`), exhaustively over all 3^10 states.
     #[test]
     fn opponent_feature_matches_digit_swap() {
         fn digit_swap(mut j: u32) -> u32 {
@@ -427,8 +383,7 @@ mod tests {
         }
     }
 
-    /// Applying the opponent-feature swap twice must return the original state (it's an
-    /// involution: swapping player<->opponent twice is identity).
+    /// Swapping player<->opponent twice must be identity.
     #[test]
     fn opponent_feature_is_an_involution() {
         let table = build_opponent_feature();
@@ -439,9 +394,8 @@ mod tests {
 
     #[test]
     fn unpack_produces_one_table_per_ply_with_correct_shapes() {
-        // A tiny synthetic n_w-length "ply" won't do -- unpack indexes packed offsets up to
-        // EVAL_PACKED_OFS[12] = 114363, so raw must be real-sized. Fill with a simple pattern
-        // (not real weights) purely to check shapes/bounds, not values.
+        // unpack indexes packed offsets up to EVAL_PACKED_OFS[12] = 114363, so raw must be
+        // real-sized; the pattern only checks shapes/bounds, not values.
         let n_w = 114364;
         let n_plies = 2;
         let raw: Vec<i16> = (0..n_w * n_plies).map(|i| (i % 1000) as i16).collect();
@@ -458,14 +412,9 @@ mod tests {
         }
     }
 
-    /// Runs the real unpacking pipeline end to end against the real `eval.dat` (header parsing is
-    /// already covered by `extract_weights`'s own gated test; this only re-slices the raw plies,
-    /// deliberately not reusing that bin target's code, to keep this a from-scratch exercise of
-    /// `unpack`). Mirrors the `EDAX_PATH`-gated skip pattern (`process_test.go`), so it's local-only
-    /// without a CI exclusion. Since there's no independent oracle for the *unpacked* weight
-    /// values without patching a debug Edax build (see this module's other tests and TASKS.md Task
-    /// 4's note authorizing end-to-end verification via Task 8 instead), this only checks the
-    /// pipeline runs to completion over real data and produces plausible (non-degenerate) output.
+    /// Runs the real unpacking pipeline against the real `eval.dat` (skipped when unavailable,
+    /// mirroring the `EDAX_PATH` gate pattern); with no independent oracle for unpacked values,
+    /// only checks completion and non-degenerate output.
     #[test]
     fn unpacks_the_real_eval_dat_without_panicking() {
         let path = if let Ok(p) = std::env::var("EVAL_DAT_PATH") {
@@ -502,8 +451,6 @@ mod tests {
         let tables = unpack(&raw, RAW_N_W, EVAL_N_PLY - FIRST_PLY);
         assert_eq!(tables.len(), EVAL_N_PLY - FIRST_PLY);
 
-        // A real trained model shouldn't be all zeros, and every weight is a signed 16-bit value
-        // by construction (i16), so the only meaningful sanity check left is non-degeneracy.
         let first = &tables[0];
         assert!(
             first.c9.iter().any(|&v| v != 0),

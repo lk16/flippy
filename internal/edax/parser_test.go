@@ -10,11 +10,8 @@ import (
 	"github.com/lk16/flippy/internal/othello"
 )
 
-// singleProblemOutput is real `lEdax-x64 -solve ... -level 10 -verbose 3`
-// stdout for the start position after black plays d3, captured directly
-// from the binary (see internal/othello/gen for how boards are produced;
-// this fixture predates that and was captured manually against the real
-// edax-reversi binary during development).
+// singleProblemOutput is real `lEdax-x64 -solve ... -level 10 -verbose 3` stdout for the start
+// position after black plays d3.
 const singleProblemOutput = `
 *** problem # 1 ***
 
@@ -45,10 +42,8 @@ const singleProblemOutput = `
 1 positions; 0 erroneous move; 0 erroneous score; mean absolute score error = 0.000; mean absolute move error = 0.000
 `
 
-// selectiveOutput is real output from the same position at -level 20,
-// which (unlike level 10) uses probabilistic (non-100%-confidence) search
-// for most of the iterative deepening, showing both the "@NN%" confidence
-// suffix and '<'/'>' non-exact-bound rows that must be skipped.
+// selectiveOutput is real output from the same position at -level 20 (selective search), showing
+// both the "@NN%" confidence suffix and '<'/'>' non-exact-bound rows that must be skipped.
 const selectiveOutput = `
 *** problem # 1 ***
 
@@ -79,10 +74,8 @@ const selectiveOutput = `
 1 positions; 0 erroneous move; 0 erroneous score; mean absolute score error = 0.000; mean absolute move error = 0.000
 `
 
-// twoProblemOutput is real output from sending the same problem twice to
-// one long-running edax process at -level 6, confirming the process stays
-// alive and keeps printing "*** problem #" blocks back to back rather than
-// exiting after the first.
+// twoProblemOutput is real output from sending the same problem twice to one long-running edax
+// process at -level 6: back-to-back "*** problem #" blocks.
 const twoProblemOutput = `
 *** problem # 1 ***
 

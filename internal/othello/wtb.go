@@ -31,9 +31,8 @@ func ParseWTB(data []byte) ([]*Game, error) {
 	gameCount := binary.LittleEndian.Uint32(data[4:8])
 	records := data[wtbHeaderSize:]
 
-	// Cap the pre-allocation by how many records the data could actually hold, so a corrupt or hostile
-	// header claiming a huge game count can't trigger an enormous allocation before the per-record
-	// bounds check below runs.
+	// Cap the pre-allocation by what the data can actually hold, so a hostile header claiming a
+	// huge game count can't trigger an enormous allocation.
 	capacity := int(gameCount)
 	if maxRecords := len(records) / wtbGameRecordSize; capacity > maxRecords {
 		capacity = maxRecords

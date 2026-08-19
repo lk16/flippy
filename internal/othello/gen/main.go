@@ -51,8 +51,7 @@ func explore(b othello.Board, visited map[othello.Board]bool, found map[string]s
 	if !b.HasMoves() {
 		next, err := b.DoMove(othello.PassMove)
 		if err != nil {
-			// Neither player has a move: the game ended before reaching
-			// targetDiscs discs.
+			// Neither player has a move: the game ended before reaching targetDiscs discs.
 			return
 		}
 		explore(next, visited, found)

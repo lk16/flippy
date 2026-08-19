@@ -106,10 +106,9 @@ type TargetLevelTier struct {
 	Level    int `json:"level"`
 }
 
-// targetLevelTiers is the single source of truth for TargetLevel, also served to the frontend
-// verbatim by handleLevelConfig so it computes the same targets the server enforces.
-// Levels match the deepest search the pre-rewrite archive holds at each disc count, so an imported
-// row lands exactly at target rather than above or below it (see docs/next-steps.md).
+// targetLevelTiers is the single source of truth for TargetLevel, served verbatim to the frontend
+// by handleLevelConfig. Levels match the deepest search the archived book holds per disc count, so
+// imported rows land exactly at target.
 var targetLevelTiers = []TargetLevelTier{
 	{MaxDiscs: 13, Level: 40},
 	{MaxDiscs: 16, Level: 36},
@@ -122,8 +121,8 @@ func TargetLevelTiers() []TargetLevelTier {
 	return slices.Clone(targetLevelTiers)
 }
 
-// TargetLevel returns the edax search level to use for a board with discCount discs. Deeper boards
-// get shallower searches to keep evaluation time roughly bounded as the search tree widens.
+// TargetLevel returns the edax search level for a board with discCount discs; deeper boards get
+// shallower searches to keep evaluation time roughly bounded.
 func TargetLevel(discCount int) int {
 	for _, tier := range targetLevelTiers {
 		if discCount <= tier.MaxDiscs {
@@ -142,7 +141,6 @@ func EffectiveTargetLevel(discCount int) int {
 	return TargetLevel(discCount)
 }
 
-// PriorityLevel is the edax search depth used for the first interactive priority-queue request.
-// Deliberately lighter than TargetLevel so the worker can respond quickly; the frontend then
-// increments by 2 per round until EffectiveTargetLevel is reached.
+// PriorityLevel is the level of the first interactive analysis request: light, so the worker
+// responds quickly; the frontend then climbs by 2 per round toward EffectiveTargetLevel.
 const PriorityLevel = 10

@@ -12,9 +12,8 @@ import (
 	"github.com/lk16/flippy/internal/othello/othellotest"
 )
 
-// testRepository returns a Repository backed by a transaction that's rolled
-// back when the test ends, isolating it from other tests sharing the pool.
-// It skips the test if FLIPPY_POSTGRES_URL isn't set.
+// testRepository returns a Repository backed by a transaction rolled back when the test ends;
+// skips the test if FLIPPY_POSTGRES_URL isn't set.
 func testRepository(t *testing.T) *Repository {
 	t.Helper()
 
@@ -38,12 +37,8 @@ func testRepository(t *testing.T) *Repository {
 	return NewRepository(tx)
 }
 
-// testBoard returns a NormalizedBoard reached by playing the first available
-// legal move (or pass) from start until it has exactly discs discs.
 var testBoard = othellotest.Board
 
-// testDistinctBoards returns n distinct NormalizedBoards with exactly discs
-// discs, found via breadth-first search from the starting position.
 var testDistinctBoards = othellotest.DistinctBoards
 
 func TestEvaluation_IsLearned(t *testing.T) {
@@ -235,11 +230,9 @@ func TestRepository_ListLearnable_OrdersByDiscCountThenLevel(t *testing.T) {
 	require.Equal(t, board13Other, results[2].Board)
 }
 
-// TestRepository_ListLearnable_LeafLevelDoesNotStarveDeeperCandidates covers
-// the scenario ListLearnable's level cutoff exists for: once every board at
-// minDiscs has reached leafLevel, a batch ordered by disc count then level
-// with no level filter would consist entirely of those (they still sort
-// first), even though boards deeper in the tree still need work.
+// TestRepository_ListLearnable_LeafLevelDoesNotStarveDeeperCandidates covers the level cutoff's
+// purpose: once every minDiscs board reaches leafLevel, a batch without the filter would consist
+// entirely of those (they sort first), starving deeper boards.
 func TestRepository_ListLearnable_LeafLevelDoesNotStarveDeeperCandidates(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
@@ -273,9 +266,8 @@ func TestRepository_ListLearnable_MinDiscsAboveLeafDiscsKeepsLeafThreshold(t *te
 	// Above deeperLevel (16) but below leafLevel (24): distinguishes the two thresholds.
 	require.NoError(t, repo.SaveEvaluation(ctx, board13, Evaluation{Level: 20, Score: 0}))
 
-	// minDiscs (13) equals board13's disc count but leafDiscs is still 12, so board13 must be judged
-	// against deeperLevel (16), not leafLevel (24); a bug binding the leaf check to minDiscs instead of
-	// leafDiscs would misapply the leaf threshold here and wrongly still return board13 as needing level 24.
+	// board13 must be judged against deeperLevel (16), not leafLevel (24): a bug binding the leaf
+	// check to minDiscs instead of leafDiscs would wrongly return board13 as needing level 24.
 	results, err := repo.ListLearnable(ctx, 13, 30, 12, 24, 16, 10)
 	require.NoError(t, err)
 	require.Empty(t, results)

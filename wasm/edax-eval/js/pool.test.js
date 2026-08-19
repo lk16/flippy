@@ -23,11 +23,7 @@
 // under GPLv3.
 
 // Tests for EdaxEvalWorkerPool's scheduling: which queued search a worker starts next, and when.
-// Uses a fake worker (options.createWorker) rather than real Web Workers -- none of this is about
-// wasm, only about the order the pool hands work out, which is what keeps a score on screen for
-// every move while deeper searches run (see static/board.js's LOCAL_EVAL_LEVELS).
-//
-// Needs no built wasm module, unlike edax-eval.test.js. Standalone, same shape as that file.
+// Uses a fake worker (options.createWorker) rather than real Web Workers; needs no built wasm.
 
 const assert = require('assert');
 const { EdaxEvalWorkerPool, CANCELLED_MESSAGE } = require('./edax-eval');
@@ -36,8 +32,7 @@ const { EdaxEvalWorkerPool, CANCELLED_MESSAGE } = require('./edax-eval');
 const PLAYER = 0x0000000810000000n;
 const OPPONENT = 0x0000001008000000n;
 
-// FakeWorker records the messages the pool posts and lets a test complete searches by hand, so
-// "which task did the pool start, and when" is fully observable and fully deterministic.
+// FakeWorker records the messages the pool posts and lets a test complete searches by hand.
 class FakeWorker {
     constructor() {
         this.onmessage = null;
@@ -142,8 +137,7 @@ async function main() {
     });
 
     await test('a task queued later still beats one queued earlier at a worse priority', async () => {
-        // The point of the pool owning its backlog: a shallow search for a move that just appeared
-        // on screen must not wait behind refinements queued before it.
+        // A shallow search must not wait behind refinements queued before it.
         const { pool, workers } = newPool(1);
         await pool.ready();
 

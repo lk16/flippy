@@ -346,11 +346,7 @@ func TestHandleGetBoard_NotFound(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
-// TestHandleGetBoard_NotLearnedYet covers a board that has a row (e.g. from
-// a book import or the precomputed 12-disc set) but hasn't been learned by
-// a worker yet: its Evaluation is still the zero value, which must be
-// reported the same as "not found" rather than as a real (and misleadingly
-// draw-like) score of 0.
+// A board with a row but no evaluation yet must read as "not found", not as a real score of 0.
 func TestHandleGetBoard_NotLearnedYet(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
@@ -409,11 +405,8 @@ func TestHandleGetBoard_FallsBackToMinimaxCache(t *testing.T) {
 	require.Equal(t, score, resp.Score)
 }
 
-// TestHandleGetBoard_ResolvesForcedPass covers a board where the player to
-// move has no legal move: such a board is never stored directly (see
-// loader.ExtractBoards), so its evaluation must be derived from the stored
-// evaluation of the position after the forced pass, negated back to the
-// original player's perspective.
+// A forced-pass board is never stored directly; its evaluation is the post-pass board's stored
+// evaluation, negated.
 func TestHandleGetBoard_ResolvesForcedPass(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
@@ -439,10 +432,7 @@ func TestHandleGetBoard_ResolvesForcedPass(t *testing.T) {
 		resp)
 }
 
-// TestHandleGetBoard_GameOver covers a board where neither player has a
-// legal move: the forced pass doesn't lead anywhere learnable either, so
-// the actual final score is returned instead of falling through to "not
-// found".
+// A game-over board returns its actual final score instead of "not found".
 func TestHandleGetBoard_GameOver(t *testing.T) {
 	s := testServer(t)
 

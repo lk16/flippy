@@ -13,9 +13,8 @@ import (
 	"github.com/lk16/flippy/internal/othello/othellotest"
 )
 
-// testRepository returns a Repository backed by a transaction that's rolled
-// back when the test ends, isolating it from other tests sharing the pool.
-// It skips the test if FLIPPY_POSTGRES_URL isn't set.
+// testRepository returns a Repository backed by a transaction rolled back when the test ends;
+// skips the test if FLIPPY_POSTGRES_URL isn't set.
 func testRepository(t *testing.T) *db.Repository {
 	t.Helper()
 
@@ -39,8 +38,6 @@ func testRepository(t *testing.T) *db.Repository {
 	return db.NewRepository(tx)
 }
 
-// testBoard returns a NormalizedBoard reached by playing the first available
-// legal move (or pass) from start until it has exactly discs discs.
 var testBoard = othellotest.Board
 
 func TestCache_Get_MissesBeforeRebuild(t *testing.T) {
@@ -63,9 +60,8 @@ func TestCache_Rebuild_BackfillsFromLearnedLeaves(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	// A real board one ply short of LeafDiscs: all of its children are
-	// LeafDiscs-disc boards, the smallest case that can be fully learned
-	// without seeding the entire book.
+	// A board one ply short of LeafDiscs: all of its children are LeafDiscs-disc boards, the
+	// smallest case fully learnable without seeding the entire book.
 	board11 := testBoard(t, LeafDiscs-1)
 	children := board11.Board().Children()
 	require.NotEmpty(t, children)
@@ -151,8 +147,7 @@ func TestCache_Rebuild_ReflectsNewlyLearnedLeaves(t *testing.T) {
 	_, ok := c.Get(board11.Board())
 	require.False(t, ok)
 
-	// Learn the rest, rebuild again on the same Cache: now a hit. This is
-	// exactly the "recompute whenever a 12-disc evaluation is saved" case.
+	// Learn the rest, rebuild again on the same Cache: now a hit.
 	for _, child := range normalizedChildren[1:] {
 		require.NoError(t, repo.SaveEvaluation(ctx, child, db.Evaluation{
 			Level: 20, Score: 1,

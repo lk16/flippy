@@ -21,12 +21,9 @@
 // from Edax 4.5.1 (https://github.com/abulmo/edax-reversi), also licensed
 // under GPLv3.
 
-// Web Worker script: runs the edax-eval WASM module off the main thread so evaluations don't
-// block the browser UI. The main thread sends two kinds of messages:
+// Web Worker script: runs the edax-eval WASM module off the main thread. Messages:
 //   { type: 'load',     wasmUrl, weightsUrl }  — fetches + initializes this worker's wasm instance
 //   { type: 'evaluate', id, player, opponent, level }  — evaluates one board, posts back result
-//
-// Evaluate messages that arrive before the load is complete are buffered and processed afterwards.
 // `importScripts` is relative to this file's URL, so it resolves to the sibling edax-eval.js.
 
 importScripts('./edax-eval.js'); // defines EdaxEval as a global

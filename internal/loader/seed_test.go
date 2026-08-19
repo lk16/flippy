@@ -12,9 +12,8 @@ import (
 	"github.com/lk16/flippy/internal/othello"
 )
 
-// testRepository returns a Repository backed by a transaction that's rolled
-// back when the test ends, isolating it from other tests sharing the pool.
-// It skips the test if FLIPPY_POSTGRES_URL isn't set.
+// testRepository returns a Repository backed by a transaction rolled back when the test ends;
+// skips the test if FLIPPY_POSTGRES_URL isn't set.
 func testRepository(t *testing.T) *db.Repository {
 	t.Helper()
 

@@ -17,12 +17,9 @@ import (
 	"github.com/lk16/flippy/internal/othello/othellotest"
 )
 
-// testClient returns a Client wired up against a real api.Server (backed by
-// a Postgres transaction, rolled back when the test ends, and a flushed
-// redis database), served in-process. Exercising the real server, not an
-// assumed wire format, is the point: it catches client/server mismatches
-// that a hand-rolled fake response couldn't. It skips the test if
-// FLIPPY_POSTGRES_URL or FLIPPY_REDIS_URL isn't set.
+// testClient returns a Client against a real in-process api.Server (rolled-back Postgres
+// transaction, flushed redis), so client/server wire mismatches can't hide behind a fake. Skips
+// the test if FLIPPY_POSTGRES_URL or FLIPPY_REDIS_URL isn't set.
 func testClient(t *testing.T, workerID string) (*Client, *db.Repository) {
 	t.Helper()
 

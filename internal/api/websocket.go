@@ -139,12 +139,9 @@ func (s *Server) handleAnalyzeRequest(ctx context.Context, boardStrings []string
 			continue
 		}
 
-		// A forced-pass board (the player to move has no legal move) can't be searched by edax
-		// directly — edax crashes on no-move positions. Its evaluation is the negation of the
-		// position after the pass (see lookupPassEvaluation), so analyze that board instead; once
-		// it resolves, the pass board's evaluation resolves too. This keeps all pass handling in the
-		// backend: the frontend requests the pass board like any other and gets the negated result.
-		// A game-over board (neither player can move) has a final score and needs no analysis.
+		// edax crashes on a position with no legal move: analyze the post-pass board instead (its
+		// negation is the pass board's evaluation, see lookupPassEvaluation). A game-over board has
+		// a final score and needs no analysis.
 		if !board.HasMoves() {
 			passed, passErr := board.DoMove(othello.PassMove)
 			if passErr != nil || !passed.HasMoves() {
@@ -156,14 +153,10 @@ func (s *Server) handleAnalyzeRequest(ctx context.Context, boardStrings []string
 		normalized := board.Normalize()
 		discCount := normalized.CountDiscs()
 
-		// Cap the requested level at the effective target for this board so a malicious client
-		// cannot request arbitrarily deep searches and consume excessive worker CPU.
+		// Cap the level so a malicious client cannot request arbitrarily deep searches.
 		clampedLevel := min(level, EffectiveTargetLevel(discCount))
 
-		// Skip if the board already has a sufficient evaluation.
-		// Minimax and final-score results are always sufficient regardless of requested level.
-		// Edax results are sufficient if their level meets or exceeds what was requested, or if
-		// the requested level describes a search they already are (searchAddsNothing).
+		// Skip boards whose stored evaluation already answers the request.
 		eval, ok, err := s.lookupEvaluation(ctx, board)
 		if err == nil && ok {
 			if eval.Source != evaluationSourceEdax || eval.Level >= clampedLevel {
@@ -181,12 +174,9 @@ func (s *Server) handleAnalyzeRequest(ctx context.Context, boardStrings []string
 	}
 }
 
-// searchAddsNothing reports whether searching a board with discCount discs at level would return
-// the evaluation it already has: either the level resolves to the same (depth, confidence) that
-// evaluation was searched at -- levels are not one search each, and the endgame collapses whole
-// runs of them onto the same solve -- or the stored result already ran the game out, which no
-// level can improve on. Either way the answer is already in hand, so nothing is queued and the
-// caller is served the stored evaluation.
+// searchAddsNothing reports whether a search at level would just repeat the stored evaluation:
+// the level maps to the same (depth, confidence) it was searched at, or the stored result already
+// ran the game out, which no level can improve on.
 func searchAddsNothing(eval evaluationResponse, discCount, level int) bool {
 	if edax.IsFinal(discCount, eval.Level) {
 		return true

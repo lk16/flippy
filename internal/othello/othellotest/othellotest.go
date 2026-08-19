@@ -1,7 +1,5 @@
-// Package othellotest provides board-construction helpers shared by the tests
-// of several packages, so each doesn't have to redefine them. It lives in a
-// non-test file so it can be imported across package boundaries, but is only
-// referenced from _test.go files and so never ends up in a production binary.
+// Package othellotest provides board-construction helpers shared by several packages' tests; a
+// non-test file so it's importable across packages, but only _test.go files reference it.
 package othellotest
 
 import (

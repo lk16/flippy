@@ -21,36 +21,26 @@
 // from Edax 4.5.1 (https://github.com/abulmo/edax-reversi), also licensed
 // under GPLv3.
 
-// Minimal JS wrapper (TASKS.md Task 10) for wasm/edax-eval's raw wasm ABI (src/wasm_api.rs). Plain
-// script, no build step and no wasm-bindgen (docs/project.md: this repo has no frontend build
-// step) -- follows static/board.js's convention: a plain <script>-loadable file under the browser,
-// module.exports under Node for testing (see edax-eval.test.js).
-//
-// Not wired into any page yet (TASKS.md Task 10 is explicit that's a separate follow-up) -- this
-// only exposes the class.
+// JS wrapper for wasm/edax-eval's raw wasm ABI (src/wasm_api.rs). Plain script, no build step:
+// <script>-loadable in the browser, module.exports under Node for tests (see edax-eval.test.js).
 
-// Sentinel return values from evaluate()/init_weights() (src/wasm_api.rs). i32::MIN and
-// i32::MIN + 1 in two's complement 32-bit -- kept as plain numbers, not derived, so a change to
-// the Rust side is a visible diff here too, not something that silently drifts.
+// Sentinel return values from evaluate()/init_weights(); must stay in sync with src/wasm_api.rs.
 const ERR_WEIGHTS_NOT_INITIALIZED = -2147483648; // i32::MIN
 const ERR_UNSUPPORTED_LEVEL = -2147483647; // i32::MIN + 1
 const ERR_WRONG_LENGTH = 1;
 const ERR_ALREADY_INITIALIZED = 2;
 
 // EdaxEval wraps one instantiated wasm module plus its loaded weights. Construct via
-// EdaxEval.instantiate (from raw bytes) or EdaxEval.load (fetches from URLs) -- not directly via
-// `new`, since loading is inherently async.
+// EdaxEval.instantiate or EdaxEval.load, not `new` -- loading is inherently async.
 class EdaxEval {
-    // wasmInstance: a WebAssembly.Instance whose exports include memory/alloc/init_weights/evaluate
-    // (src/wasm_api.rs). Not called directly; use instantiate()/load().
+    // wasmInstance: a WebAssembly.Instance exporting memory/alloc/init_weights/evaluate
+    // (src/wasm_api.rs).
     constructor(wasmInstance) {
         this.instance = wasmInstance;
     }
 
-    // Instantiates the wasm module from raw bytes and loads weightsBytes (the *decompressed*
-    // transpose+delta+byte-plane-encoded blob -- see wasm_api.rs's init_weights doc comment; the
-    // caller is responsible for decompression, e.g. via DecompressionStream('gzip'), see load()
-    // below). Returns a ready-to-use EdaxEval.
+    // Instantiates the wasm module from raw bytes and loads weightsBytes -- the *decompressed*
+    // blob (see wasm_api.rs's init_weights doc comment); decompression is the caller's job.
     static async instantiate(wasmBytes, weightsBytes) {
         const { instance } = await WebAssembly.instantiate(wasmBytes, {});
         const exports = instance.exports;
@@ -75,10 +65,8 @@ class EdaxEval {
         return new EdaxEval(instance);
     }
 
-    // Fetches wasmUrl and weightsUrl, gzip-decompresses the latter via the browser's native
-    // DecompressionStream, and instantiates. This is the convenience path a real page would use;
-    // instantiate() above (raw bytes in, no fetch) is what makes this module testable under Node
-    // without a real server -- see edax-eval.test.js.
+    // Fetches wasmUrl and weightsUrl, gzip-decompresses the latter via DecompressionStream, and
+    // instantiates.
     static async load(wasmUrl, weightsUrl) {
         const [wasmBytes, weightsResponse] = await Promise.all([
             fetch(wasmUrl).then((r) => r.arrayBuffer()),
@@ -89,14 +77,10 @@ class EdaxEval {
         return EdaxEval.instantiate(wasmBytes, weightsBytes);
     }
 
-    // Evaluates a board at Edax level (0-60; each level maps to its own search depth and
-    // selectivity, so a shallow level really is cheaper -- see search::solve and
-    // depth_and_selectivity. Levels above 60 throw rather than silently running as 60).
-    // player/opponent are Edax's mover-relative bitboards (crate::board::Board -- player
-    // is the side to move), as BigInt (wasm i64 params require BigInt from JS, not Number).
-    // Converting from a black/white/turn representation to mover-relative is the caller's job, not
-    // this wrapper's (same reasoning as [[project_edax-color-turn-encoding]] elsewhere in this repo:
-    // getting that conversion right matters and shouldn't be silently implicit).
+    // Evaluates a board at Edax level 0-60 (levels above 60 throw; see search::depth_and_selectivity).
+    // player/opponent are Edax's mover-relative bitboards (player is the side to move) as BigInt --
+    // wasm i64 params require BigInt from JS, not Number. Converting from black/white/turn is the
+    // caller's job.
     evaluate(player, opponent, level) {
         const score = this.instance.exports.evaluate(player, opponent, level);
         if (score === ERR_WEIGHTS_NOT_INITIALIZED) {
@@ -110,31 +94,18 @@ class EdaxEval {
 }
 
 // CANCELLED_MESSAGE is the rejection message cancelQueued() gives a dropped task, so callers can
-// tell "this position stopped mattering" apart from a real evaluation failure.
+// tell cancellation apart from a real evaluation failure.
 const CANCELLED_MESSAGE = 'edax-eval: evaluation cancelled';
 
-// EdaxEvalWorkerPool manages N Web Worker instances each running one wasm/edax-eval instance.
-// Workers evaluate boards concurrently -- one active evaluation per worker -- so the main thread
-// never blocks on WASM. Each worker loads the wasm module and weights independently.
-//
-// The pool owns its backlog rather than posting every request straight to a worker: a task waits
-// in this._queue until a worker is free, so *ordering stays changeable up to the moment a search
-// starts*. That is what makes evaluate()'s `priority` meaningful -- a cheap shallow search queued
-// later still runs before an expensive deep one queued earlier (a level-4 search costs well under
-// a millisecond, a level-10 one tens to hundreds), which is how the caller keeps a score on screen
-// for every move while deeper refinement continues in the background.
-//
+// EdaxEvalWorkerPool runs one wasm/edax-eval instance in each of N Web Workers, one active
+// evaluation per worker. Tasks wait in this._queue until a worker is free, so evaluate()'s
+// `priority` can still reorder them up to the moment a search starts.
 // Worker script (edax-eval-worker.js) must live beside this file, served at the same URL prefix.
 class EdaxEvalWorkerPool {
-    // options.fastLaneMaxLevel: when set (and numWorkers > 1), worker 0 becomes a fast lane that
-    // accepts only tasks at or below this level, staying *idle* rather than picking up a deeper
-    // one. Priority alone can't bound how long a shallow search waits -- every worker may already
-    // be mid-search on a level-10 board, and a running wasm search can't be interrupted -- so
-    // without a reserved lane "show a number immediately" would still mean "in up to a second".
-    // The cost is one worker's worth of deep-search throughput.
-    //
-    // options.createWorker: injection point for tests (no Worker API in Node); defaults to the
-    // real thing.
+    // options.fastLaneMaxLevel: when set (and numWorkers > 1), worker 0 accepts only tasks at or
+    // below this level, idling rather than going deep -- a running wasm search can't be
+    // interrupted, so priority alone can't bound how long a shallow search waits.
+    // options.createWorker: injection point for tests (no Worker API in Node).
     constructor(workerUrl, wasmUrl, weightsUrl, numWorkers, options = {}) {
         const { fastLaneMaxLevel = null, createWorker = (url) => new Worker(url) } = options;
         this._numWorkers = numWorkers;
@@ -164,12 +135,9 @@ class EdaxEvalWorkerPool {
         return this._readyPromise;
     }
 
-    // Evaluates one board asynchronously. player/opponent are BigInt mover-relative bitboards.
-    // Returns a Promise<number> (the score from player's POV).
-    //
-    // options.priority: lower numbers start first; equal priorities start in arrival order.
-    // options.tag: opaque value handed back to cancelQueued()'s predicate, for dropping this
-    // task later if it stops being worth running.
+    // Evaluates one board asynchronously; player/opponent are BigInt mover-relative bitboards.
+    // Returns a Promise<number> (the score from player's POV). options.priority: lower starts
+    // first, ties in arrival order. options.tag: opaque value handed to cancelQueued()'s predicate.
     evaluate(player, opponent, level, options = {}) {
         const { priority = 0, tag = null } = options;
         return new Promise((resolve, reject) => {
@@ -179,8 +147,7 @@ class EdaxEvalWorkerPool {
     }
 
     // cancelQueued drops every queued task whose tag satisfies shouldDrop(tag), rejecting its
-    // promise with CANCELLED_MESSAGE. Tasks already running are left alone -- a wasm search runs
-    // to completion inside its worker and cannot be interrupted -- so they still resolve normally.
+    // promise with CANCELLED_MESSAGE. Running tasks can't be interrupted; they resolve normally.
     cancelQueued(shouldDrop) {
         const kept = [];
         const dropped = [];
@@ -207,9 +174,8 @@ class EdaxEvalWorkerPool {
         }
     }
 
-    // _takeTaskFor removes and returns the task worker i should run next, or null if the queue
-    // holds nothing it may run. Scanning in arrival order and replacing only on a *strictly*
-    // lower priority number keeps equal priorities FIFO.
+    // _takeTaskFor removes and returns the task worker i should run next, or null. Replacing only
+    // on a *strictly* lower priority number keeps equal priorities FIFO.
     _takeTaskFor(workerIndex) {
         const fastLaneOnly = workerIndex === 0 && this._fastLaneMaxLevel !== null;
         let best = -1;
@@ -243,10 +209,8 @@ class EdaxEvalWorkerPool {
     }
 }
 
-// In the browser (loaded via <script>) EdaxEval/EdaxEvalWorkerPool are just globals. Under Node
-// (e.g. this directory's test harness) `module` exists; export them there instead, matching
-// static/board.js's/static/test's own dual-mode convention. EdaxEvalWorkerPool needs no Worker
-// API under Node as long as tests pass options.createWorker (see pool.test.js).
+// Browser: globals via <script>. Node: exports for tests, matching static/board.js's dual-mode
+// convention.
 if (typeof module !== 'undefined') {
     module.exports = { EdaxEval, EdaxEvalWorkerPool, CANCELLED_MESSAGE };
 }

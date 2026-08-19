@@ -10,13 +10,10 @@ import (
 	"github.com/lk16/flippy/internal/othello/othellotest"
 )
 
-// testBoard returns a NormalizedBoard reached by playing the first available
-// legal move (or pass) from start until it has exactly discs discs.
 var testBoard = othellotest.Board
 
 func TestExtractBoards_PlayedLineWithinRange(t *testing.T) {
-	// A real move sequence, known-legal (also used in wtb_test.go), that
-	// reaches 14 discs with no passes.
+	// A known-legal move sequence that reaches 14 discs with no passes.
 	game, err := othello.NewGameFromMoves([]int{19, 18, 17, 9, 1, 0, 37, 43, 51, 2})
 	require.NoError(t, err)
 	require.Equal(t, 14, game.Board().CountDiscs())
@@ -77,10 +74,8 @@ func TestExtractBoards_IncludesMaxSavableDiscsBoundary(t *testing.T) {
 }
 
 func TestExtractBoards_ExcludesBoardWithNoLegalMove(t *testing.T) {
-	// Black occupies all of row 0, white all of row 7, black to move: no
-	// empty square is adjacent to a flippable run for black, so black has
-	// no legal move even though disc count (16) is within the savable
-	// range.
+	// Black holds row 0, white row 7, black to move: black has no legal move even though the
+	// disc count (16) is within the savable range.
 	board, err := othello.NewBoard(0xFF, 0xFF00000000000000, othello.Black)
 	require.NoError(t, err)
 	require.False(t, board.HasMoves(), "test board must have no legal move for this test to be meaningful")

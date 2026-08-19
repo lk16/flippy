@@ -52,9 +52,8 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, jobResponse{Board: job.Board.String(), Level: job.Level})
 }
 
-// maxLevel bounds a submitted edax search level. It's well above any level flippy actually requests
-// (see TargetLevel) but stays within the smallint column the evaluation is stored in, so an
-// out-of-range value is a clean 400 rather than a Postgres error surfaced as a 500.
+// maxLevel bounds a submitted search level: above anything flippy requests, but within the
+// smallint column, so an out-of-range value is a 400 rather than a Postgres error.
 const maxLevel = 60
 
 // validateJobResult checks that a submitted evaluation's stored values are within sane bounds.
@@ -68,12 +67,9 @@ func validateJobResult(req jobResultRequest) error {
 	return nil
 }
 
-// checkReportedSearchParams logs when the depth/confidence a worker reports differ from what
-// edax.SearchParams derives from (disc count, level). Neither is stored -- deriving them is only
-// sound as long as the worker's edax agrees with the ported search_global_init, and this is the one
-// place that comparison can still be made. A mismatch means an edax build that retuned the level
-// table, so it's worth knowing about, but the score is still a real result: warn, don't reject.
-// Workers that send neither field are silently accepted.
+// checkReportedSearchParams logs when a worker's reported depth/confidence disagree with
+// edax.SearchParams -- the sign of an edax build with a retuned level table. The score is still a
+// real result: log, don't reject. Workers that send neither field are silently accepted.
 func checkReportedSearchParams(req jobResultRequest, discCount int) {
 	if req.Depth == 0 && req.Confidence == 0 {
 		return
@@ -86,16 +82,9 @@ func checkReportedSearchParams(req jobResultRequest, discCount int) {
 	}
 }
 
-// isBookQuality reports whether an evaluation is deep enough to belong in the boards table.
-// Interactive (priority) analysis walks a board up from PriorityLevel in +2 rounds and every rung
-// is its own job, so without this floor a single PGN review would write a dozen searches shallower
-// than TargetLevel -- the depth the book is defined at -- into the DB, each of them a row
-// ListLearnable then has to redo anyway. A search that already ran the game out counts as book
-// quality whatever its level: no deeper search can change its score (edax.IsFinal).
-//
-// Enforced on every submission: ListLearnable jobs are handed out at TargetLevel(discCount) (see
-// claimJob) and clear the floor by construction, but nothing stops a client from POSTing shallower
-// results directly.
+// isBookQuality reports whether an evaluation is deep enough for the boards table: at least the
+// board's target level, or a search that ran the game out, which no deeper search can improve on.
+// Enforced on every submission so interactive analysis's shallow rungs never enter the book.
 func isBookQuality(discCount, level int) bool {
 	return level >= TargetLevel(discCount) || edax.IsFinal(discCount, level)
 }
@@ -142,7 +131,6 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 		Source: evaluationSourceEdax,
 	})
 
-	// Check whether this job originated from the priority queue.
 	isPriority, err := s.consumePriorityClaim(r.Context(), normalized.String())
 	if err != nil {
 		log.Printf("failed to check priority claim; treating as non-priority: %v", err)
@@ -152,13 +140,9 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case !isBookQuality(discCount, req.Level):
-		// Below book quality: accepted but never persisted, priority or not. The ephemeral cache is
-		// the only record; the frontend keeps asking one level deeper until a result that does
-		// qualify comes back.
-		//
-		// A priority board this shallow may have no DB row at all, making it invisible to the book
-		// learner; insert one (empty evaluation) so ListLearnable picks it up later. AddBoards is
-		// insert-if-absent (ON CONFLICT DO NOTHING), so an existing evaluation is never downgraded.
+		// Below book quality: accepted but never persisted; the ephemeral cache is the only record.
+		// A savable priority board still gets an empty-evaluation row so ListLearnable finds it
+		// later (AddBoards never downgrades an existing row).
 		if isPriority && discCount <= book.MaxSavableDiscs {
 			if err := s.repo.AddBoards(r.Context(), []othello.NormalizedBoard{normalized}); err != nil {
 				log.Printf("failed to schedule priority board for learning: %v", err)
@@ -186,8 +170,7 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 		}
 		// Too many discs: the ephemeral cache is the only record.
 	default:
-		// Non-priority path: SaveEvaluation must succeed; ErrBoardNotFound is a real bug here since every
-		// ListLearnable-originated board is guaranteed to already have a row.
+		// ErrBoardNotFound is a real bug here: every ListLearnable board already has a row.
 		if err := s.repo.SaveEvaluation(r.Context(), normalized, eval); err != nil {
 			if errors.Is(err, db.ErrBoardNotFound) {
 				writeError(w, http.StatusNotFound, err)
@@ -223,8 +206,7 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleReleaseJob handles POST /api/jobs/release: releases a worker's claim on a board it didn't
-// finish (e.g. a graceful shutdown with the job still queued or in flight), so another worker can pick
-// it up without waiting out claimTTL.
+// finish, so another worker can pick it up without waiting out claimTTL.
 func (s *Server) handleReleaseJob(w http.ResponseWriter, r *http.Request) {
 	var req releaseJobRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -283,8 +265,7 @@ func (s *Server) lookupEvaluation(ctx context.Context, board othello.Board) (eva
 		return evaluationResponse{Score: score, Source: evaluationSourceMinimax}, true, nil
 	}
 
-	// Ephemeral cache: covers priority-computed evaluations for boards with no DB row (>30 discs)
-	// or not yet persisted.
+	// Covers priority-computed evaluations that never reach the DB (too many discs, below target).
 	if cached, ok, err := s.getAnalysisResult(ctx, board.Normalize().String()); err == nil && ok {
 		return cached, true, nil
 	}
@@ -396,12 +377,9 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, statEntries(stats))
 }
 
-// statEntries turns per-(disc count, level) counts into per-(disc count, depth, confidence) counts.
-// Levels are an implementation detail of how a search is requested: what a board is actually worth
-// is the search it got, so levels describing the same search at the same disc count are merged.
-// Unlearned boards (level 0) are reported as depth 0, confidence 0 rather than what the level table
-// says a zero-level search would be, which would read as a full-confidence result.
-// The result is ordered by disc count, then depth, then confidence.
+// statEntries merges per-(disc count, level) counts into sorted per-(disc count, depth, confidence)
+// entries: levels describing the same search are one entry, and unlearned boards (level 0) report
+// depth 0, confidence 0 rather than what the level table would claim for them.
 func statEntries(stats []db.LevelStat) []statEntry {
 	counts := make(map[statEntry]int, len(stats))
 	for _, stat := range stats {
@@ -474,8 +452,6 @@ func (s *Server) handlePGN(w http.ResponseWriter, r *http.Request) {
 		}
 		firstGame = game
 	} else {
-		// ParsePGNLenient accepts any PGN regardless of which metadata tags are present;
-		// handlePGN only needs the board sequence, not game metadata.
 		games, parseErr := othello.ParsePGNLenient(text)
 		if parseErr != nil {
 			writeError(w, http.StatusBadRequest, parseErr)
@@ -503,9 +479,8 @@ type jobResponse struct {
 	Level int    `json:"level"`
 }
 
-// jobResultRequest is the JSON body POSTed to /api/jobs/result. Depth and Confidence are what edax
-// printed; neither is stored, since (disc count, level) already determines both. They are kept on
-// the wire so checkReportedSearchParams can catch an edax whose level table differs from ours.
+// jobResultRequest is the JSON body POSTed to /api/jobs/result. Depth and Confidence are not
+// stored; they stay on the wire so checkReportedSearchParams can catch a mismatched edax build.
 type jobResultRequest struct {
 	WorkerID   string `json:"worker_id"`
 	Board      string `json:"board"`
@@ -540,7 +515,7 @@ const evaluationSourceMinimax = "minimax"
 const evaluationSourceFinal = "final"
 
 // evaluationResponse is the JSON shape of an evaluation, returned by GET /api/boards. Depth and
-// Confidence are derived from (disc count, level) via edax.SearchParams, not stored per board.
+// Confidence are derived via edax.SearchParams, not stored per board.
 type evaluationResponse struct {
 	Level      int    `json:"level"`
 	Depth      int    `json:"depth"`
@@ -550,9 +525,7 @@ type evaluationResponse struct {
 }
 
 // statEntry is one row of the GET /api/stats response: how many boards with DiscCount discs have
-// been searched to Depth at Confidence percent. Levels are not reported -- two levels that search a
-// board identically are one entry -- and unlearned boards report depth 0, confidence 0, since no
-// search was run on them at all.
+// been searched to Depth at Confidence percent.
 type statEntry struct {
 	DiscCount  int `json:"disc_count"`
 	Depth      int `json:"depth"`
@@ -575,10 +548,7 @@ type pgnResponse struct {
 }
 
 // levelConfigResponse is the JSON body returned by GET /api/level-config. TargetLevels carries the
-// whole disc-count tier table rather than a summary of it, so the frontend's notion of a board's
-// target level matches EffectiveTargetLevel exactly -- a board whose target the frontend puts
-// higher than the server's clamp can never reach it, leaving the PGN page reporting a search that
-// never finishes.
+// whole tier table so the frontend computes exactly the targets the server enforces.
 type levelConfigResponse struct {
 	PriorityLevel   int               `json:"priority_level"`
 	MaxSavableDiscs int               `json:"max_savable_discs"`

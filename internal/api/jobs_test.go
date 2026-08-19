@@ -59,12 +59,8 @@ func TestServer_ClaimJob_SkipsFullyLearnedBoards(t *testing.T) {
 	require.False(t, ok)
 }
 
-// TestServer_ClaimJob_LeafBoardsDoNotStarveDeeperCandidates covers the
-// starvation bug ListLearnable's level cutoff exists to prevent: once every
-// 12-disc leaf is fully learned, they still sort ahead of any 13-disc board
-// (lower disc count wins regardless of level), so a naive candidate batch
-// would consist entirely of already-done leaves and never reach the real
-// work below them.
+// Covers the starvation bug ListLearnable's level cutoff prevents: fully learned leaves sort
+// ahead of deeper unlearned boards and would otherwise fill the whole candidate batch.
 func TestServer_ClaimJob_LeafBoardsDoNotStarveDeeperCandidates(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()

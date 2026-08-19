@@ -34,9 +34,8 @@ func (r *statusRecorder) WriteHeader(status int) {
 	r.ResponseWriter.WriteHeader(status)
 }
 
-// Hijack lets the wrapped writer be used for connection upgrades (the "/ws"
-// WebSocket endpoint). Without it, embedding the http.ResponseWriter interface
-// hides the underlying Hijacker, so websocket.Accept fails with a 501.
+// Hijack exposes the underlying Hijacker for the "/ws" connection upgrade; without it,
+// websocket.Accept fails with a 501.
 func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	hijacker, ok := r.ResponseWriter.(http.Hijacker)
 	if !ok {

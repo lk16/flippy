@@ -4,8 +4,7 @@ package book
 
 import "github.com/lk16/flippy/internal/othello"
 
-// noValue is a sentinel score outside the valid -64..64 range, used while
-// finding the best of a board's children.
+// noValue is a sentinel score below the valid -64..64 range.
 const noValue = -65
 
 // buildCache computes minimax scores for every board below leafDiscs reachable from root, omitting
@@ -25,8 +24,7 @@ func buildCache(root othello.Board, leafDiscs int, leaves map[othello.Board]int)
 	return result
 }
 
-// cacheEntry is a memoized minimax result: a score, and whether it could be
-// determined at all.
+// cacheEntry is a memoized minimax result: a score, and whether it could be determined at all.
 type cacheEntry struct {
 	score int
 	ok    bool

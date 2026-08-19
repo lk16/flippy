@@ -8,8 +8,8 @@ import (
 	"github.com/lk16/flippy/internal/othello"
 )
 
-// allNormalizedBoardsAt returns every distinct normalized board with
-// exactly discs discs reachable from the starting position.
+// allNormalizedBoardsAt returns every distinct normalized board with exactly discs discs
+// reachable from the starting position.
 func allNormalizedBoardsAt(t *testing.T, discs int) []othello.Board {
 	t.Helper()
 
@@ -51,8 +51,7 @@ func allNormalizedBoardsAt(t *testing.T, discs int) []othello.Board {
 
 func TestBuildCache_SingleChild(t *testing.T) {
 	root := othello.NewBoardStart()
-	// The 4 opening moves are rotations of each other, so they all
-	// normalize to the same board: exactly one leaf is needed.
+	// The 4 opening moves are rotations of each other, so one leaf covers all of them.
 	child := root.Children()[0].Normalize().Board()
 
 	cache := buildCache(root, 5, map[othello.Board]int{child: 7})
@@ -98,8 +97,7 @@ func TestBuildCache_FullLeavesCoverAllAncestors(t *testing.T) {
 }
 
 func TestBuildCache_ForcedPass(t *testing.T) {
-	// Found via BFS from the starting position: black has no legal move
-	// here, but white does after the pass.
+	// Reachable board where black has no legal move, but white does after the pass.
 	board, err := othello.ParseBoard("00000038180c00010000000000030204-b")
 	require.NoError(t, err)
 	require.False(t, board.HasMoves())
@@ -136,15 +134,14 @@ func TestBuildCache_ForcedPassUndeterminedSuccessorExcludesBoard(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, board.HasMoves())
 
-	// No leaves at all: the passed-to position's children can't be
-	// resolved, so the forced-pass board itself must be excluded too.
+	// No leaves at all: the passed-to position's children can't be resolved, so the forced-pass
+	// board itself must be excluded too.
 	cache := buildCache(board, board.CountDiscs()+1, nil)
 	require.NotContains(t, cache, board.Normalize().Board())
 }
 
 func TestBuildCache_GameOver(t *testing.T) {
-	// Found by always playing the first available move from the start:
-	// the game ends (both players out of moves) with a full board.
+	// Reachable board where the game is over: both players are out of moves.
 	board, err := othello.ParseBoard("3fb0888090a0c080c04f777f6f5f3f7f-b")
 	require.NoError(t, err)
 	require.False(t, board.HasMoves())
@@ -161,12 +158,8 @@ func TestBuildCache_GameOver(t *testing.T) {
 }
 
 func TestMinimaxValue_ForcedPassAtLeafBoundary(t *testing.T) {
-	// The same forced-pass board as TestBuildCache_ForcedPass, but with
-	// leafDiscs set to the board's own disc count rather than one more: the
-	// board itself is now the leaf, exercising the boundary directly rather
-	// than through minimaxChildren one ply up. edax never evaluates a
-	// no-legal-move position, so leaves only has the passed-to board; the
-	// forced-pass board's value must still come out as its negation.
+	// The forced-pass board is itself at the leaf boundary; leaves can only hold the passed-to
+	// board (edax never evaluates a no-legal-move position), so the value must be its negation.
 	board, err := othello.ParseBoard("00000038180c00010000000000030204-b")
 	require.NoError(t, err)
 	require.False(t, board.HasMoves())
@@ -188,18 +181,15 @@ func TestMinimaxValue_ForcedPassAtLeafBoundaryUnlearnedSuccessorIsUndetermined(t
 	require.NoError(t, err)
 	require.False(t, board.HasMoves())
 
-	// The passed-to board isn't in leaves (unlearned), so the forced-pass
-	// board's value can't be determined either.
+	// The passed-to board isn't in leaves, so the forced-pass board can't be determined either.
 	entry := minimaxValue(board, board.CountDiscs(), nil, make(map[othello.Board]cacheEntry), make(map[othello.Board]bool))
 
 	require.False(t, entry.ok)
 }
 
 func TestMinimaxValue_GameOverAtLeafBoundary(t *testing.T) {
-	// Same board as TestBuildCache_GameOver, but with leafDiscs set to the
-	// board's own disc count: the game-over short-circuit in minimaxPass
-	// must fire before the leafDiscs boundary lookup ever gets a chance to
-	// miss on a board that was never in leaves to begin with.
+	// Game-over board at the leaf boundary: minimaxPass's game-over short-circuit must fire
+	// before the leafDiscs lookup misses on a board that was never in leaves.
 	board, err := othello.ParseBoard("3fb0888090a0c080c04f777f6f5f3f7f-b")
 	require.NoError(t, err)
 	require.False(t, board.HasMoves())
@@ -215,9 +205,8 @@ func TestMinimaxValue_GameOverAtLeafBoundary(t *testing.T) {
 }
 
 func TestBuildCache_CycleDetectionPanics(t *testing.T) {
-	// minimaxValue must never be re-entered for a board it's still
-	// resolving; simulate that directly rather than trying to construct a
-	// real cyclic position (the game graph has none).
+	// Simulate re-entering minimaxValue on a board still being resolved (the real game graph
+	// has no cycles).
 	board := othello.NewBoardStart()
 	visiting := map[othello.Board]bool{board.Normalize().Board(): true}
 

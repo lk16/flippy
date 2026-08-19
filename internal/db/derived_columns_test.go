@@ -13,10 +13,8 @@ import (
 // verifyScriptPath is the operator script that proves migration 000002's column drop is lossless.
 const verifyScriptPath = "../../scripts/verify_derived_columns.sql"
 
-// TestVerifyDerivedColumnsScript runs scripts/verify_derived_columns.sql and checks its SQL
-// transcription of edax's level table against the Go port, over every (disc count, level) pair the
-// book can hold. The script is the only other copy of that mapping, and it is what an operator
-// trusts before dropping the columns, so it must not drift from edax.SearchParams.
+// TestVerifyDerivedColumnsScript checks the script's SQL transcription of edax's level table
+// against edax.SearchParams over every (disc count, level) pair, so the two copies can't drift.
 func TestVerifyDerivedColumnsScript(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()

@@ -21,24 +21,16 @@
 // from Edax 4.5.1 (https://github.com/abulmo/edax-reversi), also licensed
 // under GPLv3.
 
-//! Stability-based cutoffs for the exact-solve endgame search (`TASKS.md` Task 17).
-//!
-//! The core idea: any disc that is "stable" (can never be flipped again, regardless of how the
-//! game continues) forms a proven lower bound on the opponent's final disc count. If even the most
-//! optimistic outcome for the current player (all non-stable opponent discs flipped) still yields
-//! a score ≤ alpha, it's a provable fail-low — return immediately without searching.
-//!
-//! This is a *correctness-preserving* pruning technique: it never changes the minimax value, only
-//! skips subtrees that are provably bounded. Ported from Edax's `NWS_endgame` (`endgame.c:538-540`)
-//! together with `get_stability` (`board.c:916-929`), `get_stable_edge` (`board.c:789-795`),
+//! Stability cutoffs for the exact-solve endgame search: stable discs (never flippable again)
+//! bound the opponent's final count, proving fail-lows without searching — pruning that never
+//! changes the minimax value. Ports `NWS_endgame`'s cutoff (`endgame.c:538-540`) with
+//! `get_stability` (`board.c:916-929`), `get_stable_edge` (`board.c:789-795`),
 //! `get_full_lines` (`board.c:867-891`), and `get_spreaded_stability` (`board.c:895-913`).
 
 use std::sync::OnceLock;
 
-/// Threshold values to try stability cutoff during NWS endgame search (`search.c:114-121`).
-/// Indexed by `n_empties`; 99 = "unused" (cutoff never fires — either trivially short game or
-/// endgame too deep for stable squares to form). At `n_empties=4`, threshold 6 means the cutoff
-/// fires when searching for scores above 6 (extremely decisive positions only).
+/// Alpha thresholds to try the stability cutoff, indexed by `n_empties` (`search.c:114-121`);
+/// 99 = cutoff never fires.
 pub(crate) const NWS_STABILITY_THRESHOLD: [i32; 64] = [
     99, 99, 99, 99, 6, 8, 10, 12, // 0-7
     8, 10, 20, 22, 24, 26, 28, 30, // 8-15
@@ -50,9 +42,8 @@ pub(crate) const NWS_STABILITY_THRESHOLD: [i32; 64] = [
     99, 99, 99, 99, 99, 99, 99, 99, // 56-63
 ];
 
-/// Compute the full-lines mask for each of the four directions, given `disc` (occupied squares).
-/// `full[i]` has all bits set in row/col/diagonal if and only if that line is completely full.
-/// Port of `get_full_lines` (`board.c:867-891`).
+/// Full-lines mask per direction: `full[i]` has a line's bits set iff that line is completely
+/// occupied. Port of `get_full_lines` (`board.c:867-891`).
 fn get_full_lines(disc: u64) -> [u64; 4] {
     // Horizontal: row is full iff all 8 bits in that byte are set.
     let h = {
@@ -87,9 +78,8 @@ fn get_full_lines(disc: u64) -> [u64; 4] {
     [h, v, d9, d7]
 }
 
-/// Propagate stability to adjacent discs: a disc is stable if it has a stable neighbour (or a
-/// full line) in every direction it can be flipped along. Iterates until no new stable discs are
-/// found. Port of `get_spreaded_stability` (`board.c:895-913`).
+/// Propagate stability: a disc is stable if every direction has a stable neighbour or a full
+/// line; iterate to fixpoint. Port of `get_spreaded_stability` (`board.c:895-913`).
 fn get_spreaded_stability(stable: u64, p_central: u64, full: &[u64; 4]) -> u32 {
     if stable == 0 {
         return 0;
@@ -111,9 +101,9 @@ fn get_spreaded_stability(stable: u64, p_central: u64, full: &[u64; 4]) -> u32 {
 
 // --- Edge stability table (65536 entries, one per (P_edge, O_edge) pair) ---
 
-/// Recursively determine which of `stable`'s squares remain stable after exhaustively trying
-/// every possible move in every empty square. Direct port of `find_edge_stable` (`board.c:681-737`).
-/// Works on 8-bit edge positions (only low 8 bits of P, O, stable are meaningful).
+/// Which of `stable`'s squares stay stable after exhaustively trying every move on an 8-bit
+/// edge (only the low 8 bits of P/O/stable are meaningful). Port of `find_edge_stable`
+/// (`board.c:681-737`).
 fn find_edge_stable(old_p: i32, old_o: i32, stable: i32) -> i32 {
     let stable = stable & old_p;
     if stable == 0 {
@@ -137,10 +127,8 @@ fn find_edge_stable(old_p: i32, old_o: i32, stable: i32) -> i32 {
                 let o2 = o & (o >> 1);
                 f |= o2 & (f >> 2);
                 f |= o2 & (f >> 2);
-                // Anchor check: if player disc is just left of the chain, flips are valid.
-                // (p & (f>>1)) is either 0 (no anchor) or a positive power of 2 (anchor disc).
-                // For valid positions where p & o == 0, the value is 0 or 1, so -(0) = 0 and
-                // -1 = all-1s — both preserve F correctly.
+                // Anchor check: with p & o == 0, (p & (f>>1)) is 0 or 1, so wrapping_neg is 0
+                // or all-1s — keeping f only when a player disc brackets the chain.
                 f &= (p & (f >> 1)).wrapping_neg();
                 o ^= f;
                 p ^= f;
@@ -182,10 +170,9 @@ fn find_edge_stable(old_p: i32, old_o: i32, stable: i32) -> i32 {
     result
 }
 
-/// Build the 65536-entry edge stability lookup table. Each entry `[P * 256 + O]` is an 8-bit
-/// bitmask of player-P's stable squares on an 8-square edge with opponent-O present. Symmetric
-/// positions share results (mirror = `reverse_bits` of both P and O). Port of
-/// `edge_stability_init` (`board.c:749-767`).
+/// Builds the 65536-entry edge stability table: `[P * 256 + O]` is the bitmask of P's stable
+/// squares on an 8-square edge. Mirrors share results. Port of `edge_stability_init`
+/// (`board.c:749-767`).
 fn build_edge_stability() -> Box<[u8; 65536]> {
     let mut table = Box::new([0u8; 65536]);
     for po in 0u32..65536 {
@@ -234,27 +221,20 @@ fn unpack_h2h7(x: u64) -> u64 {
     ((x & 0x7e).wrapping_mul(0x0002040810204000)) & 0x0080808080808000
 }
 
-/// Compute the exact stable edges of player P using the precomputed edge stability table.
-/// Returns a bitboard of player's stable discs on all four edges. Port of `get_stable_edge`
-/// (`board.c:789-795`).
+/// P's stable discs on all four edges, via the precomputed edge table. Port of
+/// `get_stable_edge` (`board.c:789-795`).
 fn get_stable_edge(p: u64, o: u64) -> u64 {
     let t = edge_stability_table();
-    // Bottom edge (rank 1): low 8 bits of P and O.
     let bottom = t[((p as u8) as usize) * 256 + (o as u8) as usize] as u64;
-    // Top edge (rank 8): high 8 bits.
     let top = (t[(p >> 56) as usize * 256 + (o >> 56) as usize] as u64) << 56;
-    // Left edge (file A): packed from column-A bits.
     let left = unpack_a2a7(t[pack_a1a8(p) * 256 + pack_a1a8(o)] as u64);
-    // Right edge (file H): packed from column-H bits.
     let right = unpack_h2h7(t[pack_h1h8(p) * 256 + pack_h1h8(o)] as u64);
     bottom | top | left | right
 }
 
-/// Count the number of player P's stable discs (a lower bound on stability — always correct but
-/// may miss some stable discs in complex positions). Port of `get_stability` (`board.c:916-929`).
-///
-/// Called by the stability cutoff in `search::negamax` with P=opponent, O=player to get an
-/// upper bound on the current player's score.
+/// Count of P's stable discs — a lower bound (may miss some in complex positions), which is safe
+/// for the cutoff. Port of `get_stability` (`board.c:916-929`); `search::negamax` calls it with
+/// P=opponent, O=player.
 pub(crate) fn get_stability(p: u64, o: u64) -> u32 {
     let stable = get_stable_edge(p, o);
     let p_central = p & 0x007e7e7e7e7e7e00;
@@ -267,39 +247,32 @@ pub(crate) fn get_stability(p: u64, o: u64) -> u32 {
 mod tests {
     use super::*;
 
-    /// Basic sanity check: on an empty board, no disc is stable.
+    /// Empty board: no stable discs; full player board: all 64 stable.
     #[test]
     fn empty_board_has_no_stable_discs() {
         assert_eq!(get_stability(0, 0), 0);
         assert_eq!(get_stability(u64::MAX, 0), 64);
     }
 
-    /// Corner discs are always stable (can never be flipped). A disc at A1 (bit 0) is the
-    /// canonical example.
+    /// Corner discs are always stable.
     #[test]
     fn corner_disc_is_stable() {
-        // Player has disc at A1 (bit 0), rest of position is arbitrary.
         let p = 0x0000000000000001u64; // A1 only
         let o = 0x0000000000000002u64; // B1 (adjacent, not corner)
         assert!(get_stability(p, o) >= 1, "A1 corner disc must be stable");
     }
 
-    /// Full board: all discs belonging to player P must be stable (no moves remain).
+    /// Full board (alternating rows): player discs must count as stable.
     #[test]
     fn full_board_all_player_discs_stable() {
-        // Alternating player/opponent rows.
         let p = 0x00ff00ff00ff00ffu64;
         let o = 0xff00ff00ff00ff00u64;
         let s = get_stability(p, o);
-        // Every disc is on a full board — all stable. Exact count depends on structure.
         assert!(s > 0, "at least some discs must be stable on a full board");
-        // Specifically, corner discs at A1 (bit 0) and A8 (bit 56) belong to p (row 1, row 7
-        // pattern): bit 0 is in row 1 (low byte), player. A1 is stable.
         assert!(p & 1 != 0, "A1 belongs to player in this fixture");
     }
 
-    /// Verify NWS_STABILITY_THRESHOLD has 99 for n_empties 0-3 and 48-63 (never fires), and
-    /// reasonable values in between.
+    /// Spot-checks NWS_STABILITY_THRESHOLD against `search.c:114-121`.
     #[test]
     fn stability_threshold_matches_search_c() {
         for i in 0..4 {
@@ -320,7 +293,7 @@ mod tests {
         }
     }
 
-    /// get_spreaded_stability with stable=0 must return 0 without iterating.
+    /// stable=0 must return 0 without iterating.
     #[test]
     fn spreaded_stability_zero_input_returns_zero() {
         let full = [0u64; 4];
