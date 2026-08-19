@@ -163,7 +163,10 @@ function rotateBits(x, rotation) {
     return x;
 }
 
-// OthelloBoard mirrors internal/othello.Board: playerBits/opponentBits are relative to blackTurn.
+// OthelloBoard mirrors internal/othello.Board's playerBits/opponentBits, plus blackTurn, which
+// says which real color those bitboards belong to. A position's evaluation doesn't depend on
+// blackTurn (see internal/othello.Board), so it is purely local: it never crosses the wire, and
+// toString/fromString leave it out.
 class OthelloBoard {
     constructor() {
         this.playerBits = 0n;
@@ -321,34 +324,26 @@ class OthelloBoard {
         return min;
     }
 
-    // toString matches Go's Board.String(): 16 hex digits black, 16 hex digits white, then "-b"/"-w".
+    // toString matches Go's Board.String(): 16 hex digits player, 16 hex digits opponent.
     toString() {
-        const black = this.blackTurn ? this.playerBits : this.opponentBits;
-        const white = this.blackTurn ? this.opponentBits : this.playerBits;
-        const turnSuffix = this.blackTurn ? '-b' : '-w';
-        return black.toString(16).padStart(16, '0') + white.toString(16).padStart(16, '0') + turnSuffix;
+        return this.playerBits.toString(16).padStart(16, '0')
+            + this.opponentBits.toString(16).padStart(16, '0');
     }
 
-    // fromString parses the format produced by toString() / Go's Board.String():
-    // 16 hex digits black, 16 hex digits white, "-b" or "-w". Returns null on any parse error.
-    static fromString(s) {
-        if (typeof s !== 'string' || s.length !== 34) return null;
-        const suffix = s.slice(32);
-        let blackTurn;
-        if (suffix === '-b') blackTurn = true;
-        else if (suffix === '-w') blackTurn = false;
-        else return null;
+    // fromString parses the format produced by toString() / Go's Board.String(). blackTurn isn't
+    // part of that format (see OthelloBoard), so callers that display the result pass whose turn it
+    // is. Returns null on any parse error.
+    static fromString(s, blackTurn = true) {
+        if (typeof s !== 'string' || s.length !== 32) return null;
 
-        let blackBits, whiteBits;
+        let playerBits, opponentBits;
         try {
-            blackBits = BigInt('0x' + s.slice(0, 16));
-            whiteBits = BigInt('0x' + s.slice(16, 32));
+            playerBits = BigInt('0x' + s.slice(0, 16));
+            opponentBits = BigInt('0x' + s.slice(16, 32));
         } catch (_) {
             return null;
         }
 
-        const playerBits = blackTurn ? blackBits : whiteBits;
-        const opponentBits = blackTurn ? whiteBits : blackBits;
         return OthelloBoard.fromBits(playerBits, opponentBits, blackTurn);
     }
 }
@@ -475,11 +470,11 @@ class OthelloGame {
         }
     }
 
-    // discCountFromBoardStr counts total discs in a normalized board string (34 chars).
+    // discCountFromBoardStr counts total discs in a normalized board string (32 chars).
     discCountFromBoardStr(s) {
-        const black = BigInt('0x' + s.slice(0, 16));
-        const white = BigInt('0x' + s.slice(16, 32));
-        return popcount(black) + popcount(white);
+        const player = BigInt('0x' + s.slice(0, 16));
+        const opponent = BigInt('0x' + s.slice(16, 32));
+        return popcount(player) + popcount(opponent);
     }
 
     // targetLevelForBoard returns the final target edax level for a board string. Mirrors
@@ -1177,7 +1172,9 @@ class OthelloGame {
 
         const { boards: rawStrings } = await response.json();
 
-        this.pgnBoards = rawStrings.map((s) => OthelloBoard.fromString(s)).filter(Boolean);
+        // A PGN line starts with black to move and every entry -- including the passes the server
+        // inserts -- hands the turn over, so ply parity says which color is to move.
+        this.pgnBoards = rawStrings.map((s, ply) => OthelloBoard.fromString(s, ply % 2 === 0)).filter(Boolean);
         this.pgnCurrentPly = 0;
         this.pgnAlternativeMoves = [];
         this.flipped = false;

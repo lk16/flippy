@@ -19,6 +19,25 @@ test('fixture: forced-pass and game-over plies are what we expect', () => {
   assert.equal(boards[GAME_OVER_PLY].isGameOver(), true, 'final ply is game over');
 });
 
+// Pins static/board.js's move generation and encoding to the backend's: every ply of the fixture
+// must come out of the previous one, string for string.
+test('fixture: replaying it in JS reproduces every backend board string', () => {
+  let board = OthelloBoard.fromString(FORCED_PASS_BOARDS[0]);
+
+  for (let ply = 1; ply < FORCED_PASS_BOARDS.length; ply++) {
+    let next;
+    if (board.hasValidMoves()) {
+      next = board.getChildren().find((c) => c.toString() === FORCED_PASS_BOARDS[ply]);
+    } else {
+      next = board.clone();
+      next.passMove();
+    }
+    assert.ok(next, `ply ${ply} is reachable from ply ${ply - 1}`);
+    assert.equal(next.toString(), FORCED_PASS_BOARDS[ply], `ply ${ply} matches`);
+    board = next;
+  }
+});
+
 test('pgnGetGraphData: forced-pass and game-over plies are null, real moves are not', () => {
   const game = buildGame(FORCED_PASS_BOARDS);
   const data = game.pgnGetGraphData();

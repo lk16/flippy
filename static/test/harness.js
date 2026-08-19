@@ -182,7 +182,8 @@ const MAX_TARGET_LEVEL = Math.max(...DEFAULT_LEVEL_CONFIG.targetLevels.map((t) =
 function buildGame(boardStrings, { complete = true } = {}) {
   const game = Object.create(OthelloGame.prototype);
   game.pgnState = 'graph';
-  game.pgnBoards = boardStrings.map((s) => OthelloBoard.fromString(s));
+  // Mirror analyzePGN(): a PGN line starts with black to move and every ply hands the turn over.
+  game.pgnBoards = boardStrings.map((s, ply) => OthelloBoard.fromString(s, ply % 2 === 0));
   game.evaluations = new Map();
   game.pendingLevelRequests = new Map();
   game.pgnCurrentPly = 0;
