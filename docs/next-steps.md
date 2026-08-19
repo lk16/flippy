@@ -15,9 +15,9 @@ is required — pick items up when a real need appears.
   on the API and separate Basic Auth on the HTML admin pages.
 - **`GET /version`**: no version/build-info endpoint.
 - **Stricter evaluation validation**: submitted results check
-  level/score bounds, but not an explicit level floor (`TargetLevel`
-  never assigns below 32, so the floor holds by construction, not by
-  input validation). Depth and confidence are checked against the level
+  level/score bounds, but nothing rejects a too-shallow one — it is the
+  DB write that is gated on the board's target level (`isBookQuality`),
+  not the request. Depth and confidence are checked against the level
   table but only warned about (`checkReportedSearchParams`), never
   rejected.
 - **PGN illegal-move tolerance**: old auto-inserted a pass when a recorded
