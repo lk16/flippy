@@ -81,13 +81,12 @@ Not started. Numbers below come from `old/ignored/edax_1763247601.sql.gz`
 (2,422,020 rows, Nov 2025) against `backups/boards_1786462307.sql.gz`
 (14,121,197 rows) — both gitignored, so re-derive if they move.
 
-### All of it transfers, not half
+### All of it transfers
 
-The old `edax` table stored one row per position with the turn thrown
-away; `boards` stores the turn. That looks like only the parity-matching
-half can be reused. It isn't a constraint at all: **the score depends only
-on `(mover, opponent)`, never on which colour holds which discs.** Three
-independent confirmations:
+Both tables store one row per position with the colour thrown away, on the
+same grounds: **the score depends only on `(mover, opponent)`, never on
+which colour holds which discs.** Three independent confirmations, which
+are also why `othello.Board` has no turn:
 
 - **Edax's own representation.** `Board` is `{player, opponent}`
   (`bit.h:147`). `board_set` (`board.c:101-146`) reads `X` into `player`
@@ -111,16 +110,14 @@ Normalization is unchanged — both minimize `(mover, opponent)` over the 8
 symmetries, with identical flip primitives. Against that one shared rule,
 0 of 2,422,020 old rows and 0 of 14,121,197 new rows come out
 unnormalized, and every row's `disc_count` matches its bitboards. Only the
-encoding differs:
-old is 16 bytes little-endian `(player, opponent)`, new is 17 bytes
-big-endian `(black, white, turn)`.
+byte order differs: old is 16 bytes little-endian `(player, opponent)`,
+new is 16 bytes big-endian. So mapping a row is `reverse(player) ||
+reverse(opponent)` and nothing else.
 
-Turn follows disc parity — even is black to move, odd is white — with
-passes as the only exception, and they are rare (at 30 discs: 1,450,922
-black-to-move rows against 1,028 white). So map an old row to
-`turn = parity`. Writing *both* turns is also always sound and picks up
-the pass positions, at the cost of ~2.4M rows that only a pass line will
-ever look up — dead weight in the row counts, not wrong answers.
+(The figures below were measured while `boards` still stored a turn byte,
+so the archive covered each new row's parity separately. Positions now key
+on `(player, opponent)` alone, which can only merge rows, never miss
+them.)
 
 ### What it buys
 
