@@ -156,6 +156,15 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 		// Below book quality: accepted but never persisted, priority or not. The ephemeral cache is
 		// the only record; the frontend keeps asking one level deeper until a result that does
 		// qualify comes back.
+		//
+		// A priority board this shallow may have no DB row at all, making it invisible to the book
+		// learner; insert one (empty evaluation) so ListLearnable picks it up later. AddBoards is
+		// insert-if-absent (ON CONFLICT DO NOTHING), so an existing evaluation is never downgraded.
+		if isPriority && discCount <= book.MaxSavableDiscs {
+			if err := s.repo.AddBoards(r.Context(), []othello.NormalizedBoard{normalized}); err != nil {
+				slog.Error("failed to schedule priority board for learning", "error", err)
+			}
+		}
 	case isPriority:
 		if discCount <= book.MaxSavableDiscs {
 			if saveErr := s.repo.SaveEvaluation(r.Context(), normalized, eval); saveErr != nil {

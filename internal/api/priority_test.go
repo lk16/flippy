@@ -199,15 +199,49 @@ func TestHandleSubmitJobResult_PriorityBelowTargetNotPersisted(t *testing.T) {
 	require.Equal(t, 6, cached.Score)
 }
 
-// TestHandleSubmitJobResult_PriorityBelowTargetNoRowAddsNothing verifies that a below-target
-// priority result does not create a row either — reviewing a PGN must not seed the book with
-// shallow evaluations for positions it has never held.
-func TestHandleSubmitJobResult_PriorityBelowTargetNoRowAddsNothing(t *testing.T) {
+// TestHandleSubmitJobResult_PriorityBelowTargetSchedulesBoardForLearning verifies that a
+// below-target priority result on an unknown savable board creates a row with an empty evaluation,
+// so ListLearnable picks the board up later — without seeding the book with the shallow score.
+func TestHandleSubmitJobResult_PriorityBelowTargetSchedulesBoardForLearning(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
 	board := testBoard(t, 14)
 	// Do NOT call AddBoards; the board has no row.
+
+	require.Equal(t, 200, submitPriorityResult(t, s, board, PriorityLevel, 6).Code)
+
+	eval, err := s.repo.GetBoard(ctx, board.Board())
+	require.NoError(t, err)
+	require.Equal(t, db.Evaluation{}, eval, "row exists but stays unevaluated")
+}
+
+// TestHandleSubmitJobResult_PriorityBelowTargetDoesNotDowngradeExistingRow verifies the
+// insert-if-absent guarantee: a board with a real evaluation is untouched by a shallow result.
+func TestHandleSubmitJobResult_PriorityBelowTargetDoesNotDowngradeExistingRow(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	board := testBoard(t, 14)
+	target := TargetLevel(board.CountDiscs())
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: target, Score: 5}))
+
+	require.Equal(t, 200, submitPriorityResult(t, s, board, PriorityLevel, 6).Code)
+
+	eval, err := s.repo.GetBoard(ctx, board.Board())
+	require.NoError(t, err)
+	require.Equal(t, db.Evaluation{Level: target, Score: 5}, eval)
+}
+
+// TestHandleSubmitJobResult_PriorityBelowTargetHighDiscAddsNoRow verifies that boards above
+// MaxSavableDiscs are not scheduled for learning either.
+func TestHandleSubmitJobResult_PriorityBelowTargetHighDiscAddsNoRow(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	board := testBoard(t, 35)
+	require.Greater(t, board.CountDiscs(), book.MaxSavableDiscs)
 
 	require.Equal(t, 200, submitPriorityResult(t, s, board, PriorityLevel, 6).Code)
 
