@@ -38,6 +38,34 @@ func TestTargetLevelTiers_MatchTargetLevel(t *testing.T) {
 	}
 }
 
+// TestIsBookQuality covers the level floor handleSubmitJobResult applies to priority results:
+// only a search at least as deep as the board's target level -- or one that already ran the game
+// out -- may reach the DB.
+func TestIsBookQuality(t *testing.T) {
+	tests := []struct {
+		name      string
+		discCount int
+		level     int
+		want      bool
+	}{
+		{"below target", 14, PriorityLevel, false},
+		{"one rung below target", 14, TargetLevel(14) - 2, false},
+		{"at target", 14, TargetLevel(14), true},
+		{"above target", 14, TargetLevel(14) + 2, true},
+		{"at target, deepest tier", 30, TargetLevel(30), true},
+		// 52 discs is past MaxSavableDiscs, so the disc-count check keeps it out of the DB anyway,
+		// but it is the shape the IsFinal clause exists for: a shallow search that is still the
+		// game-theoretic result, which no deeper level could improve on.
+		{"below target but final", 52, 12, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, isBookQuality(tt.discCount, tt.level))
+		})
+	}
+}
+
 // TestTargetLevelTiers_ReturnsACopy makes sure a caller cannot rewrite the table TargetLevel reads.
 func TestTargetLevelTiers_ReturnsACopy(t *testing.T) {
 	TargetLevelTiers()[0].Level = 1

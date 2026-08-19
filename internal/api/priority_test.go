@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
+	"github.com/lk16/flippy/internal/edax"
 	"github.com/lk16/flippy/internal/othello"
 )
 
@@ -110,23 +112,10 @@ func TestHandleSubmitJobResult_PriorityHighDiscSkipsPersistence(t *testing.T) {
 	board := testBoard(t, 35)
 	require.Greater(t, board.CountDiscs(), book.MaxSavableDiscs)
 
-	// Simulate a priority claim.
-	require.NoError(t, s.setPriorityClaim(ctx, board.String()))
-
-	// Also set a regular claim (as claimJobs would do via tryClaim).
-	claimed, err := s.tryClaim(ctx, board.String(), "w1")
-	require.NoError(t, err)
-	require.True(t, claimed)
-
-	reqBody := jobResultRequest{
-		WorkerID: "w1", Board: board.String(), Level: PriorityLevel,
-		Depth: PriorityLevel, Confidence: 100, Score: 2,
-	}
-	w := doRequest(t, s, "POST", "/api/jobs/result", reqBody)
-	require.Equal(t, 200, w.Code)
+	require.Equal(t, 200, submitPriorityResult(t, s, board, TargetLevel(board.CountDiscs()), 2).Code)
 
 	// Board should not have been inserted into boards table.
-	_, err = s.repo.GetBoard(ctx, board.Board())
+	_, err := s.repo.GetBoard(ctx, board.Board())
 	require.Error(t, err)
 
 	// But the ephemeral cache should have it.
@@ -136,8 +125,27 @@ func TestHandleSubmitJobResult_PriorityHighDiscSkipsPersistence(t *testing.T) {
 	require.Equal(t, 2, cached.Score)
 }
 
+// submitPriorityResult claims board as a priority job and submits an evaluation at level for it,
+// returning the response recorder.
+func submitPriorityResult(t *testing.T, s *Server, board othello.NormalizedBoard, level, score int) *httptest.ResponseRecorder {
+	t.Helper()
+	ctx := context.Background()
+
+	require.NoError(t, s.setPriorityClaim(ctx, board.String()))
+	claimed, err := s.tryClaim(ctx, board.String(), "w1")
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	depth, confidence := edax.SearchParams(board.CountDiscs(), level)
+	return doRequest(t, s, "POST", "/api/jobs/result", jobResultRequest{
+		WorkerID: "w1", Board: board.String(), Level: level,
+		Depth: depth, Confidence: confidence, Score: score,
+	})
+}
+
 // TestHandleSubmitJobResult_PriorityLowDiscPersists verifies that a priority job for a board
-// with <= MaxSavableDiscs (which already has a row) saves the evaluation to the DB.
+// with <= MaxSavableDiscs (which already has a row), searched at its target level, saves the
+// evaluation to the DB.
 func TestHandleSubmitJobResult_PriorityLowDiscPersists(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
@@ -145,25 +153,16 @@ func TestHandleSubmitJobResult_PriorityLowDiscPersists(t *testing.T) {
 	board := testBoard(t, 14)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
 
-	require.NoError(t, s.setPriorityClaim(ctx, board.String()))
-	claimed, err := s.tryClaim(ctx, board.String(), "w1")
-	require.NoError(t, err)
-	require.True(t, claimed)
-
-	reqBody := jobResultRequest{
-		WorkerID: "w1", Board: board.String(), Level: PriorityLevel,
-		Depth: PriorityLevel, Confidence: 100, Score: 6,
-	}
-	w := doRequest(t, s, "POST", "/api/jobs/result", reqBody)
-	require.Equal(t, 200, w.Code)
+	target := TargetLevel(board.CountDiscs())
+	require.Equal(t, 200, submitPriorityResult(t, s, board, target, 6).Code)
 
 	eval, err := s.repo.GetBoard(ctx, board.Board())
 	require.NoError(t, err)
-	require.Equal(t, db.Evaluation{Level: PriorityLevel, Score: 6}, eval)
+	require.Equal(t, db.Evaluation{Level: target, Score: 6}, eval)
 }
 
 // TestHandleSubmitJobResult_PriorityLowDiscNoRowAddsAndSaves verifies the AddBoards+retry path:
-// when a priority <=30-disc board has no existing row, one is created.
+// when a priority <=30-disc board searched at its target level has no existing row, one is created.
 func TestHandleSubmitJobResult_PriorityLowDiscNoRowAddsAndSaves(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
@@ -171,21 +170,52 @@ func TestHandleSubmitJobResult_PriorityLowDiscNoRowAddsAndSaves(t *testing.T) {
 	board := testBoard(t, 14)
 	// Do NOT call AddBoards; the board has no row.
 
-	require.NoError(t, s.setPriorityClaim(ctx, board.String()))
-	claimed, err := s.tryClaim(ctx, board.String(), "w1")
-	require.NoError(t, err)
-	require.True(t, claimed)
-
-	reqBody := jobResultRequest{
-		WorkerID: "w1", Board: board.String(), Level: PriorityLevel,
-		Depth: PriorityLevel, Confidence: 100, Score: -4,
-	}
-	w := doRequest(t, s, "POST", "/api/jobs/result", reqBody)
-	require.Equal(t, 200, w.Code)
+	target := TargetLevel(board.CountDiscs())
+	require.Equal(t, 200, submitPriorityResult(t, s, board, target, -4).Code)
 
 	eval, err := s.repo.GetBoard(ctx, board.Board())
 	require.NoError(t, err)
-	require.Equal(t, db.Evaluation{Level: PriorityLevel, Score: -4}, eval)
+	require.Equal(t, db.Evaluation{Level: target, Score: -4}, eval)
+}
+
+// TestHandleSubmitJobResult_PriorityBelowTargetNotPersisted verifies the level floor: a priority
+// result shallower than the board's target level leaves the existing row unevaluated, so the
+// intermediate rungs of the frontend's level ladder never land in the book.
+func TestHandleSubmitJobResult_PriorityBelowTargetNotPersisted(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	board := testBoard(t, 14)
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	require.Less(t, PriorityLevel, TargetLevel(board.CountDiscs()))
+
+	require.Equal(t, 200, submitPriorityResult(t, s, board, PriorityLevel, 6).Code)
+
+	eval, err := s.repo.GetBoard(ctx, board.Board())
+	require.NoError(t, err)
+	require.Equal(t, db.Evaluation{}, eval, "row stays unevaluated")
+
+	// The result is still served back: it lives in the ephemeral analysis cache.
+	cached, ok, err := s.getAnalysisResult(ctx, board.String())
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, 6, cached.Score)
+}
+
+// TestHandleSubmitJobResult_PriorityBelowTargetNoRowAddsNothing verifies that a below-target
+// priority result does not create a row either — reviewing a PGN must not seed the book with
+// shallow evaluations for positions it has never held.
+func TestHandleSubmitJobResult_PriorityBelowTargetNoRowAddsNothing(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	board := testBoard(t, 14)
+	// Do NOT call AddBoards; the board has no row.
+
+	require.Equal(t, 200, submitPriorityResult(t, s, board, PriorityLevel, 6).Code)
+
+	_, err := s.repo.GetBoard(ctx, board.Board())
+	require.ErrorIs(t, err, db.ErrBoardNotFound)
 }
 
 // TestHandleSubmitJobResult_NonPriorityBoardNotFoundStill404 ensures the existing 404 path

@@ -197,10 +197,11 @@ function buildGame(boardStrings, { complete = true } = {}) {
   game._graphLayout = null;
   game._graphClickBound = false;
   game.edaxWorkerPool = null;
-  game._pendingLocalEvals = new Set();
+  game._pendingLocalEvals = new Map();
   game._localEvalRenderPending = false;
   game._localEvalBoardKey = null;
   game._localEvalGeneration = 0;
+  game._localEvalLineGeneration = 0;
 
   // Mirror pgnBuildChildSets(): children of each valid-move board, [] for pass/game-over.
   game.pgnChildrenByPly = game.pgnBoards.map((b) =>
@@ -248,19 +249,50 @@ function buildNormalGame(board = new OthelloBoard()) {
   game.evalPollStart = 0;
   game.levelConfig = { ...DEFAULT_LEVEL_CONFIG };
   game.pendingLevelRequests = new Map();
-  game._pendingLocalEvals = new Set();
+  game._pendingLocalEvals = new Map();
   game._localEvalRenderPending = false;
   game._localEvalBoardKey = null;
   game._localEvalGeneration = 0;
+  game._localEvalLineGeneration = 0;
   game.edaxWorkerPool = null;
   // No-op by default; tests that need to inspect outgoing requests replace this.
   game.wsClient = { requestEvaluations() {}, sendEvent() {} };
   return game;
 }
 
+// mockWorkerPool stands in for EdaxEvalWorkerPool: it records every evaluate() call and lets the
+// test resolve them one at a time, mirroring the real signature (player, opponent, level, options)
+// -> Promise<score>. cancelQueued() drops every not-yet-resolved call whose tag matches, the same
+// way the real pool drops tasks that haven't started yet.
+function mockWorkerPool() {
+  const calls = [];
+  return {
+    calls,
+    evaluate(player, opponent, level, { priority = 0, tag = null } = {}) {
+      return new Promise((resolve, reject) => {
+        calls.push({ player, opponent, level, priority, tag, resolved: false, resolve, reject });
+      });
+    },
+    cancelQueued(shouldDrop) {
+      for (const call of calls) {
+        if (call.resolved || !shouldDrop(call.tag)) continue;
+        call.resolved = true;
+        call.reject(new Error('edax-eval: evaluation cancelled'));
+      }
+    },
+  };
+}
+
+// flush yields to the microtask/timer queue, letting promise chains under test settle.
+function flush() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 module.exports = {
   OthelloBoard,
   OthelloGame,
+  mockWorkerPool,
+  flush,
   installCellDOM,
   buildGame,
   buildNormalGame,

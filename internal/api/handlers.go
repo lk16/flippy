@@ -112,6 +112,19 @@ func checkReportedSearchParams(req jobResultRequest, discCount int) {
 	}
 }
 
+// isBookQuality reports whether an evaluation is deep enough to belong in the boards table.
+// Interactive (priority) analysis walks a board up from PriorityLevel in +2 rounds and every rung
+// is its own job, so without this floor a single PGN review would write a dozen searches shallower
+// than TargetLevel -- the depth the book is defined at -- into the DB, each of them a row
+// ListLearnable then has to redo anyway. A search that already ran the game out counts as book
+// quality whatever its level: no deeper search can change its score (edax.IsFinal).
+//
+// Only the priority path needs the check: ListLearnable jobs are always handed out at
+// TargetLevel(discCount) (see claimJobs), so they clear the floor by construction.
+func isBookQuality(discCount, level int) bool {
+	return level >= TargetLevel(discCount) || edax.IsFinal(discCount, level)
+}
+
 // handleSubmitJobResult handles POST /api/jobs/result: stores a worker's evaluation and releases its claim.
 func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 	var req jobResultRequest
@@ -163,7 +176,7 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 	savedToDB := false
 
 	if isPriority {
-		if discCount <= book.MaxSavableDiscs {
+		if discCount <= book.MaxSavableDiscs && isBookQuality(discCount, req.Level) {
 			if saveErr := s.repo.SaveEvaluation(r.Context(), normalized, eval); saveErr != nil {
 				if errors.Is(saveErr, db.ErrBoardNotFound) {
 					// Board has no row yet; add one and retry.
@@ -182,7 +195,9 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 				savedToDB = true
 			}
 		}
-		// discCount > MaxSavableDiscs: ephemeral cache is the only record; skip DB entirely.
+		// Ineligible (too many discs, or shallower than the book's target level): the ephemeral
+		// cache is the only record, and the frontend keeps asking one level deeper until a result
+		// that does qualify comes back.
 	} else {
 		// Non-priority path: SaveEvaluation must succeed; ErrBoardNotFound is a real bug here since every
 		// ListLearnable-originated board is guaranteed to already have a row.
