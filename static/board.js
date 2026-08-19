@@ -464,7 +464,7 @@ class OthelloGame {
             }
         } catch (_) {}
         // Fallback so the rest of the code always has a config object. Must stay in step with
-        // internal/api/level.go: a target above what the server is willing to search is one it
+        // internal/api/jobs.go: a target above what the server is willing to search is one it
         // never reaches, so isAtTarget would never come true for those boards.
         if (!this.levelConfig) {
             this.levelConfig = {

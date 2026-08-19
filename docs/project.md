@@ -9,9 +9,10 @@ stored in Postgres, and browsed via a web frontend.
   HTML admin pages (game/analysis, stats, clients). Serves evaluations from
   the DB, with an in-memory minimax cache (`internal/book`) that backfills
   every <12-disc position from the 12-disc evaluations.
-- `cmd/worker` (`internal/worker`, `internal/edax`) — claims jobs from the
-  server, evaluates them with one long-running edax subprocess, submits
-  results, heartbeats. Job claims and worker identity live only in Redis
+- `cmd/worker` (`internal/worker`, `internal/edax`) — claims one job at a
+  time from the server, evaluates it with one long-running edax
+  subprocess, submits the result, heartbeats (each heartbeat refreshes the
+  claim's TTL). Job claims and worker identity live only in Redis
   (TTL keys), never in Postgres.
 - `cmd/loader` (`internal/loader`) — subcommands `seed` (precomputed
   12-disc set, embedded in source), `load` (PGN files), `load-oq`
@@ -29,7 +30,9 @@ stored in Postgres, and browsed via a web frontend.
   depth and confidence follow from disc count + level, see
   `internal/edax.SearchParams`); migrations via golang-migrate
   (`migrations/`), one-shot operator SQL in `scripts/`
-- Redis — job claims, worker heartbeats, stats cache
+- Redis — job claims, worker heartbeats, priority queue, ephemeral
+  analysis results, and the `book_stats` hash (rebuilt from the DB every
+  60s; serves `GET /api/stats` and derives the job floor)
 - edax — external binary; `EDAX_PATH` in `.env` (see `.env.sample`)
 - Frontend — Go `html/template` + vanilla JS/CSS in `static/`, no build step
 - Scripts: `local.sh` (dev stack: compose Postgres/Redis, migrate, seed,
