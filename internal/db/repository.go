@@ -50,10 +50,9 @@ func (r *Repository) AddBoards(ctx context.Context, boards []othello.NormalizedB
 	return err
 }
 
-// AddBoardsInserted inserts boards that don't already have a row, leaving existing rows untouched, and
-// returns the number of rows actually inserted (boards already present are skipped and not counted).
-// Boards are sent via UNNEST rather than one placeholder pair each, to stay under Postgres's parameter
-// limit.
+// AddBoardsInserted inserts boards that don't already have a row and returns the number actually
+// inserted (existing boards are skipped, not counted). Boards are sent via UNNEST rather than one
+// placeholder pair each, to stay under Postgres's parameter limit.
 func (r *Repository) AddBoardsInserted(ctx context.Context, boards []othello.NormalizedBoard) (int, error) {
 	if len(boards) == 0 {
 		return 0, nil
@@ -133,10 +132,9 @@ type BoardEvaluation struct {
 	Evaluation Evaluation
 }
 
-// ListLearnable returns up to limit boards in [minDiscs, maxDiscs] below their target level (leafLevel
-// for leafDiscs, deeperLevel beyond); filtering in SQL keeps learned leafDiscs rows from starving the
-// rest. minDiscs and leafDiscs are independent: minDiscs may be raised above leafDiscs by a caller
-// skipping a prefix it already knows is fully learned, without changing which disc count counts as leaf.
+// ListLearnable returns up to limit boards in [minDiscs, maxDiscs] below their target level
+// (leafLevel for leafDiscs, deeperLevel beyond); filtering in SQL keeps learned leafDiscs rows from
+// starving the rest. minDiscs may be raised above leafDiscs without changing which count is leaf.
 func (r *Repository) ListLearnable(ctx context.Context, minDiscs, maxDiscs, leafDiscs, leafLevel, deeperLevel, limit int) ([]BoardEvaluation, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT position, level, score

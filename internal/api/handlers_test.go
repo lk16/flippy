@@ -37,35 +37,13 @@ func doRequest(t *testing.T, s *Server, method, target string, body any) *httpte
 
 func TestHandleGetJob_MissingWorkerID(t *testing.T) {
 	s := testServer(t)
-	w := doRequest(t, s, http.MethodGet, "/api/jobs?count=1", nil)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestHandleGetJob_MissingCount(t *testing.T) {
-	s := testServer(t)
-	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1", nil)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestHandleGetJob_CountOutOfRange(t *testing.T) {
-	s := testServer(t)
-
-	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1&count=0", nil)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-
-	w = doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1&count=11", nil)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestHandleGetJob_CountNotAnInteger(t *testing.T) {
-	s := testServer(t)
-	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1&count=abc", nil)
+	w := doRequest(t, s, http.MethodGet, "/api/jobs", nil)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestHandleGetJob_NoJobsAvailable(t *testing.T) {
 	s := testServer(t)
-	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1&count=1", nil)
+	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1", nil)
 	require.Equal(t, http.StatusNoContent, w.Code)
 }
 
@@ -74,27 +52,31 @@ func TestHandleGetJob_ReturnsJob(t *testing.T) {
 	board := testBoard(t, 12)
 	require.NoError(t, s.repo.AddBoards(context.Background(), []othello.NormalizedBoard{board}))
 
-	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1&count=1", nil)
+	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1", nil)
 	require.Equal(t, http.StatusOK, w.Code)
 
-	var resp []jobResponse
+	var resp jobResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	require.Len(t, resp, 1)
-	require.Equal(t, board.String(), resp[0].Board)
-	require.Equal(t, TargetLevel(12), resp[0].Level)
+	require.Equal(t, board.String(), resp.Board)
+	require.Equal(t, TargetLevel(12), resp.Level)
 }
 
-func TestHandleGetJob_ReturnsUpToCountJobs(t *testing.T) {
+func TestHandleGetJob_RepeatedRequestsReturnDistinctJobs(t *testing.T) {
 	s := testServer(t)
-	boards := testDistinctBoards(t, 12, 3)
+	boards := testDistinctBoards(t, 12, 2)
 	require.NoError(t, s.repo.AddBoards(context.Background(), boards))
 
-	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1&count=2", nil)
+	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1", nil)
 	require.Equal(t, http.StatusOK, w.Code)
+	var first jobResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &first))
 
-	var resp []jobResponse
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	require.Len(t, resp, 2)
+	w = doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+	var second jobResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &second))
+
+	require.NotEqual(t, first.Board, second.Board)
 }
 
 func TestHandleSubmitJobResult_Success(t *testing.T) {
@@ -108,14 +90,14 @@ func TestHandleSubmitJobResult_Success(t *testing.T) {
 	require.True(t, claimed)
 
 	reqBody := jobResultRequest{
-		WorkerID: "w1", Board: board.String(), Level: 24, Depth: 24, Confidence: 73, Score: 4,
+		WorkerID: "w1", Board: board.String(), Level: TargetLevel(12), Score: 4,
 	}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	eval, err := s.repo.GetBoard(ctx, board.Board())
 	require.NoError(t, err)
-	require.Equal(t, db.Evaluation{Level: 24, Score: 4}, eval)
+	require.Equal(t, db.Evaluation{Level: TargetLevel(12), Score: 4}, eval)
 
 	// Claim must be released: another worker can now claim the same board.
 	claimed, err = s.tryClaim(ctx, board.String(), "w2")
@@ -145,7 +127,7 @@ func TestHandleSubmitJobResult_RebuildsMinimaxCache(t *testing.T) {
 	// leaf it depends on is learned.
 	for _, child := range normalizedChildren {
 		reqBody := jobResultRequest{
-			WorkerID: "w1", Board: child.String(), Level: 24, Depth: 24, Confidence: 73, Score: 1,
+			WorkerID: "w1", Board: child.String(), Level: TargetLevel(book.LeafDiscs), Score: 1,
 		}
 		w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -218,22 +200,56 @@ func TestHandleSubmitJobResult_AcceptsMismatchedSearchParams(t *testing.T) {
 	board := testBoard(t, 12)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
 
-	// A level-24 search of a 12-disc board is 24@73%, not 30@98%.
-	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: 30, Confidence: 98, Score: 4}
+	// A level-40 search of a 12-disc board is not 30@98%.
+	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: TargetLevel(12), Depth: 30, Confidence: 98, Score: 4}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	stored, err := s.repo.GetBoard(ctx, board.Board())
 	require.NoError(t, err)
-	require.Equal(t, db.Evaluation{Level: 24, Score: 4}, stored)
+	require.Equal(t, db.Evaluation{Level: TargetLevel(12), Score: 4}, stored)
 }
 
 func TestHandleSubmitJobResult_BoardNotFound(t *testing.T) {
 	s := testServer(t)
 	board := testBoard(t, 12)
-	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: 24, Confidence: 73, Score: 0}
+	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: TargetLevel(12), Score: 0}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// TestHandleSubmitJobResult_NonPriorityBelowTargetNotPersisted covers the API-wide book-quality
+// floor: a below-target result is accepted (cached ephemerally, claim released) but never saved,
+// even on the non-priority path.
+func TestHandleSubmitJobResult_NonPriorityBelowTargetNotPersisted(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+	board := testBoard(t, 12)
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+
+	claimed, err := s.tryClaim(ctx, board.String(), "w1")
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	require.Less(t, 24, TargetLevel(12))
+	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Score: 4}
+	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	eval, err := s.repo.GetBoard(ctx, board.Board())
+	require.NoError(t, err)
+	require.Equal(t, db.Evaluation{}, eval, "row stays unevaluated")
+
+	// The result is still served back from the ephemeral analysis cache.
+	cached, ok, err := s.getAnalysisResult(ctx, board.String())
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, 4, cached.Score)
+
+	// The claim was released.
+	claimed, err = s.tryClaim(ctx, board.String(), "w2")
+	require.NoError(t, err)
+	require.True(t, claimed)
 }
 
 func TestHandleReleaseJob_AllowsAnotherWorkerToClaim(t *testing.T) {
@@ -330,11 +346,7 @@ func TestHandleGetBoard_NotFound(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
-// TestHandleGetBoard_NotLearnedYet covers a board that has a row (e.g. from
-// a book import or the precomputed 12-disc set) but hasn't been learned by
-// a worker yet: its Evaluation is still the zero value, which must be
-// reported the same as "not found" rather than as a real (and misleadingly
-// draw-like) score of 0.
+// A board with a row but no evaluation yet must read as "not found", not as a real score of 0.
 func TestHandleGetBoard_NotLearnedYet(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
@@ -393,11 +405,8 @@ func TestHandleGetBoard_FallsBackToMinimaxCache(t *testing.T) {
 	require.Equal(t, score, resp.Score)
 }
 
-// TestHandleGetBoard_ResolvesForcedPass covers a board where the player to
-// move has no legal move: such a board is never stored directly (see
-// loader.ExtractBoards), so its evaluation must be derived from the stored
-// evaluation of the position after the forced pass, negated back to the
-// original player's perspective.
+// A forced-pass board is never stored directly; its evaluation is the post-pass board's stored
+// evaluation, negated.
 func TestHandleGetBoard_ResolvesForcedPass(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
@@ -423,10 +432,7 @@ func TestHandleGetBoard_ResolvesForcedPass(t *testing.T) {
 		resp)
 }
 
-// TestHandleGetBoard_GameOver covers a board where neither player has a
-// legal move: the forced pass doesn't lead anywhere learnable either, so
-// the actual final score is returned instead of falling through to "not
-// found".
+// A game-over board returns its actual final score instead of "not found".
 func TestHandleGetBoard_GameOver(t *testing.T) {
 	s := testServer(t)
 
@@ -472,6 +478,8 @@ func TestHandleStats_Empty(t *testing.T) {
 	require.JSONEq(t, `[]`, w.Body.String())
 }
 
+// TestHandleStats_ReturnsCounts covers the DB fallback: with no book_stats hash in Redis (first
+// boot, Redis flushed), the stats are queried directly.
 func TestHandleStats_ReturnsCounts(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
@@ -484,6 +492,27 @@ func TestHandleStats_ReturnsCounts(t *testing.T) {
 	var entries []statEntry
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &entries))
 	require.Contains(t, entries, statEntry{DiscCount: 12, Count: 1})
+}
+
+// TestHandleStats_ServesFromBookStatsHash proves the endpoint reads the rebuilt hash rather than the
+// DB: a board added after the rebuild is not reported.
+func TestHandleStats_ServesFromBookStatsHash(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	board12 := testBoard(t, 12)
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board12}))
+	require.NoError(t, s.rebuildBookStats(ctx))
+
+	board13 := testBoard(t, 13)
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board13}))
+
+	w := doRequest(t, s, http.MethodGet, "/api/stats", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var entries []statEntry
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &entries))
+	require.Equal(t, []statEntry{{DiscCount: 12, Count: 1}}, entries)
 }
 
 // TestHandleStats_ReportsDerivedSearchParams checks that a learned board is reported by the search
@@ -530,7 +559,7 @@ func TestHandleListWorkers_Empty(t *testing.T) {
 
 func TestHandleListWorkers_ReturnsActiveWorkers(t *testing.T) {
 	s := testServer(t)
-	require.NoError(t, s.heartbeat(context.Background(), "w1", "host-1", "commit-1"))
+	require.NoError(t, s.heartbeat(context.Background(), "w1", "host-1", "commit-1", ""))
 
 	w := doRequest(t, s, http.MethodGet, "/api/workers", nil)
 	require.Equal(t, http.StatusOK, w.Code)

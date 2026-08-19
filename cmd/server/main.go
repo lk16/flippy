@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -35,9 +34,8 @@ func (r *statusRecorder) WriteHeader(status int) {
 	r.ResponseWriter.WriteHeader(status)
 }
 
-// Hijack lets the wrapped writer be used for connection upgrades (the "/ws"
-// WebSocket endpoint). Without it, embedding the http.ResponseWriter interface
-// hides the underlying Hijacker, so websocket.Accept fails with a 501.
+// Hijack exposes the underlying Hijacker for the "/ws" connection upgrade; without it,
+// websocket.Accept fails with a 501.
 func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	hijacker, ok := r.ResponseWriter.(http.Hijacker)
 	if !ok {
@@ -59,12 +57,7 @@ func logRequests(next http.Handler) http.Handler {
 
 		next.ServeHTTP(rec, r)
 
-		slog.Info("http request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", rec.status,
-			"duration", time.Since(start),
-		)
+		log.Printf("%s %s %d %.1fms", r.Method, r.URL.Path, rec.status, float64(time.Since(start).Microseconds())/1000)
 	})
 }
 
@@ -113,6 +106,7 @@ func main() {
 	log.Printf("minimax cache built: %d boards", cache.Len())
 
 	apiServer := api.NewServer(repo, redisClient, cache)
+	go apiServer.RunBookStatsRefresh(ctx)
 
 	webServer, err := web.NewServer()
 	if err != nil {

@@ -8,9 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// encodeWTBRecord builds a single 68-byte WTHOR game record for moves,
-// encoding each move as row*10+col with row/col 1-based, matching the
-// format ParseWTB decodes.
+// encodeWTBRecord builds a single 68-byte WTHOR game record, encoding each move as row*10+col
+// with row/col 1-based, matching the format ParseWTB decodes.
 func encodeWTBRecord(moves []int) []byte {
 	record := make([]byte, wtbGameRecordSize)
 
@@ -45,9 +44,8 @@ func TestParseWTB_RoundTrip(t *testing.T) {
 	require.Len(t, games, len(gamesMoves))
 
 	for i, moves := range gamesMoves {
-		// Build the expected game the same way ParseWTB does internally, so
-		// this only tests the WTB byte encode/decode round-trip and not the
-		// (separately tested) auto-pass logic in NewGameFromMoves.
+		// Build the expected game the same way ParseWTB does, so this only tests the byte
+		// round-trip and not the separately tested auto-pass logic.
 		want, err := NewGameFromMoves(moves)
 		require.NoError(t, err)
 		require.Equal(t, want.Moves(), games[i].Moves())
@@ -77,8 +75,7 @@ func TestParseWTBFile_NotFound(t *testing.T) {
 }
 
 func TestParseWTBFile_RealArchive(t *testing.T) {
-	// A small real WTHOR archive, used as a smoke test: it should parse
-	// without error and produce the number of games declared in its header.
+	// Smoke test against a small real WTHOR archive.
 	games, err := ParseWTBFile("testdata/wtb/WTH_1977.wtb")
 	require.NoError(t, err)
 	require.Len(t, games, 12)
@@ -88,10 +85,8 @@ func TestParseWTBFile_RealArchive(t *testing.T) {
 	}
 }
 
-// TestParseWTB_HugeGameCountDoesNotOverAllocate covers a corrupt/hostile header
-// claiming far more games than the data holds: parsing must fail cleanly on the
-// first missing record rather than pre-allocating a slice sized to the header's
-// count (which for MaxUint32 would attempt a many-gigabyte allocation).
+// TestParseWTB_HugeGameCountDoesNotOverAllocate covers a hostile header claiming more games than
+// the data holds: parsing must fail cleanly rather than pre-allocate from the header's count.
 func TestParseWTB_HugeGameCountDoesNotOverAllocate(t *testing.T) {
 	data := make([]byte, wtbHeaderSize)
 	binary.LittleEndian.PutUint32(data[4:8], math.MaxUint32)

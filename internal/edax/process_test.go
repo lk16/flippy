@@ -72,11 +72,8 @@ func TestProcess_Evaluate_BinaryNotFound(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestProcess_Evaluate_FailedStartDoesNotLeakFDs guards the invariant that
-// repeated failing Evaluate calls don't accumulate open file descriptors.
-// (os/exec already closes the parent pipes when Start itself fails; the
-// explicit closes in ensureStarted additionally cover a StdoutPipe failure
-// after StdinPipe succeeded.)
+// TestProcess_Evaluate_FailedStartDoesNotLeakFDs guards that repeated failing Evaluate calls
+// don't accumulate open file descriptors.
 func TestProcess_Evaluate_FailedStartDoesNotLeakFDs(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("open-fd count is read from /proc, which is Linux-only")
@@ -95,8 +92,7 @@ func TestProcess_Evaluate_FailedStartDoesNotLeakFDs(t *testing.T) {
 	}
 	after := openFDCount(t)
 
-	// Allow a little slack for unrelated runtime activity, but 50 leaked calls
-	// (2 descriptors each) would blow well past this.
+	// Slack for unrelated runtime activity; 50 leaked calls (2 fds each) would blow well past it.
 	require.LessOrEqual(t, after-before, 5, "open file descriptors grew from %d to %d", before, after)
 }
 
@@ -109,11 +105,8 @@ func openFDCount(t *testing.T) int {
 	return len(entries)
 }
 
-// TestProcess_EnsureStarted_FailedRestartClearsStaleState covers the restart
-// path: when a level change kills the running process but starting the
-// replacement then fails, the Process must not keep pointing at the killed
-// process and its closed pipes (which the fast path would otherwise hand back
-// to the next same-level Evaluate, wedging it permanently).
+// TestProcess_EnsureStarted_FailedRestartClearsStaleState covers a restart whose replacement fails
+// to start: stale state must be cleared or the next same-level Evaluate would reuse dead pipes.
 func TestProcess_EnsureStarted_FailedRestartClearsStaleState(t *testing.T) {
 	prev := exec.Command("sleep", "60")
 	require.NoError(t, prev.Start())
@@ -141,8 +134,6 @@ func TestProcess_EnsureStarted_FailedRestartClearsStaleState(t *testing.T) {
 	_, _, err = p.ensureStarted(8)
 	require.Error(t, err)
 
-	// State must be cleared so the next Evaluate starts fresh instead of reusing
-	// the dead process's pipes.
 	require.Nil(t, p.cmd)
 	require.Zero(t, p.level)
 	require.Nil(t, p.stdin)
@@ -206,8 +197,7 @@ func TestProcess_Close_KillsProcess(t *testing.T) {
 
 	require.NoError(t, p.Close())
 
-	// The process should be gone: signal 0 (existence check only) should
-	// report an error.
+	// Signal 0 (existence check only) should now report an error.
 	err = proc.Signal(syscall.Signal(0))
 	require.Error(t, err)
 }

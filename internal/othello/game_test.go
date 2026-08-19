@@ -35,9 +35,8 @@ func TestGame_PushMove_Invalid(t *testing.T) {
 }
 
 func TestGame_PushMove_AutoPass(t *testing.T) {
-	// This sequence of otherwise-legal moves leads to a board where the
-	// player to move (black) has no legal move but white does, so pushing
-	// the final move should auto-insert a pass for black.
+	// This sequence reaches a board where black (to move) has no legal move but white does, so
+	// pushing the final move should auto-insert a pass.
 	moves := []int{19, 18, 17, 9, 1, 0, 37, 43, 51, 2}
 
 	game := NewGame()
@@ -52,8 +51,7 @@ func TestGame_PushMove_AutoPass(t *testing.T) {
 	recorded := game.Moves()
 	require.Equal(t, PassMove, recorded[len(recorded)-1], "a pass should have been auto-inserted")
 
-	// The board right after the regular move (before the auto-inserted
-	// pass) has no legal move for whoever's turn it is.
+	// The board right after the regular move (before the pass) has no legal move.
 	require.False(t, game.BoardAt(len(recorded)-1).HasMoves())
 
 	// After the pass, it's the other player's turn, who does have moves.
@@ -69,11 +67,8 @@ func TestGame_PushMove_NoDoublePass(t *testing.T) {
 }
 
 func TestGame_PushMove_ExplicitPass(t *testing.T) {
-	// This sequence leads to a board where the player to move has no legal
-	// move. The game is built directly from these boards (bypassing
-	// PushMove) so that no pass has been auto-inserted yet, letting us test
-	// that pushing PassMove directly (rather than relying on auto-insert
-	// right after the regular move that necessitates it) is also accepted.
+	// The game is built directly from boards (bypassing PushMove) so no pass has been
+	// auto-inserted yet, testing that pushing PassMove explicitly is also accepted.
 	moves := []int{19, 18, 17, 9, 1, 0, 37, 43, 51, 2}
 
 	boards := make([]Board, len(moves)+1)
@@ -109,9 +104,8 @@ func TestGame_PopMove(t *testing.T) {
 }
 
 func TestGame_PopMove_LoneTrailingPass(t *testing.T) {
-	// A game that starts on a board with no legal move and whose only pushed
-	// move is a pass: popping it must remove just that one pass, not try to
-	// also remove a (nonexistent) preceding move and slice out of bounds.
+	// The only pushed move is a pass: popping must remove just that pass, not also a
+	// (nonexistent) preceding move and slice out of bounds.
 	board, err := NewBoard(0xFFFFFFFFFFFFFFFF, 0, Black)
 	require.NoError(t, err)
 
@@ -125,9 +119,8 @@ func TestGame_PopMove_LoneTrailingPass(t *testing.T) {
 }
 
 func TestGame_PopMove_RemovesTrailingPass(t *testing.T) {
-	// PopMove's trailing-pass handling only looks at move values and slice
-	// lengths, so the board cache content doesn't matter here as long as
-	// its length tracks moves (one more entry, for the start board).
+	// PopMove only inspects move values and slice lengths, so the boards' content doesn't
+	// matter as long as the slice length tracks moves.
 	game := &Game{
 		moves:  []int{19, 18, PassMove},
 		boards: make([]Board, 4),

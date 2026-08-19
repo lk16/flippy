@@ -17,9 +17,6 @@ const MaxLevel = 60
 // discCount discs. Direct port of search_global_init (search.c:161-346), the same mapping
 // wasm/edax-eval/src/search.rs ports as depth_and_selectivity; confidence is the selectivity
 // percentage edax prints, so 100 means full-width rather than "solved".
-//
-// The pair is what the boards table used to store per row: it is fully determined by
-// (discCount, level), so the columns were dropped and this is computed on read instead.
 func SearchParams(discCount, level int) (depth, confidence int) {
 	empties := boardSquares - discCount
 

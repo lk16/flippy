@@ -21,27 +21,19 @@
 // from Edax 4.5.1 (https://github.com/abulmo/edax-reversi), also licensed
 // under GPLv3.
 
-//! Weights extraction/transform tool (`TASKS.md` Task 2).
+//! Weights extraction/transform tool: reads Edax's `eval.dat`, validates its header, slices out
+//! the packed weight blocks for plies 2..53 (the only range `eval_open` loads), transforms them
+//! (see `weights_transform`), gzip-compresses, and writes the blob plus a manifest.
 //!
-//! Reads Edax's `eval.dat`, validates its header, slices out the packed
-//! weight blocks for plies 2..53 (the only range `eval_open` ever loads),
-//! transforms the slice (see `weights_transform`), gzip-compresses it, and
-//! writes the compressed blob plus a manifest to an output directory.
-//!
-//! `eval.dat` is a 13 MB binary artifact external to this repo (see
-//! `TASKS.md` decision on licensing/distribution) and is not committed; this
-//! tool's output is regenerated from a local Edax checkout rather than
-//! checked in either. To run it:
+//! `eval.dat` is a 13 MB external artifact, not committed; neither is this tool's output. To run:
 //!
 //! ```text
 //! EDAX_HOST_DIR=/path/to/edax-reversi \
 //!     cargo run --manifest-path wasm/edax-eval/Cargo.toml --bin extract_weights -- [output_dir]
 //! ```
 //!
-//! `EDAX_HOST_DIR` is the same env var `sandbox.sh`/`docker-compose.yml` use
-//! elsewhere in this repo for the edax-reversi checkout; `eval.dat` is read
-//! from `$EDAX_HOST_DIR/data/eval.dat`. Set `EVAL_DAT_PATH` instead to point
-//! directly at an `eval.dat` file outside that layout.
+//! `eval.dat` is read from `$EDAX_HOST_DIR/data/eval.dat`; set `EVAL_DAT_PATH` to point directly
+//! at an `eval.dat` outside that layout.
 
 use std::env;
 use std::fs;
@@ -87,8 +79,7 @@ fn parse_header(bytes: &[u8]) -> Result<Header, String> {
     let magic1 = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
     let magic2 = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
 
-    // Mirrors eval.c:659's validation exactly: accept either the normal or byte-swapped magic
-    // pairing, fail loudly on anything else rather than guessing the format.
+    // Mirrors eval.c:659's validation: accept normal or byte-swapped magic, fail loudly on else.
     let normal = magic1 == EDAX_MAGIC || magic2 == EVAL_MAGIC;
     let swapped = magic1 == XADE_MAGIC || magic2 == LAVE_MAGIC;
     if !normal && !swapped {
@@ -116,9 +107,8 @@ fn parse_header(bytes: &[u8]) -> Result<Header, String> {
     })
 }
 
-/// Locates `eval.dat` from `EVAL_DAT_PATH` (direct path) or `EDAX_HOST_DIR` (edax-reversi
-/// checkout root, same env var `sandbox.sh`/`docker-compose.yml` use for it elsewhere in this
-/// repo), in that priority order.
+/// Locates `eval.dat` from `EVAL_DAT_PATH` (direct path) or `EDAX_HOST_DIR` (checkout root), in
+/// that priority order.
 fn locate_eval_dat() -> Result<PathBuf, String> {
     if let Ok(path) = env::var("EVAL_DAT_PATH") {
         return Ok(PathBuf::from(path));
@@ -133,8 +123,7 @@ fn locate_eval_dat() -> Result<PathBuf, String> {
     )
 }
 
-/// FNV-1a 64-bit hash, used only to fingerprint the extracted raw slice in the manifest (not a
-/// security checksum, just a build-artifact identity check).
+/// FNV-1a 64-bit hash, fingerprinting the raw slice in the manifest (not a security checksum).
 fn fnv1a64(data: &[u8]) -> u64 {
     const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -143,9 +132,8 @@ fn fnv1a64(data: &[u8]) -> u64 {
     })
 }
 
-/// Parses the header and slices out the ply-major raw weights (plies `FIRST_PLY..EVAL_N_PLY`) from
-/// a full `eval.dat` file buffer. Pure function, split out from `run()` so tests can exercise it
-/// directly against the real file without touching the filesystem for output.
+/// Parses the header and slices the ply-major raw weights (plies `FIRST_PLY..EVAL_N_PLY`) from a
+/// full `eval.dat` buffer.
 fn extract_raw_slice(file: &[u8]) -> Result<(Header, Vec<i16>), String> {
     assert_eq!(RAW_N_W, N_W, "RAW_N_W must match weights_transform::N_W");
     assert_eq!(
@@ -165,8 +153,7 @@ fn extract_raw_slice(file: &[u8]) -> Result<(Header, Vec<i16>), String> {
         ));
     }
 
-    // Ply-major raw slice: plies FIRST_PLY..EVAL_N_PLY, each RAW_N_W shorts, byte-swapped if the
-    // file was written on a different-endian machine (eval.c:665-666).
+    // Byte-swapped if the file was written on a different-endian machine (eval.c:665-666).
     let mut raw = vec![0i16; N_W * N_PLIES];
     for ply in FIRST_PLY..EVAL_N_PLY {
         let block_start = HEADER_LEN + ply * block_bytes;
@@ -320,9 +307,7 @@ mod tests {
         assert_ne!(fnv1a64(b"a"), fnv1a64(b"b"));
     }
 
-    /// Mirrors the EDAX_PATH-gated skip pattern in `internal/edax/process_test.go`: runs only
-    /// when a real eval.dat is available, skips (doesn't fail) otherwise, so it needs no separate
-    /// CI exclusion.
+    /// Runs only when a real eval.dat is available; skips (doesn't fail) otherwise.
     #[test]
     fn extracts_and_round_trips_the_real_eval_dat() {
         let Ok(eval_dat_path) = locate_eval_dat() else {
@@ -336,9 +321,7 @@ mod tests {
 
         let (header, raw) = extract_raw_slice(&file).expect("real eval.dat should parse");
 
-        // These are facts read directly from the real file (TASKS.md Task 2 "Correction" note):
-        // format version 3.2.5, not byte-swapped, exactly the raw slice size the transform table
-        // in TASKS.md was measured against.
+        // Facts read directly from the real file: version 3.2.5, not byte-swapped.
         assert!(!header.byte_swapped);
         assert_eq!((header.version, header.release, header.build), (3, 2, 5));
         assert_eq!(raw.len(), N_W * N_PLIES);

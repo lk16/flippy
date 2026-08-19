@@ -21,21 +21,11 @@
 // from Edax 4.5.1 (https://github.com/abulmo/edax-reversi), also licensed
 // under GPLv3.
 
-//! Evaluation feature computation and leaf scoring (`TASKS.md` Task 5):
-//! ports `accumlate_eval`/`search_eval_0` (`midgame.c:34-121`) and the
-//! feature-from-board computation `eval_set` does in its portable path
-//! (`eval.c:757-770`).
-//!
-//! Edax computes features incrementally (`eval_update`/`eval_update_leaf`,
-//! `eval.c:782-908`), tracking a running `Eval` struct move by move to
-//! avoid recomputing all 46 features from the full board at every leaf.
-//! This port now does the same via [`init_features`] (once per search
-//! root), [`update_features`]/[`undo_features`] (at each interior node),
-//! and [`eval_from_features`] at depth-0 leaves. The update cost per move
-//! is O(discs_changed × avg_features_per_square ≈ 5 × 5.6 = 28 ops)
-//! versus O(437) for a full recompute, reducing eval cost by roughly 15×
-//! per leaf visit and yielding a ~2× speedup on the eval fraction of total
-//! search time in midgame positions.
+//! Evaluation feature computation and leaf scoring: ports `accumlate_eval`/`search_eval_0`
+//! (`midgame.c:34-121`) and `eval_set`'s portable feature computation (`eval.c:757-770`).
+//! Features are tracked incrementally — [`init_features`] once per search root,
+//! [`update_features`]/[`undo_features`] per move, [`eval_from_features`] at depth-0 leaves —
+//! mirroring Edax's `eval_update`/`eval_update_leaf` (`eval.c:782-908`).
 
 use crate::board::Board;
 use crate::weights::EvalWeight;
@@ -47,10 +37,8 @@ const EVAL_N_PLY: i32 = 54;
 const SCORE_MIN: i32 = -64;
 const SCORE_MAX: i32 = 64;
 
-/// Which shared weight array a feature's raw base-3 state indexes into (`eval.c`'s `accumlate_eval`
-/// hardcodes this grouping via fixed `f[]` index ranges; named here instead of index ranges since
-/// this port computes features into a plain `[i32; 46]` rather than replicating the exact packed
-/// union layout).
+/// Which shared weight array a feature indexes into; `accumlate_eval` hardcodes this grouping
+/// via fixed `f[]` index ranges, named here instead.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum WeightGroup {
     C9,
@@ -61,22 +49,17 @@ enum WeightGroup {
     S7654,
 }
 
-/// One of the 46 board features `accumlate_eval` sums (`EVAL_F2X` minus its trailing `PASS`
-/// sentinel entry, which `accumlate_eval` never reads). `squares` are listed in the exact order
-/// Edax encodes them in (most-significant base-3 digit first) — order is significant, not just
-/// membership, since it determines the feature's raw value. `offset` shifts a feature's raw
-/// `0..3^n-1` value into its sub-region of a shared weight array (`S8x4`/`S7654` each pack 4
-/// features into one array; `C9`/`C10`/`S100`/`S101` don't share, hence `offset: 0` throughout).
+/// One of the 46 features `accumlate_eval` sums (`EVAL_F2X` minus its `PASS` sentinel).
+/// `squares` order is significant (most-significant base-3 digit first); `offset` shifts the raw
+/// value into its sub-region of a shared weight array (`S8x4`/`S7654` pack 4 features each).
 struct Feature {
     squares: &'static [u32],
     group: WeightGroup,
     offset: i32,
 }
 
-/// Direct port of `EVAL_F2X` (`eval.c:42-97`) plus `EVAL_OFFSET` (`eval.c:457-459`) merged
-/// together, square names translated to indices (`A1=0 .. H8=63`, matching `crate::board`'s
-/// convention, which is Edax's own). Order (corners/C9, edges/C10, S100, S101, rows-cols/S8x4,
-/// diagonals-4..7/S7654) matches `accumlate_eval`'s hardcoded `f[]` groupings exactly.
+/// Port of `EVAL_F2X` (`eval.c:42-97`) merged with `EVAL_OFFSET` (`eval.c:457-459`), squares as
+/// indices (`A1=0 .. H8=63`); order matches `accumlate_eval`'s hardcoded `f[]` groupings.
 #[rustfmt::skip]
 const FEATURES: [Feature; 46] = [
     Feature { squares: &[0, 1, 8, 9, 2, 16, 10, 17, 18], group: WeightGroup::C9, offset: 0 },
@@ -273,17 +256,9 @@ const SQ_FEAT_WEIGHT: [[i32; 7]; 64] = [
     [6561, 243,    3,    3,     1,     1,    1], // sq=63
 ];
 
-/// Computes all 46 feature values for `b`, each a base-3 number (most-significant digit = the
-/// feature's first listed square) of that square's color (0 = player, 1 = opponent, 2 = empty),
-/// offset into its weight array's sub-region. Direct port of `eval_set`'s portable per-feature
-/// loop (`eval.c:763-769`) — but unlike `eval_set`, which takes the *pre-parity-swapped* board
-/// (`eval_set`'s own `b`, see [`search_eval_0`]), this takes whatever board it's given as-is;
-/// the caller is responsible for that swap.
-///
-/// A flat 64-entry color table is built from the bitboards once per call (O(popcount) init),
-/// replacing the branch-per-square pattern of the original `board_get_square_color` calls
-/// (`board.c:1033-1037`) in the feature loop. The inner Horner loop becomes branch-free array
-/// reads, which are cheaper and more predictable in the WASM scalar execution model.
+/// All 46 feature values for `b`, each a base-3 number of square colors (0 = player,
+/// 1 = opponent, 2 = empty) plus offset. Port of `eval_set`'s per-feature loop
+/// (`eval.c:763-769`); takes the board as-is — the caller does the parity swap.
 fn compute_features(b: &Board) -> [i32; 46] {
     // Default to 2 (empty); overwrite only occupied squares.
     let mut colors = [2i32; 64];
@@ -309,11 +284,8 @@ fn compute_features(b: &Board) -> [i32; 46] {
     f
 }
 
-/// Sums the 46 features' weights for the ply-appropriate `EvalWeight` table, plus its constant
-/// `s0` term. Direct port of `accumlate_eval` (`midgame.c:34-64`, portable non-AVX2 branch).
-///
-/// `weights` is indexed exactly as [`crate::weights::unpack`] returns it: `weights[0]` is real ply
-/// 2, `weights[weights.len() - 1]` is real ply `EVAL_N_PLY - 1`.
+/// Sums the 46 features' weights plus the constant `s0`. Port of `accumlate_eval`
+/// (`midgame.c:34-64`, portable branch). `weights[0]` is real ply 2 ([`crate::weights::unpack`]).
 fn accumulate_eval(ply: i32, f: &[i32; 46], weights: &[EvalWeight]) -> i32 {
     let mut ply = ply;
     if ply >= EVAL_N_PLY {
@@ -340,16 +312,9 @@ fn accumulate_eval(ply: i32, f: &[i32; 46], weights: &[EvalWeight]) -> i32 {
     sum + w.s0 as i32
 }
 
-/// Initialises feature state for the root of an incremental search. Applies the same parity swap
-/// as `search_eval_0` so the feature convention (which physical color is "player" = 0) is fixed
-/// for the whole search tree: when `n_empties` is even, `board.player` = color 0; when odd,
-/// `board.opponent` = color 0 (because those are the same physical color after alternating moves).
-/// This is a parity-based *relabeling* of which physical color counts as feature-color-0 for this
-/// ply -- there is exactly one `EVAL_WEIGHT` table per ply (`weights::EvalWeight`), not separate
-/// tables for black-to-move vs. white-to-move -- matching Edax's own `eval_set` (`eval.c:757-762`):
-/// `if (eval->n_empties & 1) { b.player = board->opponent; ... }` before computing features, for
-/// exactly this reason (the weight table is trained per-ply against a fixed "color 0" convention,
-/// not a naively mover-relative one).
+/// Root feature state for an incremental search. Applies `eval_set`'s parity swap
+/// (`eval.c:757-762`): odd `n_empties` swaps which side is feature color 0, because the per-ply
+/// weight tables are trained against a fixed color convention, not a mover-relative one.
 pub(crate) fn init_features(board: &Board, n_empties: i32) -> [i32; 46] {
     let b = if n_empties & 1 != 0 {
         Board {
@@ -362,21 +327,10 @@ pub(crate) fn init_features(board: &Board, n_empties: i32) -> [i32; 46] {
     compute_features(&b)
 }
 
-/// Applies the incremental feature delta for a move that placed a disc at `sq` and flipped the
-/// discs in `flipped`. `mover_is_eval_player` is `n_empties % 2 == 0` at the node making the
-/// move (i.e. the current mover maps to feature color 0 when true, color 1 when false).
-///
-/// Delta derivation: placed square changes 2 → placed_color; flipped squares change
-/// opp_color → placed_color. With mover=color 0: placed_color=0, opp_color=1 → placed delta=-2,
-/// flip delta=-1. With mover=color 1: placed_color=1, opp_color=0 → placed delta=-1, flip delta=+1.
-///
-/// Edax computes this via two separately-coded functions instead, `eval_update_0`/`eval_update_1`
-/// (`eval.c:782-876`), dispatched on `eval->n_empties & 1` rather than branching on a parameter;
-/// their bodies differ in exactly these same sign/magnitude constants (`eval_update_0`:
-/// placed `-2x`/flipped `-1x`, matching `mover_is_eval_player = true`; `eval_update_1`: placed
-/// `-1x`/flipped `+1x`, matching `false`). Both approaches branch once per move either way (Edax
-/// picks a function, this picks two constants), so there's no extra per-square branching cost to
-/// sharing one loop here.
+/// Incremental feature delta for a move placing a disc at `sq` and flipping `flipped`;
+/// `mover_is_eval_player` is `n_empties % 2 == 0` at the moving node. Deltas match
+/// `eval_update_0`/`eval_update_1` (`eval.c:782-876`): mover = color 0 → placed -2, flipped -1;
+/// mover = color 1 → placed -1, flipped +1.
 pub(crate) fn update_features(
     features: &mut [i32; 46],
     sq: u32,
@@ -450,21 +404,15 @@ pub(crate) fn eval_from_features(
     score.clamp(SCORE_MIN + 1, SCORE_MAX - 1)
 }
 
-/// Evaluates `board` (mover-relative: `board.player` is the side to move) with the trained
-/// evaluation function, as Edax's `search_eval_0` does (`midgame.c:105-121`) for a leaf reached by
-/// exhausting the search depth (as opposed to solving to the end of the game, whose leaves are
-/// scored by exact disc count instead — that's `crate::search`'s concern, Task 6).
-///
-/// `weights` must be [`crate::weights::unpack`]'s output for the real 52-ply table (`n_plies =
-/// crate::weights_transform::N_PLIES`); a shorter slice is a caller bug, not a runtime input to
-/// validate (this crate ships exactly one weights blob).
+/// Evaluates `board` (mover-relative) with the trained evaluation, as `search_eval_0` does
+/// (`midgame.c:105-121`) at a depth-exhausted leaf. `weights` must be
+/// [`crate::weights::unpack`]'s output for the full 52-ply table; a shorter slice is a caller bug.
 pub fn search_eval_0(board: &Board, weights: &[EvalWeight]) -> i32 {
     let n_empties = 64 - (board.player | board.opponent).count_ones() as i32;
     let ply = 60 - n_empties;
 
-    // eval_set (eval.c:757-761): features are always encoded for a *fixed* color convention
-    // across plies (matching which of P[0]/P[1] crate::weights::unpack used for this ply), not
-    // naively mover-relative -- odd n_empties swaps which side is treated as "player".
+    // eval_set (eval.c:757-761): odd n_empties swaps which side is "player" — features use a
+    // fixed per-ply color convention, not a mover-relative one.
     let b = if n_empties & 1 != 0 {
         Board {
             player: board.opponent,
@@ -484,19 +432,14 @@ pub fn search_eval_0(board: &Board, weights: &[EvalWeight]) -> i32 {
     }
     score /= 128;
 
-    // Edax clamps with two sequential ifs (midgame.c:118-119); .clamp() is equivalent here since
-    // SCORE_MIN + 1 < SCORE_MAX - 1 always holds (clippy::manual_clamp).
+    // Edax clamps with two sequential ifs (midgame.c:118-119); .clamp() is equivalent.
     score.clamp(SCORE_MIN + 1, SCORE_MAX - 1)
 }
 
-/// Direct port of `eval_sigma` (`eval.c:948-956`): the estimated standard deviation of the
-/// search error as a function of the position's emptiness, search depth, and ProbCut shallow
-/// depth. Used by ProbCut (`search_probcut`, Task 15) to size the null-window probe; a larger
-/// sigma means a wider probe window (less aggressive pruning).
+/// Port of `eval_sigma` (`eval.c:948-956`): estimated standard deviation of the search error,
+/// used by ProbCut to size the null-window probe.
 pub(crate) fn eval_sigma(n_empty: i32, depth: i32, probcut_depth: i32) -> f64 {
-    // Linear-combination coefficients from eval_open (eval.c:705-706).
-    // The C source names the quadratic coefficients with lowercase (EVAL_a/b/c vs EVAL_A/B/C)
-    // to distinguish the two sets; this port uses LIN_/QUAD_ prefixes instead.
+    // Coefficients from eval_open (eval.c:705-706); LIN_/QUAD_ replace C's EVAL_a/EVAL_A naming.
     const LIN_A: f64 = -0.10026799;
     const LIN_B: f64 = 0.31027733;
     const LIN_C: f64 = -0.57772603;
@@ -513,24 +456,16 @@ mod tests {
     use crate::board::START;
     use crate::weights_transform::{N_PLIES, N_W};
 
-    /// Spot-checks `eval_sigma` against pre-computed reference values from the formula in
-    /// `eval.c:948-956` with constants from `eval.c:705-706`. Reference values computed by
-    /// substituting into the two-step formula by hand; any transcription error in the constants
-    /// would produce a result outside the 1e-9 tolerance.
+    /// Spot-checks `eval_sigma` against reference values hand-substituted into the formula
+    /// (`eval.c:948-956`, constants `eval.c:705-706`).
     #[test]
     fn eval_sigma_matches_formula() {
-        // (n=30, depth=10, probcut_depth=4):
-        //   lin = -0.10026799*30 + 0.31027733*10 + -0.57772603*4 = -2.2161705
-        //   sigma = 0.07585621*(-2.2161705)^2 + 1.16492647*(-2.2161705) + 5.4171698
-        //         ≈ 0.37256 - 2.58168 + 5.41717 ≈ 3.20806
+        // lin = -0.10026799*30 + 0.31027733*10 - 0.57772603*4 = -2.2161705 → sigma ≈ 3.20806
         let s1 = eval_sigma(30, 10, 4);
         assert!(
             (s1 - 3.208055785).abs() < 1e-6,
             "eval_sigma(30,10,4) = {s1}"
         );
-        // (n=20, depth=5, probcut_depth=3):
-        //   lin = -0.10026799*20 + 0.31027733*5 + -0.57772603*3 = -2.226...
-        //   sigma ≈ 3.18...
         let s2 = eval_sigma(20, 5, 3);
         assert!(
             s2 > 2.0 && s2 < 5.0,
@@ -538,10 +473,8 @@ mod tests {
         );
     }
 
-    /// Every feature's raw value (after adding its offset) must land inside the weight array
-    /// it's used to index -- an out-of-bounds index would panic in `accumulate_eval`, so this
-    /// catches a transcription mistake in `FEATURES` (wrong square count, wrong offset, wrong
-    /// group) independent of needing real weights or a real board.
+    /// Every feature's max raw value (with offset) must fit its weight array, catching
+    /// `FEATURES` transcription mistakes without real weights or boards.
     #[test]
     fn every_feature_raw_value_fits_its_weight_array() {
         for feat in &FEATURES {
@@ -560,10 +493,7 @@ mod tests {
         }
     }
 
-    /// Every board square must appear in at least one feature (Edax's evaluation covers the whole
-    /// board), and squares should each appear the same number of times every real Othello position
-    /// evaluator of this shape does -- not asserted precisely here (that's just "trust the
-    /// transcription"), but every square must appear at least once as a coarse completeness check.
+    /// Coarse completeness check: every board square must appear in at least one feature.
     #[test]
     fn every_square_appears_in_some_feature() {
         let mut seen = [false; 64];
@@ -578,14 +508,9 @@ mod tests {
         );
     }
 
-    /// `EVAL_F2X` (`eval.c:41-98`) plus `EVAL_OFFSET` (`eval.c:452-456`), converted from Edax's
-    /// square-letter notation to this crate's square indices by a one-off script reading the real
-    /// `eval.c` source text directly -- not copied from `FEATURES` above, so a transcription bug
-    /// in `FEATURES` has an actual chance of being caught here instead of both copies trivially
-    /// agreeing by construction. Only squares + offset are checked here; `FEATURES`'s
-    /// `WeightGroup` assignment is checked separately below against `accumlate_eval`'s hardcoded
-    /// index ranges (`midgame.c:83-95`: `f[0..4)`=C9, `f[4..8)`=C10, `f[8..12)`=S100,
-    /// `f[12..16)`=S101, `f[16..30)`=S8x4, `f[30..46)`=S7654).
+    /// `EVAL_F2X` (`eval.c:41-98`) plus `EVAL_OFFSET` (`eval.c:452-456`), converted by a one-off
+    /// script from the real `eval.c` text — independent of `FEATURES`, so a transcription bug
+    /// there can actually be caught. Groups are checked separately below.
     const REAL_EVAL_F2X: [(&[u32], i32); 46] = [
         (&[0, 1, 8, 9, 2, 16, 10, 17, 18], 0),
         (&[7, 6, 15, 14, 5, 23, 13, 22, 21], 0),
@@ -645,11 +570,8 @@ mod tests {
         }
     }
 
-    /// `accumlate_eval`'s hardcoded `f[]` index ranges (`midgame.c:83-95`) assign features to
-    /// weight arrays by *position*, not by any label in `EVAL_F2X` itself -- so `FEATURES`'s
-    /// `WeightGroup` tagging is only correct if it reproduces those exact boundaries. Checked
-    /// separately from `features_match_real_edax_eval_f2x_and_eval_offset` since group membership
-    /// isn't part of `EVAL_F2X`/`EVAL_OFFSET` at all.
+    /// `FEATURES`'s `WeightGroup` tagging must reproduce `accumlate_eval`'s hardcoded `f[]`
+    /// index ranges (`midgame.c:83-95`), which assign weight arrays by position.
     #[test]
     fn feature_groups_match_accumlate_evals_hardcoded_ranges() {
         for (i, feat) in FEATURES.iter().enumerate() {
@@ -667,9 +589,7 @@ mod tests {
     }
 
     fn dummy_weights() -> Vec<EvalWeight> {
-        // Not real trained weights -- just enough real-shaped data (via the real unpacking
-        // pipeline, so indices are exercised the same way real weights would) to check
-        // search_eval_0 runs to completion and respects the score bounds/rounding contract.
+        // Real-shaped (via the real unpacking pipeline) but not real trained weights.
         let raw: Vec<i16> = (0..N_W * N_PLIES)
             .map(|i| ((i * 7 + 3) % 2001) as i16 - 1000)
             .collect();
@@ -720,9 +640,8 @@ mod tests {
         );
     }
 
-    /// `init_features` + `eval_from_features` must produce the same score as `search_eval_0`.
-    /// This is the correctness invariant that makes incremental eval valid: the root initialisation
-    /// matches what `search_eval_0` would compute from scratch.
+    /// `init_features` + `eval_from_features` must match `search_eval_0` — the invariant that
+    /// makes incremental eval valid.
     #[test]
     fn eval_from_features_matches_search_eval_0() {
         let weights = dummy_weights();

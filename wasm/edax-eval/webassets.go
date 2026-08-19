@@ -21,17 +21,11 @@
 // from Edax 4.5.1 (https://github.com/abulmo/edax-reversi), also licensed
 // under GPLv3.
 
-// Package webassets embeds this crate's browser-facing files -- the JS wrapper (js/) and the
-// built wasm module plus compressed weights blob (dist/) -- so internal/web can serve them
-// without a frontend build step, the same way static.FS embeds static/'s hand-written JS/CSS.
-// This one .go file living inside a Cargo crate directory is intentional, not a stray file:
-// go:embed patterns can't reach outside their own directory tree, and this is the only directory
-// containing both js/ and dist/ without duplicating either into static/ (see TASKS.md decision #4,
-// which already carves this subtree out as the repo's one exception to "no frontend build step").
-//
-// dist/ is checked into git (unlike generated/ and target/, both gitignored scratch output) --
-// regenerating it requires a local Edax checkout (EDAX_HOST_DIR/eval.dat), which CI doesn't have;
-// see docs/next-steps.md for the regeneration steps.
+// Package webassets embeds this crate's browser-facing files (js/ wrapper, dist/ wasm module and
+// compressed weights) for internal/web to serve. It lives inside the Cargo crate because go:embed
+// patterns can't reach outside their own directory tree. dist/ is checked into git: regenerating
+// it requires a local Edax checkout (EDAX_HOST_DIR/eval.dat), which CI doesn't have -- see
+// docs/next-steps.md.
 package webassets
 
 import "embed"

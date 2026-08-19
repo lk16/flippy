@@ -6,9 +6,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// rotateBoard applies spatial symmetry r to a board's discs directly,
-// independent of whose turn it is. This is used to check that Normalize
-// collapses all 8 symmetries of a board to the same NormalizedBoard.
+// rotateBoard applies spatial symmetry r to a board's discs directly, to check that Normalize
+// collapses all 8 symmetries to the same NormalizedBoard.
 func rotateBoard(b Board, r int) Board {
 	return Board{
 		black: rotateBits(b.black, r),

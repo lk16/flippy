@@ -21,20 +21,14 @@
 // from Edax 4.5.1 (https://github.com/abulmo/edax-reversi), also licensed
 // under GPLv3.
 
-//! The raw wasm-facing API (`TASKS.md` Task 10): a minimal C ABI (`#[no_mangle] extern "C"`)
-//! surface for `js/edax-eval.js` to call, deliberately not using `wasm-bindgen` — this repo has no
-//! frontend build step (`docs/project.md`), and the goal here is a `.wasm` file plus a plain
-//! `<script type="module">`-loadable JS file, not a bundler-oriented toolchain.
+//! The raw wasm-facing API: a minimal C ABI surface for `js/edax-eval.js`, deliberately without
+//! `wasm-bindgen` (this repo has no frontend build step). Not `#[cfg(target_arch = "wasm32")]`-
+//! gated, so it stays unit-testable on the native target.
 //!
-//! Not `#[cfg(target_arch = "wasm32")]`-gated: these functions compile and are directly unit-
-//! testable on the native target too (see this module's tests), which is worth more than avoiding
-//! a few harmless exported C symbols in native builds nobody links against externally anyway.
-//!
-//! Protocol: call [`alloc`] for a buffer sized to the (decompressed, still transform-encoded --
-//! see [`crate::weights_transform`]) weights blob, write it into wasm linear memory at the
-//! returned pointer, call [`init_weights`] once with that pointer/length, then call [`evaluate`]
-//! any number of times. `evaluate`'s `player`/`opponent` are Edax's mover-relative bitboards
-//! (`crate::board::Board`), not black/white -- the JS wrapper's job, not this module's.
+//! Protocol: [`alloc`] a buffer for the (decompressed, still transform-encoded) weights blob,
+//! write it into wasm linear memory, call [`init_weights`] once, then [`evaluate`] any number of
+//! times. `evaluate`'s `player`/`opponent` are mover-relative bitboards, not black/white — the
+//! translation is the JS wrapper's job.
 
 use std::sync::OnceLock;
 
@@ -52,32 +46,24 @@ pub const ERR_WEIGHTS_NOT_INITIALIZED: i32 = i32::MIN;
 /// [`evaluate`]'s sentinel for `level > 60` (see `crate::search::UnsupportedLevel`).
 pub const ERR_UNSUPPORTED_LEVEL: i32 = i32::MIN + 1;
 
-/// [`init_weights`]'s sentinel for "wrong-sized blob" (a caller bug, not a runtime input to
-/// validate beyond this -- this crate ships exactly one weights blob, see its doc comment).
+/// [`init_weights`]'s sentinel for a wrong-sized blob (a caller bug).
 pub const ERR_WRONG_LENGTH: i32 = 1;
 
-/// [`init_weights`]'s sentinel for "already called" (weights are set once, for the lifetime of
-/// the wasm instance).
+/// [`init_weights`]'s sentinel for "already called" (weights are set once per wasm instance).
 pub const ERR_ALREADY_INITIALIZED: i32 = 2;
 
-/// Allocates `len` zeroed bytes in wasm linear memory and returns a pointer the caller can write
-/// into (from JS: `new Uint8Array(instance.exports.memory.buffer, ptr, len)`). The buffer's
-/// ownership passes to whoever reclaims it -- currently only [`init_weights`], via
-/// `Box::from_raw`, so every `alloc`ed buffer must be handed to exactly one `init_weights` call
-/// with the same `len`, or it leaks for the lifetime of the wasm instance (acceptable here: this
-/// crate allocates the weights blob buffer once, not in a hot loop).
+/// Allocates `len` zeroed bytes in wasm linear memory for the caller to write into. Ownership
+/// passes to exactly one [`init_weights`] call with the same `len` (via `Box::from_raw`);
+/// otherwise the buffer leaks.
 #[no_mangle]
 pub extern "C" fn alloc(len: usize) -> *mut u8 {
     let buf = vec![0u8; len].into_boxed_slice();
     Box::into_raw(buf) as *mut u8
 }
 
-/// Reverses Task 2's transpose+delta+byte-plane encoding on the (already gzip-decompressed, e.g.
-/// via the browser's native `DecompressionStream('gzip')`) weights blob at `ptr`/`len` -- which
-/// must be a buffer previously returned by [`alloc`] with the same `len`, now filled in by the
-/// caller -- and unpacks it into the full per-ply weight tables `evaluate` uses. Returns 0 on
-/// success, [`ERR_WRONG_LENGTH`] if `len` doesn't match the one weights blob this crate ships (a
-/// caller bug), or [`ERR_ALREADY_INITIALIZED`] if called more than once.
+/// Decodes the (already gzip-decompressed) transform-encoded weights blob at `ptr`/`len` and
+/// unpacks it into the per-ply tables [`evaluate`] uses. Returns 0 on success,
+/// [`ERR_WRONG_LENGTH`], or [`ERR_ALREADY_INITIALIZED`].
 ///
 /// # Safety
 /// `ptr`/`len` must be exactly as returned by a prior [`alloc`] call (same `len`), not yet passed
@@ -88,9 +74,8 @@ pub unsafe extern "C" fn init_weights(ptr: *mut u8, len: usize) -> i32 {
     if len != expected_len {
         return ERR_WRONG_LENGTH;
     }
-    // SAFETY: per this function's own safety contract, `ptr`/`len` come from a matching `alloc`
-    // call; `Box::into_raw` (in `alloc`) and `Box::from_raw` (here) use the same allocator, so
-    // this is exactly one alloc/dealloc pair from the caller's point of view.
+    // SAFETY: per the safety contract, `ptr`/`len` come from a matching `alloc` call, so
+    // Box::into_raw/Box::from_raw form exactly one alloc/dealloc pair.
     let bytes = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len));
 
     let raw = weights_transform::decode(&bytes, weights_transform::N_W, weights_transform::N_PLIES);
@@ -102,12 +87,9 @@ pub unsafe extern "C" fn init_weights(ptr: *mut u8, len: usize) -> i32 {
     0
 }
 
-/// Evaluates a board (`player`/`opponent`: Edax's mover-relative bitboards, `crate::board::Board`)
-/// at Edax `level`, returning the exact score from `player`'s point of view. Levels 0..=60 use
-/// depth and selectivity from `search_global_init` (see `crate::search::solve`); levels 11-60
-/// currently search full-width (ProbCut not yet implemented, TASKS.md Task 15) and will differ
-/// from real Edax above level 10. Levels above 60 return [`ERR_UNSUPPORTED_LEVEL`]. Returns
-/// [`ERR_WEIGHTS_NOT_INITIALIZED`] if [`init_weights`] hasn't been called yet.
+/// Evaluates a mover-relative board at Edax `level` (see `crate::search::solve`), returning the
+/// score from `player`'s view; [`ERR_UNSUPPORTED_LEVEL`] above level 60,
+/// [`ERR_WEIGHTS_NOT_INITIALIZED`] before [`init_weights`].
 #[no_mangle]
 pub extern "C" fn evaluate(player: u64, opponent: u64, level: u32) -> i32 {
     let Some(weights) = WEIGHTS.get() else {
@@ -123,10 +105,8 @@ mod tests {
     use crate::board::START;
     use crate::weights_transform::{encode, N_PLIES, N_W};
 
-    /// Builds a real (transform-encoded, not yet decompressed) weights blob the same way the
-    /// browser would receive it after `DecompressionStream('gzip')`, from synthetic but
-    /// realistically-shaped data (this module doesn't need real trained weights -- Task 8 already
-    /// covers bit-exactness end to end; this just exercises the alloc/init/evaluate protocol).
+    /// A transform-encoded weights blob from synthetic but realistically-shaped data — enough to
+    /// exercise the alloc/init/evaluate protocol without real trained weights.
     fn synthetic_transform_encoded_blob() -> Vec<u8> {
         let raw: Vec<i16> = (0..N_W * N_PLIES)
             .map(|i| ((i * 7 + 3) % 2001) as i16 - 1000)
@@ -136,10 +116,8 @@ mod tests {
 
     #[test]
     fn evaluate_before_init_weights_reports_not_initialized() {
-        // A fresh process-local static per test binary isn't guaranteed by cargo test's threading
-        // model (tests share a process), so this only asserts the sentinel value is distinct from
-        // real scores -- the "not yet initialized" path itself is exercised by whichever test in
-        // this binary happens to run first, since WEIGHTS is a OnceLock shared across tests.
+        // WEIGHTS is a OnceLock shared across this binary's tests, so only assert the sentinels
+        // are distinct from real scores.
         assert!(!(-64..=64).contains(&ERR_WEIGHTS_NOT_INITIALIZED));
         assert!(!(-64..=64).contains(&ERR_UNSUPPORTED_LEVEL));
         assert_ne!(ERR_WEIGHTS_NOT_INITIALIZED, ERR_UNSUPPORTED_LEVEL);
@@ -154,8 +132,7 @@ mod tests {
             std::ptr::copy_nonoverlapping(blob.as_ptr(), ptr, blob.len());
         }
 
-        // init_weights may already have run (WEIGHTS is shared across this binary's tests); either
-        // outcome is a legitimate protocol response.
+        // init_weights may already have run (shared OnceLock); either outcome is legitimate.
         let init_result = unsafe { init_weights(ptr, blob.len()) };
         assert!(init_result == 0 || init_result == ERR_ALREADY_INITIALIZED);
 
@@ -170,8 +147,7 @@ mod tests {
     fn init_weights_rejects_wrong_length() {
         let ptr = alloc(4);
         assert_eq!(unsafe { init_weights(ptr, 4) }, ERR_WRONG_LENGTH);
-        // ERR_WRONG_LENGTH returns before reclaiming the buffer via Box::from_raw, so free it
-        // directly to avoid leaking in this test (init_weights's normal paths do reclaim it).
+        // ERR_WRONG_LENGTH returns before reclaiming the buffer, so free it here.
         unsafe {
             drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, 4)));
         }

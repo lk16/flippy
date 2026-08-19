@@ -21,18 +21,12 @@
 // from Edax 4.5.1 (https://github.com/abulmo/edax-reversi), also licensed
 // under GPLv3.
 
-//! Bitboard representation and move generation, ported from Edax's `board.c`
-//! (`TASKS.md` Task 3). Only the portable, non-SIMD code paths are ported —
-//! `board_sse.c`/`board_mmx.c` and the vectorized `flip_*.c` variants are
-//! performance-only alternates for the same logic (Edax's own `flip_slow.c`,
-//! ported as [`Board::get_flip`] below, exists specifically to assert that
-//! equivalence in Edax's own test suite).
+//! Bitboard representation and move generation, ported from Edax's `board.c` (portable, non-SIMD
+//! paths only; the SIMD variants are performance-only alternates for the same logic).
 //!
-//! Squares are numbered exactly as Edax's `const.h` enum: `A1 = 0`, `H1 = 7`,
-//! `A2 = 8`, ..., `H8 = 63` (bit `x` of a bitboard is square `x`, row-major).
-//! A [`Board`] is always mover-relative, matching Edax's `player`/`opponent`
-//! fields (`bit.h:147`) rather than a black/white representation — this is
-//! what later tasks' eval/search logic is built against.
+//! Squares are numbered as Edax's `const.h` enum: `A1 = 0`, `H1 = 7`, `A2 = 8`, ..., `H8 = 63`
+//! (bit `x` is square `x`, row-major). A [`Board`] is always mover-relative, matching Edax's
+//! `player`/`opponent` fields (`bit.h:147`), not black/white.
 
 /// A mover-relative board: `player` is the side to move, `opponent` the other side.
 /// Mirrors Edax's `Board` struct (`bit.h:147-149`).
@@ -53,11 +47,9 @@ pub const START: Board = Board {
 const NOT_AH_FILE: u64 = 0x7e7e_7e7e_7e7e_7e7e;
 
 impl Board {
-    /// Propagates flips one direction at a time across the whole board, the way `get_moves` finds
-    /// every legal move without testing squares individually. Direct port of `get_some_moves`'s
-    /// portable "sequential algorithm" branch (`board.c:536-546`); `mask` is the opponent bitboard
-    /// with edge squares excluded (for horizontal/diagonal directions) or the raw opponent
-    /// bitboard (for vertical, which never wraps).
+    /// One-direction flip propagation; port of `get_some_moves`'s sequential branch
+    /// (`board.c:536-546`). `mask` is the opponent bitboard, edge-masked for horizontal/diagonal
+    /// directions, raw for vertical (which never wraps).
     #[inline]
     fn get_some_moves(p: u64, mask: u64, dir: u32) -> u64 {
         let mut flip = (p.wrapping_shl(dir) | p.wrapping_shr(dir)) & mask;
@@ -67,8 +59,8 @@ impl Board {
         flip.wrapping_shl(dir) | flip.wrapping_shr(dir)
     }
 
-    /// All legal moves for `self.player`, as a bitboard. Direct port of `get_moves`
-    /// (`board.c:560-580`), skipping its SSE/MMX dispatch (portable path only).
+    /// All legal moves for `self.player`, as a bitboard. Port of `get_moves` (`board.c:560-580`),
+    /// portable path only.
     #[inline]
     pub fn get_moves(&self) -> u64 {
         let om = self.opponent & NOT_AH_FILE;
@@ -79,38 +71,25 @@ impl Board {
         moves & !(self.player | self.opponent)
     }
 
-    /// Whether `self.player` has any legal move. Direct port of `can_move` (`board.c:606-620`,
-    /// portable path).
+    /// Whether `self.player` has any legal move. Port of `can_move` (`board.c:606-620`).
     pub fn can_move(&self) -> bool {
         self.get_moves() != 0
     }
 
     /// The bitboard of opponent discs that playing at `x` (`0..64`, an empty square) would flip.
-    ///
-    /// Uses bitboard propagation with compile-time-constant shift amounts — the same technique
-    /// `get_moves` uses via `get_some_moves`, applied to a single starting square rather than the
-    /// whole player bitboard. Each direction propagates through consecutive opponent bits until it
-    /// either runs out of opponent or hits an empty/player square; a player bracket at the far end
-    /// confirms the flip. The NOT_AH_FILE mask on the opponent prevents horizontal and diagonal
-    /// propagation from wrapping across the A↔H file boundary; vertical shifts (±8) never wrap
-    /// columns, so they use the raw opponent bitboard. This replaces the original `flip_slow.c`
-    /// port's loop-per-direction approach (variable shifts + per-iteration edge checks = two
-    /// avoidable bottlenecks for the compiler).
-    ///
+    /// Bitboard propagation with constant shifts per direction; a player bracket at the far end
+    /// confirms the flip. NOT_AH_FILE stops horizontal/diagonal wrap; vertical (±8) never wraps.
     /// Precondition: `x < 64`. Passing is a distinct operation (`Board::pass`), not handled here.
     pub fn get_flip(&self, x: u32) -> u64 {
         debug_assert!(x < 64, "get_flip called with out-of-range square {x}");
         let bit = 1u64 << x;
         let p = self.player;
-        // Opponent masked to non-A/H columns: prevents horizontal/diagonal propagation from
-        // wrapping (same mask get_moves uses). Vertical (shift=8) never wraps columns, so it
-        // uses the raw opponent bitboard.
         let om = self.opponent & NOT_AH_FILE;
         let ov = self.opponent;
 
         let mut flipped = 0u64;
 
-        // East (+1): propagate right through column-masked opponent; bracket must be further right.
+        // East (+1)
         let mut gen = (bit << 1) & om;
         if gen != 0 {
             gen |= (gen << 1) & om;
@@ -217,9 +196,8 @@ impl Board {
         flipped
     }
 
-    /// Plays `x` (`0..64`, must be a legal move — i.e. present in [`Board::get_moves`]) and
-    /// returns the resulting board, player/opponent swapped to the new side to move. Direct port
-    /// of `board_update`'s portable path (`board.c:390-408`).
+    /// Plays `x` (must be legal, i.e. present in [`Board::get_moves`]) and returns the resulting
+    /// board, sides swapped. Port of `board_update`'s portable path (`board.c:390-408`).
     pub fn play(&self, x: u32) -> Board {
         let flipped = self.get_flip(x);
         Board {
@@ -228,8 +206,8 @@ impl Board {
         }
     }
 
-    /// Swaps player/opponent without flipping any discs, for when `self.player` has no legal
-    /// move. Direct port of `board_pass` (`board.c:452-456`).
+    /// Swaps player/opponent without flipping discs, for when `self.player` has no legal move.
+    /// Port of `board_pass` (`board.c:452-456`).
     pub fn pass(&self) -> Board {
         Board {
             player: self.opponent,
@@ -262,11 +240,9 @@ mod tests {
             );
 
             let after = START.play(x);
-            // The played square and the flipped disc(s) both end up belonging to the mover, i.e.
-            // to `after.opponent` (player/opponent swap on the returned board).
+            // The played square and flipped discs belong to the mover, i.e. `after.opponent`.
             assert_eq!(after.opponent, START.player | flipped | (1u64 << x));
             assert_eq!(after.player, START.opponent & !flipped);
-            // Total disc count grows by exactly one (a move places a disc, never removes one).
             let before_discs = (START.player | START.opponent).count_ones();
             let after_discs = (after.player | after.opponent).count_ones();
             assert_eq!(after_discs, before_discs + 1);
@@ -288,14 +264,10 @@ mod tests {
         );
     }
 
-    /// A frozen snapshot of a real forced-pass game (PlayOK `playok_normal.pgn`), one board per
-    /// ply, in the same `black`/`white`/turn encoding and exact values as
-    /// `static/test/fixtures.js`'s `FORCED_PASS_BOARDS` (there generated from, and cross-verified
-    /// against, `internal/othello`'s and `static/board.js`'s independent move-generation ports —
-    /// see `docs/project.md`). Regenerate the same way: `go run` a throwaway main over
-    /// `internal/othello/testdata/pgn/playok_normal.pgn`.
-    ///
-    /// Plies 55 and 57 are forced passes (the side to move has none); ply 62 is game over.
+    /// A real forced-pass game (PlayOK `playok_normal.pgn`), one board per ply, same encoding and
+    /// values as `static/test/fixtures.js`'s `FORCED_PASS_BOARDS` (regenerate with a throwaway
+    /// `go run` over `internal/othello/testdata/pgn/playok_normal.pgn`).
+    /// Plies 55 and 57 are forced passes; ply 62 is game over.
     const FORCED_PASS_BOARDS: [&str; 63] = [
         "00000008100000000000001008000000-b",
         "00000038100000000000000008000000-w",
@@ -362,9 +334,8 @@ mod tests {
         "7fbfdfadd5abc5fe804020522a543a01-b", // 62: final, game over (neither can move)
     ];
 
-    /// Independent, deliberately naive 8-direction ray-walk reference for legal-move generation
-    /// and flip computation, sharing no code with [`Board::get_some_moves`]/[`Board::get_flip`],
-    /// used only to cross-check them below across many random self-play games.
+    /// Independent, naive 8-direction ray-walk reference sharing no code with
+    /// [`Board::get_some_moves`]/[`Board::get_flip`], used only to cross-check them.
     mod reference {
         const DIRS: [(i32, i32); 8] = [
             (-1, -1),
@@ -410,8 +381,7 @@ mod tests {
         }
     }
 
-    /// Minimal xorshift64 PRNG so this test has no dependency on a `rand` crate — determinism
-    /// isn't required here, just cheap, dependency-free pseudo-randomness for move selection.
+    /// Minimal xorshift64 PRNG: cheap pseudo-randomness without a `rand` dependency.
     fn xorshift64(state: &mut u64) -> u64 {
         *state ^= *state << 13;
         *state ^= *state >> 7;
@@ -457,7 +427,7 @@ mod tests {
     const GAME_OVER_PLY: usize = 62;
 
     /// Parses a `%016x%016x-{b,w}` fixture entry (Go's `Board.String()` format) into a
-    /// mover-relative [`Board`]: `player` is the side named by the turn suffix.
+    /// mover-relative [`Board`].
     fn parse_fixture(s: &str) -> Board {
         let (discs, turn) = s.split_at(32);
         let black = u64::from_str_radix(&discs[0..16], 16).unwrap();

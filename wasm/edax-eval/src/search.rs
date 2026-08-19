@@ -21,36 +21,16 @@
 // from Edax 4.5.1 (https://github.com/abulmo/edax-reversi), also licensed
 // under GPLv3.
 
-//! Full-width negamax alpha-beta search (`TASKS.md` Tasks 6 + 11), covering the non-selective
-//! level 0-10 regime of `search_global_init` (`search.c:161-179`). Per-level depth formula
-//! (all levels use `NO_SELECTIVITY`; no ProbCut):
+//! Negamax alpha-beta search covering `search_global_init`'s level regimes (`search.c:161-346`).
+//! Level 0: depth 0; level L (1-10): exact solve when `n_empties <= 2 * L`, else fixed depth L.
 //!
-//! - **level 0**: `depth = 0` always — immediate [`crate::eval::search_eval_0`] at the root,
-//!   no lookahead.
-//! - **level L (1-10)**: `depth = n_empties` when `n_empties <= 2 * L` (exact solve to the end
-//!   of the game, [`crate::eval::search_eval_0`] never reached), else `depth = L` (fixed-depth
-//!   midgame search, leaving scored by [`crate::eval::search_eval_0`]).
+//! Not a line-by-line port of Edax's `midgame.c`/`endgame.c` search functions: at full width the
+//! minimax value depends only on position, depth, and eval, so a plain negamax suffices; verified
+//! by the differential harness against the real `lEdax-x64` binary.
 //!
-//! Unlike the board/eval ports (Tasks 3-5), this is *not* a line-by-line
-//! translation of Edax's `PVS_midgame`/`NWS_midgame`/`NWS_shallow`/
-//! `NWS_endgame`/... functions in `midgame.c`/`endgame.c`. Per this
-//! project's decision #2, level <= 10 is fully non-selective (no ProbCut),
-//! so the minimax value alpha-beta search converges to is a mathematical
-//! property of the position, depth, and evaluation function alone — it does
-//! not depend on move ordering, transposition tables, or which of Edax's
-//! several depth-specialized search functions computed it. Those functions
-//! exist purely to compute that same value faster; TASKS.md's "Explicitly
-//! deferred" section defers exactly that kind of performance work. So this
-//! module is a plain, single-function textbook negamax, verified not by
-//! line-matching C source but by Task 8's differential harness comparing
-//! final scores against the real `lEdax-x64` binary.
-//!
-//! The one place C source *was* load-bearing rather than just "any correct
-//! alpha-beta": whether passing consumes a depth level. `NWS_midgame`
-//! (`midgame.c:632`) recurses on a forced pass with `depth` unchanged, and
-//! `depth - 1` on a real move (`midgame.c:662`) — passing is free. Getting
-//! this backwards wouldn't just be slower, it would search a different
-//! depth than Edax and diverge from its exact score.
+//! Load-bearing C detail: a forced pass does not consume depth (`midgame.c:632` recurses with
+//! `depth` unchanged; `depth - 1` only on a real move, `midgame.c:662`) — getting this backwards
+//! would search a different depth than Edax and diverge from its exact score.
 
 use crate::board::Board;
 use crate::eval::{eval_from_features, eval_sigma, init_features, undo_features, update_features};
@@ -59,12 +39,11 @@ use crate::weights::EvalWeight;
 const SCORE_MIN: i32 = -64;
 const SCORE_MAX: i32 = 64;
 
-/// Default TT size exponent used by [`solve`]: `2^TT_SIZE_LOG2` entries (~384 KB of memory).
-/// Direct-mapped (1 entry per slot); fits comfortably inside WASM's default memory limit.
+/// TT size used by [`solve`]: `2^TT_SIZE_LOG2` entries (~384 KB), fits WASM's default memory.
 const TT_SIZE_LOG2: u32 = 14;
 
-/// One transposition-table entry. Fields mirror `HashData` (`hash.h:22-53`):
-/// `lower`/`upper` are proven score bounds; entry is valid when `key` matches the board hash.
+/// One transposition-table entry, mirroring `HashData` (`hash.h:22-53`); `lower`/`upper` are
+/// proven bounds, valid when `key` matches the board hash.
 #[derive(Clone, Copy)]
 struct TtEntry {
     key: u64,
@@ -74,10 +53,8 @@ struct TtEntry {
     upper: i32,
 }
 
-/// Direct-mapped transposition table (port of Edax's `HashTable` + `search_TC_NWS`,
-/// `hash.h:68-77` / `search.c:1240-1256`). Created once per [`solve`] call; not shared across
-/// calls. Even single-call use is substantial: the same position is often reached via many
-/// different move sequences during alpha-beta search.
+/// Direct-mapped transposition table (port of `HashTable` + `search_TC_NWS`, `hash.h:68-77` /
+/// `search.c:1240-1256`); created once per [`solve`] call.
 struct TranspositionTable {
     entries: Box<[TtEntry]>,
     mask: usize,
@@ -107,11 +84,9 @@ impl TranspositionTable {
             .wrapping_add(board.opponent.wrapping_mul(0x517C_C1B7_2722_0A95_u64))
     }
 
-    /// `search_TC_NWS` (`search.c:1240-1256`): if the stored entry is at least as deep and
-    /// selective as requested and its bounds prove a cutoff, return the bound without searching.
-    /// Three cases: fail-high (lower ≥ beta), fail-low (upper ≤ alpha), or exact (lower == upper
-    /// fits in the window). Using `lower >= beta` (not `alpha < lower`) is critical in non-NWS
-    /// contexts: `alpha < lower < beta` would return a lower bound as if it were an exact score.
+    /// `search_TC_NWS` (`search.c:1240-1256`): return a proven-bound cutoff without searching.
+    /// `lower >= beta` (not `alpha < lower`) is critical outside NWS: `alpha < lower < beta`
+    /// would return a lower bound as if it were an exact score.
     fn try_cutoff(
         &self,
         board: &Board,
@@ -136,9 +111,7 @@ impl TranspositionTable {
         None
     }
 
-    /// Store the result of a search at (depth, selectivity) with window (alpha, beta) → score.
-    /// Replaces the entry if it belongs to a different position or if the new depth is at least as
-    /// deep (depth-preferred replacement policy).
+    /// Stores a search result; depth-preferred replacement.
     fn store(
         &mut self,
         board: &Board,
@@ -152,9 +125,8 @@ impl TranspositionTable {
         let idx = key as usize & self.mask;
         let e = self.entries[idx];
         if e.key != key || e.depth <= depth {
-            // `alpha` here must be the *original* alpha (before the search loop raised it),
-            // not the updated alpha — otherwise fail-high results (score >= beta) incorrectly
-            // store upper = score instead of upper = SCORE_MAX, breaking future probes.
+            // `alpha` must be the *original* alpha (before the search loop raised it), else
+            // fail-high results store upper = score instead of SCORE_MAX, breaking future probes.
             let (lower, upper) = if score >= beta {
                 (score, SCORE_MAX) // fail-high: proven lower bound
             } else if score > alpha {
@@ -176,9 +148,8 @@ impl TranspositionTable {
 /// `NO_SELECTIVITY` from `search.c:102`: full-width search, no forward pruning.
 pub(crate) const NO_SELECTIVITY: u32 = 5;
 
-/// Direct port of `struct Selectivity` (`search.h:26-30`). `t` sizes ProbCut's null-window probe
-/// (Task 15); `level` is the selectivity index (0 = strongest pruning, 5 = `NO_SELECTIVITY`, no
-/// pruning); `percent` is the nominal probability the true score falls inside the window.
+/// Port of `struct Selectivity` (`search.h:26-30`); `t` sizes ProbCut's null-window probe,
+/// `percent` is the nominal probability the true score falls inside the window.
 #[derive(Clone, Copy)]
 #[allow(dead_code)]
 pub(crate) struct Selectivity {
@@ -187,15 +158,14 @@ pub(crate) struct Selectivity {
     pub percent: u32,
 }
 
-/// Direct port of `selectivity_table` (`search.c:104-111`): 6 entries indexed by the selectivity
-/// value returned by [`depth_and_selectivity`]. `search_probcut` reads `.t` to size the
-/// null-window probe; index [`NO_SELECTIVITY`] is full-width (no ProbCut).
+/// Port of `selectivity_table` (`search.c:104-111`), indexed by [`depth_and_selectivity`]'s
+/// selectivity; index [`NO_SELECTIVITY`] is full-width (no ProbCut).
 pub(crate) const SELECTIVITY_TABLE: [Selectivity; 6] = [
     Selectivity {
         t: 1.1,
         level: 0,
         percent: 73,
-    }, // strong selectivity
+    },
     Selectivity {
         t: 1.5,
         level: 1,
@@ -220,7 +190,7 @@ pub(crate) const SELECTIVITY_TABLE: [Selectivity; 6] = [
         t: 999.0,
         level: 5,
         percent: 100,
-    }, // no selectivity
+    },
 ];
 
 /// Levels above 60 are outside the range `search_global_init` (`search.c:161-346`) defines.
@@ -239,12 +209,8 @@ impl std::fmt::Display for UnsupportedLevel {
 
 impl std::error::Error for UnsupportedLevel {}
 
-/// Direct port of `search_global_init` (`search.c:161-346`): returns `(depth, selectivity)` for
-/// the given `level` and `n_empties`. `selectivity` is the index into `selectivity_table`
-/// (`search.c:104-111`); `NO_SELECTIVITY = 5` means full-width (no ProbCut). `depth` is the
-/// number of real moves to search (exact solve when `depth == n_empties`, midgame otherwise).
-///
-/// Called only by [`solve`]; separated out to unit-test against the C table.
+/// Direct port of `search_global_init` (`search.c:161-346`): `(depth, selectivity)` for `level`
+/// and `n_empties`; exact solve when `depth == n_empties`, midgame otherwise.
 fn depth_and_selectivity(level: u32, n_empties: i32) -> (i32, u32) {
     let lv = level as i32;
     let mut dep = n_empties;
@@ -374,11 +340,9 @@ fn depth_and_selectivity(level: u32, n_empties: i32) -> (i32, u32) {
     (dep, sel)
 }
 
-/// The final score of a board with no legal moves for either side, as a disc difference from
-/// `player`'s point of view, with any empty squares awarded to whichever side is ahead (a tie
-/// splits them, scoring 0). Direct port of `board_solve` (`endgame.c:55-65`); also correct for
-/// `n_empties == 0` (the board-full case `search_solve_0` special-cases for speed, `endgame.c:90-95`
-/// — same formula, since the `n_empties` term vanishes), so this crate only needs the one function.
+/// Final score of a board with no legal moves for either side, from `player`'s view; empties go
+/// to the leader (a tie splits them). Port of `board_solve` (`endgame.c:55-65`); also correct for
+/// `n_empties == 0` (`search_solve_0`, `endgame.c:90-95`, is the same formula).
 fn final_score(player_discs: i32, n_empties: i32) -> i32 {
     let score = player_discs * 2 - SCORE_MAX;
     let diff = score + n_empties;
@@ -389,22 +353,15 @@ fn final_score(player_discs: i32, n_empties: i32) -> i32 {
     }
 }
 
-/// Port of `NWS_midgame` (`midgame.c:590-699`): negamax alpha-beta search to `depth` (count of
-/// *real* moves, unaffected by forced passes), returning the exact score from `board.player`'s
-/// point of view. In midgame (`depth < n_empties`), includes ProbCut (`search_probcut`,
-/// `midgame.c:288-350`) when `alpha+1==beta` (NWS context) and `selectivity < NO_SELECTIVITY`
-/// (selective level). In exact-solve mode (`depth == n_empties`), ProbCut is skipped (eval never
-/// called there). `probcut_level` is the current ProbCut nesting depth (0 at root, capped at 2
-/// per `LIMIT_RECURSIVE_PROBCUT`). `features` must be kept consistent with `board` via
-/// [`update_features`]/[`undo_features`]; the caller (or [`solve`]) owns the backing array.
+/// Port of `NWS_midgame` (`midgame.c:590-699`): negamax to `depth` *real* moves (forced passes
+/// are free), returning the exact score from `board.player`'s view. ProbCut (`search_probcut`,
+/// `midgame.c:288-350`) fires only in midgame, in NWS context, at selective levels;
+/// `probcut_level` caps recursive ProbCut at 2 (`LIMIT_RECURSIVE_PROBCUT`). `features` must be
+/// kept consistent with `board` via [`update_features`]/[`undo_features`].
 ///
 /// `in_midgame` (`depth < n_empties`) and `mover_is_eval_player` (`n_empties % 2 == 0`) are
-/// caller-supplied rather than recomputed here (Task 23): `in_midgame` is provably invariant
-/// across the whole search tree from the root (every real move decrements both `depth` and
-/// `n_empties` by exactly 1 in lockstep, and a pass decrements neither, so `depth - n_empties`
-/// never changes after the root), and `mover_is_eval_player` only flips on a real move (fixed
-/// parity) and is unchanged across a pass (`n_empties` unchanged). Recomputing both from scratch
-/// at every node is correct but wasteful once the caller already knows them.
+/// caller-supplied: `depth - n_empties` is invariant from the root (moves decrement both, passes
+/// neither), and the parity only flips on a real move.
 #[allow(clippy::too_many_arguments)]
 fn negamax(
     board: &Board,
@@ -430,17 +387,13 @@ fn negamax(
 
     let original_alpha = alpha;
 
-    // Transposition cutoff (search_TC_NWS, search.c:1240-1256): short-circuit if a previous
-    // search at this position already proved a bound that implies a fail-high or fail-low.
+    // Transposition cutoff (search_TC_NWS, search.c:1240-1256).
     if let Some(score) = tt.try_cutoff(board, depth, selectivity, alpha, beta) {
         return score;
     }
 
-    // Stability cutoff (NWS_endgame, endgame.c:538-540): in the exact-solve regime, if the
-    // opponent has enough stable discs that even the most optimistic outcome cannot beat alpha,
-    // return the proven upper bound without searching. get_stability(opponent, player) counts
-    // opponent's stable discs s_opp; the player's best possible score is SCORE_MAX - 2*s_opp
-    // (opponent keeps all s_opp stable discs, player takes everything else).
+    // Stability cutoff (NWS_endgame, endgame.c:538-540), exact-solve only: the opponent's stable
+    // discs cap the player's best score at SCORE_MAX - 2*s_opp; if that can't beat alpha, return.
     if !in_midgame && alpha >= crate::stability::NWS_STABILITY_THRESHOLD[n_empties as usize] {
         let s_opp = crate::stability::get_stability(board.opponent, board.player);
         let score = SCORE_MAX - 2 * s_opp as i32;
@@ -455,13 +408,9 @@ fn negamax(
         if passed.get_moves() == 0 {
             return final_score(board.player.count_ones() as i32, n_empties);
         }
-        // A forced pass doesn't consume depth (midgame.c:632: recurses with `depth`, not
-        // `depth - 1`) -- see this module's doc comment. It also doesn't change n_empties, so
-        // in_midgame and mover_is_eval_player both pass through unchanged (see this function's
-        // doc comment on why).
-        // In midgame (depth < n_empties): a pass swaps the eval convention (same n_empties,
-        // different mover), so recompute features for the new board's convention.
-        // In endgame (depth == n_empties): features are never read; pass `features` as-is.
+        // A forced pass consumes no depth (midgame.c:632) and leaves n_empties unchanged, so
+        // in_midgame and mover_is_eval_player pass through. In midgame, a pass swaps the eval
+        // convention, so recompute features; in endgame, features are never read.
         if in_midgame {
             let mut passed_features = init_features(&passed, n_empties);
             return -negamax(
@@ -493,15 +442,13 @@ fn negamax(
         );
     }
 
-    // ProbCut (search_probcut, midgame.c:288-350): in midgame NWS context, try a shallow probe
-    // to skip the full-depth search when confident the true score will fail high or low.
-    // `probcut_d = 0.25` (options.c:67); `RCD = 0.5` (midgame.c:24-26).
+    // ProbCut (search_probcut, midgame.c:288-350): a shallow probe skips the full-depth search
+    // when confident of a fail. `probcut_d = 0.25` (options.c:67); `RCD = 0.5` (midgame.c:24-26).
     if in_midgame && alpha + 1 == beta && selectivity < NO_SELECTIVITY && probcut_level < 2 {
         let probcut_depth = 2 * (depth / 4) + (depth & 1); // 2*floor(probcut_d*depth) + parity
         if probcut_depth >= 2 {
-            // The probe searches the same board (same n_empties, same mover) to a different
-            // depth, so mover_is_eval_player carries over unchanged but in_midgame must be
-            // recomputed for probcut_depth specifically -- it's not the current node's in_midgame.
+            // The probe searches the same board to a different depth: mover_is_eval_player
+            // carries over, but in_midgame must be recomputed for probcut_depth.
             let probe_in_midgame = probcut_depth < n_empties;
             const RCD: f64 = 0.5;
             let t = SELECTIVITY_TABLE[selectivity as usize].t;
@@ -558,13 +505,8 @@ fn negamax(
         }
     }
 
-    // Move ordering: sort candidates by ascending opponent mobility (fewest opponent responses
-    // first). This is the canonical Othello ordering heuristic — it dramatically improves
-    // alpha-beta cutoff efficiency and doesn't affect the minimax value (see module doc comment).
-    //
-    // We store (opp_mobility, sq, child_board) so we can apply incremental feature updates
-    // without re-calling board.play(). `sq` lets us recover `flipped = child.player ^ board.opponent`.
-    //
+    // Move ordering: ascending opponent mobility (the canonical Othello heuristic; doesn't
+    // affect the minimax value). `sq` recovers `flipped = child.player ^ board.opponent`.
     // 34 is a safe upper bound on legal moves in any Othello position (observed max is ~33).
     let zero_board = Board {
         player: 0,
@@ -583,12 +525,8 @@ fn negamax(
     }
     candidates[..n].sort_unstable_by_key(|&(score, _, _)| score);
 
-    // In midgame (depth < n_empties): maintain features incrementally so depth-0 leaves can call
-    // eval_from_features. In endgame (depth == n_empties): eval is never called — skip the
-    // update/undo entirely to avoid wasting ~112 ops per node on no-op bookkeeping.
-    //
-    // A real move flips mover_is_eval_player (n_empties decrements by 1, flipping its parity);
-    // in_midgame carries over unchanged (see this function's doc comment).
+    // Midgame: maintain features incrementally for depth-0 leaves. Endgame: eval is never
+    // called, so skip the bookkeeping. A real move flips mover_is_eval_player.
     let child_mover_is_eval_player = !mover_is_eval_player;
 
     let mut best = SCORE_MIN - 1;
@@ -598,7 +536,7 @@ fn negamax(
             update_features(features, x, flipped, mover_is_eval_player);
         }
         let score = if i == 0 {
-            // First candidate: full-window search establishes the PV score.
+            // First candidate: full-window search.
             -negamax(
                 &child,
                 depth - 1,
@@ -613,10 +551,8 @@ fn negamax(
                 features,
             )
         } else {
-            // Subsequent candidates: null-window search first. With good move ordering
-            // (opponent mobility) most moves score ≤ alpha and we avoid the full-window
-            // subtree entirely. Only when nws indicates the move improves alpha AND doesn't
-            // prove a beta-cutoff do we re-search with the full window to get the exact score.
+            // Subsequent candidates: null-window search first; re-search full-window only when
+            // it improves alpha without proving a beta-cutoff.
             let nws = -negamax(
                 &child,
                 depth - 1,
@@ -667,21 +603,15 @@ fn negamax(
 }
 
 /// Evaluates `board` at Edax level `level` (`board.player` is the side to move), returning the
-/// exact score from that side's point of view. Levels 0-60 use depth and selectivity from
-/// [`depth_and_selectivity`] (a direct port of `search_global_init`, `search.c:161-346`).
-/// Selectivity is threaded into [`negamax`] but not yet consumed (ProbCut lands in Task 15), so
-/// levels 11-60 currently search full-width at the level's depth and will differ from real Edax
-/// (which uses ProbCut above level 10). Levels above 60 are outside the defined range and are
-/// rejected with [`UnsupportedLevel`].
+/// score from that side's view. Depth/selectivity come from [`depth_and_selectivity`]; levels
+/// above 60 are rejected with [`UnsupportedLevel`].
 pub fn solve(board: &Board, level: u32, weights: &[EvalWeight]) -> Result<i32, UnsupportedLevel> {
     if level > 60 {
         return Err(UnsupportedLevel(level));
     }
     let n_empties = 64 - (board.player | board.opponent).count_ones() as i32;
     let (depth, selectivity) = depth_and_selectivity(level, n_empties);
-    // Initialise feature state once at the root; the search maintains it incrementally via
-    // update_features/undo_features so that depth-0 midgame leaves can call eval_from_features
-    // instead of recomputing all 46 features from the board on every leaf visit.
+    // Feature state is initialised once at the root and maintained incrementally by the search.
     let mut tt = TranspositionTable::new(TT_SIZE_LOG2);
     let mut features = init_features(board, n_empties);
     Ok(negamax(
@@ -724,27 +654,20 @@ mod tests {
         assert!(solve(&START, 0, &weights).is_ok());
         assert!(solve(&START, 1, &weights).is_ok());
         assert!(solve(&START, 10, &weights).is_ok());
-        // Level 11+ uses ProbCut. Use a position with few empties so depth_and_selectivity(level, 5)
-        // → dep=5 (exact solve) for both — ProbCut never fires in exact-solve regime.
+        // n_empties = 5: levels 11 and 60 both exact-solve, so ProbCut never fires.
         let small = Board {
             player: 0x007e_e4d2_aadc_be7c,
             opponent: 0x7e01_1b2d_5523_4180,
-        }; // n_empties = 5; level 11 → dep=5 (exact solve), level 60 → dep=5 (exact solve)
+        };
         assert!(solve(&small, 11, &weights).is_ok());
         assert!(solve(&small, 60, &weights).is_ok());
     }
 
-    /// Level 11+ sanity check: scores are in [-64, 64] and solve doesn't panic. ProbCut is now
-    /// active but the search won't match real Edax bit-exactly until Tasks 16-18 (TT, parity
-    /// sorting) close the search-quality gap — differential harness stays at levels <= 10 until
-    /// then (decision recorded in TASKS.md Task 15).
+    /// Level 11+ sanity check: ProbCut-active solves stay in [-64, 64] and don't panic.
     #[test]
     fn level_eleven_plus_scores_are_in_range() {
         let weights = dummy_weights();
-        // Use a midgame position (n_empties=28) so ProbCut actually fires for level 12
-        // (depth_and_selectivity(12, 28) → dep=12, sel=0 — selective, triggers ProbCut).
-        // START has n_empties=60 which lands in the dep=level midgame branch for level 12.
-        // Level 0: dep=0, sel=5 (no ProbCut). Level 12 at START: dep=12, sel=0 (ProbCut active).
+        // Level 12 at START: dep=12, sel=0 — ProbCut active. Level 0: dep=0, sel=5.
         let score_l0 = solve(&START, 0, &weights).unwrap();
         let score_l12 = solve(&START, 12, &weights).unwrap();
         assert!(
@@ -757,9 +680,8 @@ mod tests {
         );
     }
 
-    /// Spot-checks `depth_and_selectivity` against a cross-section of the C source table
-    /// (`search_global_init`, `search.c:161-346`). Format per case: (level, n_empties,
-    /// expected_depth, expected_selectivity).
+    /// Spot-checks `depth_and_selectivity` against the C table (`search_global_init`,
+    /// `search.c:161-346`); cases are (level, n_empties, expected_depth, expected_selectivity).
     #[test]
     fn depth_and_selectivity_matches_search_global_init() {
         let cases: &[(u32, i32, i32, u32)] = &[
@@ -819,16 +741,12 @@ mod tests {
         }
     }
 
-    /// Task 11: levels 0-9 now use their real per-level depth. Deterministic property: any two
-    /// levels that both reach the exact-solve regime (n_empties <= 2 * level) search to depth =
-    /// n_empties without ever calling eval_from_features, so they always agree regardless of
-    /// weights (unlike midgame leaves, exact-solve leaves return final disc count).
+    /// Any two levels reaching the exact-solve regime (n_empties <= 2 * level) never call
+    /// eval_from_features, so they must agree regardless of weights.
     #[test]
     fn levels_use_real_per_level_depth() {
         let weights = dummy_weights();
-        // Position with 5 empties (the forced-pass fixture used in other tests).
-        // Level 3 (5 <= 2*3=6), level 5 (5 <= 2*5=10), and level 10 (5 <= 20) all enter the
-        // exact-solve regime and must agree on the true minimax value.
+        // 5 empties: levels 3, 5, and 10 all exact-solve and must agree.
         let board = Board {
             player: 0x007e_e4d2_aadc_be7c,
             opponent: 0x7e01_1b2d_5523_4180,
@@ -836,20 +754,16 @@ mod tests {
         let exact = solve(&board, 10, &weights).unwrap();
         assert_eq!(solve(&board, 3, &weights), Ok(exact));
         assert_eq!(solve(&board, 5, &weights), Ok(exact));
-        // Level 0 (depth=0 always) and level 2 (5 > 2*2=4, so depth=2 midgame) differ in
-        // depth from the exact solve but are still accepted without error.
+        // Levels 0 and 2 don't reach the exact-solve regime here but must still succeed.
         assert!(solve(&board, 0, &weights).is_ok());
         assert!(solve(&board, 2, &weights).is_ok());
     }
 
-    /// A near-full board (few empties) is within the exact-solve regime (`n_empties <= 20`):
-    /// the true minimax value shouldn't depend on the search window, so a full-window solve and a
-    /// null-window probe on both sides of it must agree on whether the result is above/below/at
-    /// that probe -- a basic alpha-beta correctness check independent of any real weights.
+    /// Alpha-beta correctness: an exact-solve score must be consistent with null-window probes
+    /// on either side of it, independent of weights.
     #[test]
     fn exact_solve_score_is_consistent_with_null_window_probes() {
         let weights = dummy_weights();
-        // Play down to a small number of empties from the start position (deterministic path).
         let mut board = START;
         let mut rng = 0xa5a5_1234_dead_beef_u64;
         let mut xorshift = || {
@@ -927,13 +841,8 @@ mod tests {
         );
     }
 
-    /// A genuine "double pass before the board is full" position: found by random self-play
-    /// (independent Python transliteration of `crate::board`'s logic, not this crate's own code,
-    /// to avoid a shared-bug blind spot), both sides confirmed to have zero legal moves with 46
-    /// empty squares still on the board. This is exactly the scenario TASKS.md Task 7 calls out
-    /// as bug-prone (a double pass isn't the same as the board being full), and it's rare enough
-    /// in real play that the forced-pass game fixture (see `crate::board`'s tests) doesn't happen
-    /// to contain one -- its own game-over ply has `n_empties == 0`, see the test below.
+    /// Double pass with 46 empties left: game over before the board is full, the bug-prone case
+    /// a full-board check alone would miss. Position found by independent random self-play.
     #[test]
     fn double_pass_before_board_full_ends_the_game_with_empties_awarded_to_the_leader() {
         let board = Board {
@@ -945,15 +854,12 @@ mod tests {
         assert_eq!(64 - (board.player | board.opponent).count_ones(), 46);
 
         let weights = dummy_weights();
-        // n_empties (46) is in the fixed-midgame-depth regime, but the game is already over, so
-        // this must never touch search_eval_0/the weights at all -- passing `dummy_weights` here
-        // is only to have a value of the right type, its contents are irrelevant to the outcome.
+        // Game already over: the weights are never read, so their contents are irrelevant.
         assert_eq!(solve(&board, 10, &weights), Ok(58)); // independently hand-computed: 15+46 vs 3
     }
 
-    /// The real forced-pass game fixture's actual game-over position (`crate::board`'s
-    /// `FORCED_PASS_BOARDS[GAME_OVER_PLY]`): board is completely full (`n_empties == 0`), the
-    /// other branch of the same off-by-one-prone logic the test above exercises.
+    /// The forced-pass fixture's game-over position (`n_empties == 0`): the other branch of the
+    /// off-by-one-prone logic the test above exercises.
     #[test]
     fn real_game_over_fixture_scores_as_the_exact_disc_difference() {
         // "7fbfdfadd5abc5fe804020522a543a01-b": black (mover) 47 discs, white 17, 0 empties.
@@ -968,11 +874,8 @@ mod tests {
         assert_eq!(solve(&board, 10, &weights), Ok(47 - 17));
     }
 
-    /// The real forced-pass game fixture's first forced-pass position (ply 55: white to move, no
-    /// legal move, black still can) has only 5 empties left -- entirely inside the exact-solve
-    /// regime, so `solve` here never calls `search_eval_0` and this test needs no real trained
-    /// weights, just correct pass detection deep inside the search (not just at the root, unlike
-    /// the two tests above).
+    /// The forced-pass fixture's ply-55 position (white to move, forced pass, 5 empties):
+    /// exercises pass detection deep inside the search, not just at the root.
     #[test]
     fn solves_exactly_through_a_real_mid_search_forced_pass() {
         // "7e011b2d55234180007ee4d2aadcbe7c-w": black=7e011b2d55234180, white=007ee4d2aadcbe7c,
@@ -997,8 +900,8 @@ mod tests {
         assert!((-64..=64).contains(&score));
     }
 
-    /// Verifies every entry in `SELECTIVITY_TABLE` against the C source (`search.c:104-111`) and
-    /// confirms `NO_SELECTIVITY` indexes the last entry.
+    /// Verifies `SELECTIVITY_TABLE` against `search.c:104-111` and that `NO_SELECTIVITY`
+    /// indexes the last (full-width) entry.
     #[test]
     fn selectivity_table_matches_search_c() {
         // (t, level, percent) from search.c:104-111
@@ -1015,7 +918,6 @@ mod tests {
             assert_eq!(SELECTIVITY_TABLE[i].level, level, "entry {i} level");
             assert_eq!(SELECTIVITY_TABLE[i].percent, percent, "entry {i} percent");
         }
-        // NO_SELECTIVITY (5) indexes the last entry — the "no selectivity / full-width" row.
         assert_eq!(
             SELECTIVITY_TABLE[NO_SELECTIVITY as usize].level,
             NO_SELECTIVITY

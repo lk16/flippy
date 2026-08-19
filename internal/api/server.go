@@ -4,6 +4,7 @@ package api
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/redis/go-redis/v9"
 
@@ -16,11 +17,17 @@ type Server struct {
 	repo  *db.Repository
 	redis *redis.Client
 	cache *book.Cache
+
+	// liveConns tracks the websocket connections currently open, so dequeuePriority can drop
+	// analysis work whose requester is gone. In-memory is fine: this is a single-process deployment.
+	connsMu    sync.Mutex
+	liveConns  map[string]struct{}
+	lastConnID int64
 }
 
 // NewServer returns a Server backed by repo, redisClient, and cache.
 func NewServer(repo *db.Repository, redisClient *redis.Client, cache *book.Cache) *Server {
-	return &Server{repo: repo, redis: redisClient, cache: cache}
+	return &Server{repo: repo, redis: redisClient, cache: cache, liveConns: make(map[string]struct{})}
 }
 
 // Handler returns the HTTP handler serving the JSON REST API and the "/ws" websocket endpoint.

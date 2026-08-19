@@ -22,25 +22,17 @@
 // from Edax 4.5.1 (https://github.com/abulmo/edax-reversi), also licensed
 // under GPLv3.
 
-// Fixed-corpus wall-clock benchmark for search::solve, run through the actual compiled wasm
-// module (the deployment target) rather than a native build, since wasm-specific codegen is
-// exactly what some candidate optimizations (e.g. popcount/ctz lowering) affect.
+// Fixed-corpus wall-clock benchmark for search::solve, run through the compiled wasm module (the
+// deployment target), since wasm-specific codegen is what some candidate optimizations affect.
 //
 // Usage: build the release wasm first, then run this script:
 //   cargo build --manifest-path wasm/edax-eval/Cargo.toml --target wasm32-unknown-unknown --lib --release
 //   node wasm/edax-eval/bench/bench.js
 //
-// The corpus is a fixed set of (seed, discCount) pairs, each replayed via static/board.js's
-// OthelloBoard through a deterministic pseudo-random legal game (same technique used to sanity
-// check the browser wiring end-to-end -- see the WASM-triggering fix this benchmark followed).
-// Fully deterministic and independent of anything in wasm/edax-eval's Rust source, so the same
-// positions are evaluated before and after a candidate change -- only search::solve's speed on
-// them can differ, not which positions get benchmarked. Mixes both level-10 regimes: several
-// midgame (n_empties > 20, scored by search_eval_0 at depth-10 leaves) and several endgame
-// (n_empties <= 20, exact-solved to the end of the game) positions. Total wall-clock across the
-// whole corpus is the metric to compare run-to-run -- individual positions vary by 10-50x in cost
-// (no transposition table means branching-factor luck matters a lot at the harder depths), so only
-// the fixed-corpus total is meaningful, not any single position's time.
+// The corpus is a fixed set of (seed, discCount) pairs replayed deterministically via
+// static/board.js's OthelloBoard, independent of the Rust source, so the same positions are
+// evaluated before and after a candidate change. Only the fixed-corpus total wall-clock is
+// meaningful run-to-run -- individual positions vary 10-50x in cost.
 
 const fs = require('fs');
 const path = require('path');
@@ -58,15 +50,11 @@ const MIDGAME_CASES = [3, 5].flatMap((seed) => [36, 38, 40, 42].map((discCount) 
 // Level-12 midgame corpus: only n_empties > 24 positions (discCount < 40), so
 // depth_and_selectivity(12, n_empties) → dep=12, sel=0 (true midgame, ProbCut fires).
 // n_empties <= 24 → exact-solve at depth 22-24 with no ProbCut → too slow for this benchmark.
-// Used to verify TT speedup for level 11+ (Task 16): compare with-TT vs. baseline (Task 15).
 const MIDGAME12_CASES = [3, 5].flatMap((seed) => [36, 38].map((discCount) => ({ seed, discCount, level: 12 })));
 
-// Endgame corpus (level 10): seven seeds at n_empties 8-14 (light endgame) plus four seeds at n_empties 16
-// (hard endgame — still within the exact-solve regime but deep enough that move-ordering and
-// search-tree improvements show up clearly). All individually timed against the release wasm to
-// stay under ~400ms each. n_empties 17+ are excluded: too position-dependent without a
-// transposition table (some take seconds, others minutes). n_empties 15 is similarly excluded:
-// several tested seeds took 500ms-1s against the baseline build.
+// Endgame corpus (level 10): light endgame (n_empties 8-14) plus hard endgame (n_empties 16),
+// each under ~400ms against the release wasm. n_empties 15 and 17+ are excluded: too slow or
+// too position-dependent without a transposition table.
 const ENDGAME_CASES = [
     // n_empties 8, 10, 12, 14: light endgame, seven seeds each
     ...[1, 2, 3, 4, 5, 7, 8].flatMap((seed) =>
@@ -90,10 +78,8 @@ function discCountOf(board) {
     return popcount(board.playerBits) + popcount(board.opponentBits);
 }
 
-// playToDiscCount replays a deterministic pseudo-random legal game (a simple LCG seeded by
-// `seed`) until a board with exactly `discCount` discs is reached, or returns null if the game
-// ends first. Deterministic and independent of any Rust/wasm behavior -- only static/board.js's
-// OthelloBoard (a separate JS port) drives it.
+// playToDiscCount replays a deterministic pseudo-random legal game (an LCG seeded by `seed`)
+// until a board with exactly `discCount` discs is reached, or null if the game ends first.
 function playToDiscCount(seed, discCount) {
     let board = new OthelloBoard();
     let state = seed;

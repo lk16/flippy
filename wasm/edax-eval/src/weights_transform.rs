@@ -21,14 +21,9 @@
 // from Edax 4.5.1 (https://github.com/abulmo/edax-reversi), also licensed
 // under GPLv3.
 
-//! Reversible transform applied to the raw, ply-major slice of `eval.dat`'s
-//! packed weights before compression (`TASKS.md` Task 2). The slice is
-//! transposed to weight-major order, delta-encoded across the ply axis, and
-//! byte-plane split; see `TASKS.md`'s "Weights file" section for the
-//! rationale and measured sizes against the real file.
-//!
-//! Used by `src/bin/extract_weights.rs` (encode, offline) and, from Task 4
-//! onward, by the wasm module itself (decode, in-browser).
+//! Reversible transform applied to the raw ply-major slice of `eval.dat`'s packed weights before
+//! compression: transpose to weight-major, delta-encode across the ply axis, byte-plane split.
+//! Encoded offline by `src/bin/extract_weights.rs`, decoded in-browser by the wasm module.
 
 /// Number of packed weights per ply (`eval.c`'s `n_w`).
 pub const N_W: usize = 114364;

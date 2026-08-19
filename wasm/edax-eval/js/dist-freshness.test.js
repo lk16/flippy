@@ -22,26 +22,12 @@
 // from Edax 4.5.1 (https://github.com/abulmo/edax-reversi), also licensed
 // under GPLv3.
 
-// Guards the *checked-in* wasm artifact (dist/edax_eval.wasm), which is what internal/web actually
-// serves to the browser -- src/ is only what it was supposed to be built from. Nothing else in the
-// suite touches dist/: the Rust tests test the source, and edax-eval.test.js tests the JS wrapper
-// against a freshly built module, so a stale dist/ passes every one of them while the real page
-// runs months-old search code.
-//
-// That is not hypothetical: dist/edax_eval.wasm shipped ignoring `level` entirely (every call ran
-// a full level-10 search, hundreds of milliseconds to seconds per board), which is exactly what
-// made static/board.js's incremental LOCAL_EVAL_LEVELS chain -- whose whole point is a
-// sub-millisecond level-4 score under every move, right away -- show nothing for seconds.
-//
-// Checks, against the real shipped weights:
-//   1. dist/ agrees score-for-score with a freshly built module across a fixed corpus and several
-//      levels. Behavior, not bytes: a toolchain upgrade legitimately changes the bytes, and
-//      demanding a byte-identical rebuild would just teach everyone to ignore this test.
-//   2. a shallow (level-4) evaluation is actually fast, so a rebuild that silently loses the
-//      level -> depth mapping fails here even if a fresh build has lost it too.
-//
-// Requires the release wasm to have been built first (test.sh and CI both do this immediately
-// before running this file):
+// Guards the *checked-in* wasm artifact (dist/edax_eval.wasm) -- the file internal/web actually
+// serves -- against going stale relative to src/. Checks, with the real shipped weights:
+//   1. dist/ agrees score-for-score with a freshly built module (behavior, not bytes: a toolchain
+//      upgrade legitimately changes the bytes).
+//   2. a shallow (level-4) evaluation is actually fast, catching a lost level -> depth mapping.
+// Requires the release wasm to have been built first:
 //   cargo build --manifest-path wasm/edax-eval/Cargo.toml --target wasm32-unknown-unknown --lib --release
 // To fix a failure: rerun that build and copy target/wasm32-unknown-unknown/release/edax_eval.wasm
 // over dist/edax_eval.wasm.
@@ -57,14 +43,12 @@ const DIST_WASM = path.join(__dirname, '..', 'dist', 'edax_eval.wasm');
 const FRESH_WASM = path.join(__dirname, '..', 'target', 'wasm32-unknown-unknown', 'release', 'edax_eval.wasm');
 const WEIGHTS = path.join(__dirname, '..', 'dist', 'weights.bin.gz');
 
-// Levels to compare. Deliberately shallow: this test is about "is dist/ built from src/", not
-// about search speed at level 10 (which costs a few hundred ms per board -- bench/bench.js is
-// where that belongs). Level 0 is the raw static evaluation, so a weights/feature regression
-// shows up here too, not just a search one.
+// Levels to compare. Deliberately shallow (level 10 costs a few hundred ms per board); level 0
+// is the raw static evaluation, so a weights/feature regression shows up too.
 const LEVELS = [0, 2, 4, 6];
 
-// Fixed corpus: deterministic pseudo-random legal games replayed to a given disc count, the same
-// technique (and seeds) bench/bench.js uses, so the positions depend only on static/board.js.
+// Fixed corpus: deterministic pseudo-random legal games replayed to a given disc count, same
+// technique as bench/bench.js, so the positions depend only on static/board.js.
 const CORPUS = [
     { seed: 1, discCount: 8 },
     { seed: 3, discCount: 20 },
@@ -72,9 +56,8 @@ const CORPUS = [
     { seed: 7, discCount: 44 },
 ];
 
-// LEVEL4_BUDGET_MS: a level-4 search measured ~0.3ms per board; the stale artifact this test
-// exists for took 200-2500ms. Two orders of magnitude of headroom, so a slow CI runner can't
-// make it flaky while the failure it guards against still trips it.
+// LEVEL4_BUDGET_MS: a level-4 search measures ~0.3ms per board; a stale artifact ignoring the
+// level takes 200-2500ms. Two orders of magnitude of headroom keeps slow CI runners from flaking.
 const LEVEL4_BUDGET_MS = 25;
 
 function playToDiscCount(seed, discCount) {

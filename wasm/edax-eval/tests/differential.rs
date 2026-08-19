@@ -21,49 +21,17 @@
 // from Edax 4.5.1 (https://github.com/abulmo/edax-reversi), also licensed
 // under GPLv3.
 
-//! Differential correctness harness (`TASKS.md` Tasks 8 + 11): runs a small board corpus through
-//! both this crate's `search::solve` and the real `lEdax-x64` binary at levels 10 and below,
-//! asserting the scores match exactly. Gated on `EDAX_PATH` (and `EVAL_DAT_PATH`/`EDAX_HOST_DIR`
-//! for the real weights), skipped rather than failed when unset, mirroring
-//! `internal/edax/process_test.go`'s pattern so this needs no separate CI exclusion (CI has
-//! neither set, per `docs/project.md`).
+//! Differential correctness harness: runs a board corpus through both `search::solve` and the
+//! real `lEdax-x64` binary at levels <= 10, asserting exact score matches. Gated on `EDAX_PATH`
+//! and `EVAL_DAT_PATH`/`EDAX_HOST_DIR`; skipped rather than failed when unset (CI has neither).
 //!
-//! The problem-line format and output-parsing protocol are reimplemented here rather than shared
-//! with `internal/edax` (`problem.go`/`parser.go`/`process.go`) since that package is Go and this
-//! crate is Rust; the encoding itself is copied deliberately closely (real board colors and turn,
-//! not mover-relative -- see `[[project_edax-color-turn-encoding]]`'s lesson, referenced in
-//! TASKS.md's Background, that `-solve` problem lines need real colors) and was manually checked
-//! against one real `lEdax-x64` invocation before writing this file's parser (see this file's git
-//! history / commit message for that transcript).
+//! Problem lines use real board colors and turn, not mover-relative boards
+//! (`[[project_edax-color-turn-encoding]]`: `-solve` problem lines need real colors); the parser
+//! was checked against a real `lEdax-x64` transcript.
 //!
-//! **Corpus size note (no silent cap):** this crate's search has no transposition table or move
-//! ordering yet (TASKS.md's "Explicitly deferred" section), so runtime for a given `n_empties` is
-//! wildly position-dependent, not just a function of depth -- measured directly (a throwaway
-//! calibration harness, not committed) against many random positions at fixed `n_empties`:
-//!
-//! | `n_empties` | fastest seen | slowest seen |
-//! |---|---|---|
-//! | 13 | 8.9ms | 1.2s |
-//! | 14 | 50.7ms | 5.9s |
-//! | 15 | 134ms | 8.4s |
-//! | 16 | 445ms | 43s |
-//! | 17 | 928ms | 103s |
-//!
-//! i.e. two positions at the *same* `n_empties` can differ in cost by 100-1000x depending on how
-//! much the (missing) move ordering/pruning would have helped. `n_empties` 18-20 (the top of the
-//! exact-solve regime -- recall level 10 solves exactly whenever `n_empties <= 20`, see TASKS.md
-//! Background) were not explored past 17: the trend above makes it plausible individual positions
-//! there take minutes to tens of minutes, and finding a fast one isn't guaranteed by trying a few
-//! seeds (17 itself took two multi-minute misses before a sub-second one turned up). This is a
-//! known, deliberate gap, not a silent one -- revisit once a transposition table lands. This test
-//! runs under `cargo test --release` (`test.sh` passes `--release` for exactly this reason); a bare
-//! `cargo test` without it will be substantially slower across the whole corpus below.
-//!
-//! Every position below was individually timed before being added (again via the throwaway
-//! harness) and picked to stay under ~1.2s in `--release`, so the corpus is deliberately larger
-//! than just "one of each regime": several exact-solve samples spanning `n_empties` 8-17 (covering
-//! the previously-untested 13-17 gap), and three midgame samples (`n_empties` 28, 32, and ~39,
-//! exercising `search_eval_0` at different depths-to-leaf) instead of just one.
+//! Corpus positions were each individually timed to stay under ~1.2s in `--release` (runtime at
+//! a given `n_empties` varies 100-1000x between positions); run under `cargo test --release`.
+//! Exact-solve samples span `n_empties` 8-17; `n_empties` 18-20 is a known, deliberate gap.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -134,11 +102,9 @@ fn parse_final_score(output: &str) -> Option<i32> {
     last
 }
 
-/// Mirrors `parseResultLine`/`parseDepthConfidence`: a data row's first field is `depth` or
-/// `depth@confidence%`, its second is the score (or `<`/`>`-prefixed for a non-exact bound, which
-/// means the search isn't done at that row -- skip it). Header/art/banner lines all fail the
-/// "first field parses as an integer" check, so no dedicated line-shape filtering is needed beyond
-/// that (verified against a real `lEdax-x64 -verbose 3` transcript, not assumed).
+/// Mirrors `parseResultLine`/`parseDepthConfidence`: first field `depth` or `depth@confidence%`,
+/// second the score (`<`/`>`-prefixed bounds mean the search isn't done — skip). Header/banner
+/// lines all fail the integer check on the first field (verified against a real transcript).
 fn parse_result_line(line: &str) -> Option<i32> {
     let fields: Vec<&str> = line.split_whitespace().collect();
     if fields.len() < 2 {
@@ -155,9 +121,8 @@ fn parse_result_line(line: &str) -> Option<i32> {
     score_field.parse::<i32>().ok()
 }
 
-/// Runs one real-board position through the real edax binary at `level`, returning its exact final
-/// score from `mover_is_black`'s point of view. Mirrors `internal/edax`'s problem-line encoding
-/// (`problem.go`) and subprocess invocation (`process.go`'s `buildArgs`/`ensureStarted`).
+/// Runs one position through the real edax binary at `level`, returning its final score from the
+/// mover's view. Mirrors `internal/edax`'s problem-line encoding and subprocess invocation.
 fn edax_solve(edax_path: &Path, black: u64, white: u64, mover_is_black: bool, level: u32) -> i32 {
     let mut squares = [b'-'; 64];
     for i in 0..64u32 {
@@ -172,8 +137,8 @@ fn edax_solve(edax_path: &Path, black: u64, white: u64, mover_is_black: bool, le
     problem.push(if mover_is_black { 'X' } else { 'O' });
     problem.push_str(";\n");
 
-    // process.go: cmd.Dir = filepath.Join(filepath.Dir(p.path), ".."), so options.c's default
-    // relative "data/eval.dat" resolves from the edax-reversi checkout root, not the bin/ dir.
+    // Run from the checkout root (as process.go does) so the default relative "data/eval.dat"
+    // resolves.
     let edax_dir = edax_path
         .parent()
         .and_then(Path::parent)
@@ -230,11 +195,8 @@ fn to_position(board: &Board, mover_is_black: bool) -> Position {
     }
 }
 
-/// Plays random legal moves from the start position (own move generator, per TASKS.md decision
-/// #6 -- board/move-gen is a separately-verified port, not shared code) until `n_empties` first
-/// reaches `target_empties` or below, tracking which physical color is to move. `player`/
-/// `opponent` swap on every ply (move *or* pass) alike, so the physical color a mover-relative
-/// `Board.player` represents alternates every ply regardless of which caused the swap.
+/// Plays random legal moves from the start position until `n_empties` reaches `target_empties`,
+/// tracking which physical color is to move (sides swap on every ply, move or pass alike).
 fn play_until(target_empties: u32, seed: u64) -> Position {
     let mut rng = seed;
     let mut xorshift = || {
@@ -282,16 +244,11 @@ fn matches_real_edax_at_level_10() {
     let weights = load_real_weights(&eval_dat);
 
     let mut corpus = Vec::new();
-    // Midgame regime (n_empties > 20): exercises the depth-10/search_eval_0 path. Three samples at
-    // different depths-to-leaf, each individually timed to stay under ~1.2s in --release (see this
-    // file's doc comment) -- (seed, target n_empties) pairs picked by that calibration, not
-    // arbitrary.
+    // Midgame regime (n_empties > 20): (seed, target) pairs picked by timing calibration.
     for (seed, target) in [(32u64, 28), (32, 32), (1, 40)] {
         corpus.push(play_until(target, seed));
     }
-    // Exact-solve regime: board_solve/pass-to-game-over, search_eval_0 never reached. Spans
-    // n_empties 8-17 (the 13-17 gap noted in this file's doc comment is filled in here), every
-    // (seed, target) pair individually timed to stay under ~1.2s in --release.
+    // Exact-solve regime (search_eval_0 never reached), n_empties 8-17, each pair timed.
     for (seed, target) in [
         (4u64, 12),
         (5, 10),
@@ -330,10 +287,8 @@ fn matches_real_edax_at_level_10() {
     }
 }
 
-/// Task 11: verify levels below 10 match real edax at those levels. Uses a subset of the
-/// existing corpus positions (already timed at level 10; lower levels are strictly faster).
-/// Covers one midgame-regime position (n_empties=28, n_empties > 2*level for both levels tested)
-/// and one exact-solve-regime position (n_empties=8, n_empties <= 2*level for both) at each level.
+/// Levels below 10 must also match real edax: one midgame and one exact-solve position per
+/// level, reusing already-timed corpus positions.
 #[test]
 fn matches_real_edax_at_levels_below_ten() {
     let Some(edax) = edax_path() else {

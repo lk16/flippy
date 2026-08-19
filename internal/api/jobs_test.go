@@ -6,12 +6,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
 	"github.com/lk16/flippy/internal/othello"
 )
 
-func TestServer_ClaimJobs_PicksLowestDiscCountThenLevel(t *testing.T) {
+func TestServer_ClaimJob_PicksLowestDiscCountThenLevel(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
@@ -20,56 +19,32 @@ func TestServer_ClaimJobs_PicksLowestDiscCountThenLevel(t *testing.T) {
 
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board13s[0], board13s[1], board12}))
 
-	jobs, err := s.claimJobs(ctx, "worker-1", 1)
+	job, ok, err := s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
-	require.Len(t, jobs, 1)
-	require.Equal(t, board12, jobs[0].Board)
-	require.Equal(t, TargetLevel(12), jobs[0].Level)
+	require.True(t, ok)
+	require.Equal(t, board12, job.Board)
+	require.Equal(t, TargetLevel(12), job.Level)
 }
 
-func TestServer_ClaimJobs_ReturnsUpToCount(t *testing.T) {
-	s := testServer(t)
-	ctx := context.Background()
-
-	boards := testDistinctBoards(t, 12, 5)
-	require.NoError(t, s.repo.AddBoards(ctx, boards))
-
-	jobs, err := s.claimJobs(ctx, "worker-1", 3)
-	require.NoError(t, err)
-	require.Len(t, jobs, 3)
-}
-
-func TestServer_ClaimJobs_ReturnsFewerThanCountWhenNotEnoughCandidates(t *testing.T) {
+func TestServer_ClaimJob_SkipsAlreadyClaimedBoards(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
 	boards := testDistinctBoards(t, 12, 2)
 	require.NoError(t, s.repo.AddBoards(ctx, boards))
 
-	jobs, err := s.claimJobs(ctx, "worker-1", 5)
+	job1, ok, err := s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
-	require.Len(t, jobs, 2)
+	require.True(t, ok)
+
+	job2, ok, err := s.claimJob(ctx, "worker-2")
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	require.NotEqual(t, job1.Board, job2.Board)
 }
 
-func TestServer_ClaimJobs_SkipsAlreadyClaimedBoards(t *testing.T) {
-	s := testServer(t)
-	ctx := context.Background()
-
-	boards := testDistinctBoards(t, 12, 2)
-	require.NoError(t, s.repo.AddBoards(ctx, boards))
-
-	jobs1, err := s.claimJobs(ctx, "worker-1", 1)
-	require.NoError(t, err)
-	require.Len(t, jobs1, 1)
-
-	jobs2, err := s.claimJobs(ctx, "worker-2", 1)
-	require.NoError(t, err)
-	require.Len(t, jobs2, 1)
-
-	require.NotEqual(t, jobs1[0].Board, jobs2[0].Board)
-}
-
-func TestServer_ClaimJobs_SkipsFullyLearnedBoards(t *testing.T) {
+func TestServer_ClaimJob_SkipsFullyLearnedBoards(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
@@ -79,18 +54,14 @@ func TestServer_ClaimJobs_SkipsFullyLearnedBoards(t *testing.T) {
 		Level: TargetLevel(12), Score: 0,
 	}))
 
-	jobs, err := s.claimJobs(ctx, "worker-1", 1)
+	_, ok, err := s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
-	require.Empty(t, jobs)
+	require.False(t, ok)
 }
 
-// TestServer_ClaimJobs_LeafBoardsDoNotStarveDeeperCandidates covers the
-// starvation bug ListLearnable's level cutoff exists to prevent: once every
-// 12-disc leaf is fully learned, they still sort ahead of any 13-disc board
-// (lower disc count wins regardless of level), so a naive candidate batch
-// would consist entirely of already-done leaves and never reach the real
-// work below them.
-func TestServer_ClaimJobs_LeafBoardsDoNotStarveDeeperCandidates(t *testing.T) {
+// Covers the starvation bug ListLearnable's level cutoff prevents: fully learned leaves sort
+// ahead of deeper unlearned boards and would otherwise fill the whole candidate batch.
+func TestServer_ClaimJob_LeafBoardsDoNotStarveDeeperCandidates(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
@@ -105,114 +76,122 @@ func TestServer_ClaimJobs_LeafBoardsDoNotStarveDeeperCandidates(t *testing.T) {
 	board13 := testBoard(t, 13)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board13}))
 
-	jobs, err := s.claimJobs(ctx, "worker-1", 1)
+	job, ok, err := s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
-	require.Len(t, jobs, 1)
-	require.Equal(t, board13, jobs[0].Board)
-	require.Equal(t, TargetLevel(13), jobs[0].Level)
+	require.True(t, ok)
+	require.Equal(t, board13, job.Board)
+	require.Equal(t, TargetLevel(13), job.Level)
 }
 
-func TestServer_ClaimJobs_SkipsOutOfRangeDiscCounts(t *testing.T) {
+func TestServer_ClaimJob_SkipsOutOfRangeDiscCounts(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
 	board35 := testBoard(t, 35)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board35}))
 
-	jobs, err := s.claimJobs(ctx, "worker-1", 1)
+	_, ok, err := s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
-	require.Empty(t, jobs)
+	require.False(t, ok)
 }
 
-func TestServer_ClaimJobs_NoBoardsAvailable(t *testing.T) {
+func TestServer_ClaimJob_NoBoardsAvailable(t *testing.T) {
 	s := testServer(t)
 
-	jobs, err := s.claimJobs(context.Background(), "worker-1", 1)
+	_, ok, err := s.claimJob(context.Background(), "worker-1")
 	require.NoError(t, err)
-	require.Empty(t, jobs)
+	require.False(t, ok)
 }
 
-// TestServer_ClaimJobs_AdvancesFloorPastFullyLearnedDiscCount covers the job floor cache: once a claim
-// lands above the previous floor, that's proof the skipped disc counts had nothing claimable left, so
-// the floor should advance to avoid rescanning them on the next call.
-func TestServer_ClaimJobs_AdvancesFloorPastFullyLearnedDiscCount(t *testing.T) {
+// TestServer_ClaimJob_StaleFloorSkipsNewlyAddedLowerBoards documents the accepted trade-off of
+// deriving the floor from the periodically rebuilt book_stats hash: boards added below the floor
+// after the last rebuild are invisible to claimJob until the next rebuild.
+func TestServer_ClaimJob_StaleFloorSkipsNewlyAddedLowerBoards(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	board12 := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board12}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board12, db.Evaluation{
+	board12s := testDistinctBoards(t, 12, 2)
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board12s[0]}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, board12s[0], db.Evaluation{
 		Level: TargetLevel(12), Score: 0,
 	}))
-
 	board13 := testBoard(t, 13)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board13}))
 
-	jobs, err := s.claimJobs(ctx, "worker-1", 1)
-	require.NoError(t, err)
-	require.Len(t, jobs, 1)
-	require.Equal(t, board13, jobs[0].Board)
+	// The rebuilt floor is 13: every 12-disc board known to the hash is fully learned.
+	require.NoError(t, s.rebuildBookStats(ctx))
 
-	floor, err := s.getJobFloor(ctx, book.LeafDiscs)
+	// A 12-disc board added after the rebuild stays invisible until the next one.
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board12s[1]}))
+
+	job, ok, err := s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
-	require.Equal(t, 13, floor)
+	require.True(t, ok)
+	require.Equal(t, board13, job.Board)
 }
 
-func TestServer_ClaimJobs_AdvancesFloorToHighestClaimedDiscCountInBatch(t *testing.T) {
-	s := testServer(t)
-	ctx := context.Background()
-
-	board12 := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board12}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board12, db.Evaluation{
-		Level: TargetLevel(12), Score: 0,
-	}))
-
-	board13 := testBoard(t, 13)
-	board14 := testBoard(t, 14)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board13, board14}))
-
-	jobs, err := s.claimJobs(ctx, "worker-1", 2)
-	require.NoError(t, err)
-	require.Len(t, jobs, 2)
-
-	floor, err := s.getJobFloor(ctx, book.LeafDiscs)
-	require.NoError(t, err)
-	require.Equal(t, 14, floor)
+func TestTargetLevel(t *testing.T) {
+	require.Equal(t, 40, TargetLevel(12))
+	require.Equal(t, 40, TargetLevel(13))
+	require.Equal(t, 36, TargetLevel(14))
+	require.Equal(t, 36, TargetLevel(16))
+	require.Equal(t, 34, TargetLevel(17))
+	require.Equal(t, 34, TargetLevel(20))
+	require.Equal(t, 32, TargetLevel(21))
+	require.Equal(t, 32, TargetLevel(30))
+	require.Equal(t, 32, TargetLevel(64))
 }
 
-func TestServer_ClaimJobs_DoesNotAdvanceFloorWhenClaimingAtFloor(t *testing.T) {
-	s := testServer(t)
-	ctx := context.Background()
+// TestTargetLevelTiers_MatchTargetLevel guards the contract handleLevelConfig relies on: the tiers
+// served to the frontend must reproduce TargetLevel for every disc count, so the frontend's target
+// for a board is exactly the one handleAnalyzeRequest clamps its requests to.
+func TestTargetLevelTiers_MatchTargetLevel(t *testing.T) {
+	tiers := TargetLevelTiers()
+	require.NotEmpty(t, tiers)
+	require.Equal(t, 64, tiers[len(tiers)-1].MaxDiscs, "last tier must cover a full board")
 
-	board12 := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board12}))
-
-	jobs, err := s.claimJobs(ctx, "worker-1", 1)
-	require.NoError(t, err)
-	require.Len(t, jobs, 1)
-
-	floor, err := s.getJobFloor(ctx, book.LeafDiscs)
-	require.NoError(t, err)
-	require.Equal(t, book.LeafDiscs, floor)
+	for discCount := range 65 {
+		var want int
+		for _, tier := range tiers {
+			if discCount <= tier.MaxDiscs {
+				want = tier.Level
+				break
+			}
+		}
+		require.Equal(t, want, TargetLevel(discCount), "disc count %d", discCount)
+	}
 }
 
-// TestServer_ClaimJobs_CachedFloorSkipsLowerUnlearnedBoards documents the accepted trade-off of caching
-// the floor: while the cache is fresh (within jobFloorTTL), boards below it are invisible to claimJobs
-// even if unlearned. This only matters for boards added below the floor after it was set (see
-// internal/loader.ImportGames), and self-heals once the cache entry expires.
-func TestServer_ClaimJobs_CachedFloorSkipsLowerUnlearnedBoards(t *testing.T) {
-	s := testServer(t)
-	ctx := context.Background()
+// TestIsBookQuality covers the level floor handleSubmitJobResult applies to every submission:
+// only a search at least as deep as the board's target level -- or one that already ran the game
+// out -- may reach the DB.
+func TestIsBookQuality(t *testing.T) {
+	tests := []struct {
+		name      string
+		discCount int
+		level     int
+		want      bool
+	}{
+		{"below target", 14, PriorityLevel, false},
+		{"one rung below target", 14, TargetLevel(14) - 2, false},
+		{"at target", 14, TargetLevel(14), true},
+		{"above target", 14, TargetLevel(14) + 2, true},
+		{"at target, deepest tier", 30, TargetLevel(30), true},
+		// 52 discs is past MaxSavableDiscs, so the disc-count check keeps it out of the DB anyway,
+		// but it is the shape the IsFinal clause exists for: a shallow search that is still the
+		// game-theoretic result, which no deeper level could improve on.
+		{"below target but final", 52, 12, true},
+	}
 
-	board12 := testBoard(t, 12)
-	board13 := testBoard(t, 13)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board12, board13}))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, isBookQuality(tt.discCount, tt.level))
+		})
+	}
+}
 
-	require.NoError(t, s.setJobFloor(ctx, 13))
-
-	jobs, err := s.claimJobs(ctx, "worker-1", 1)
-	require.NoError(t, err)
-	require.Len(t, jobs, 1)
-	require.Equal(t, board13, jobs[0].Board)
+// TestTargetLevelTiers_ReturnsACopy makes sure a caller cannot rewrite the table TargetLevel reads.
+func TestTargetLevelTiers_ReturnsACopy(t *testing.T) {
+	TargetLevelTiers()[0].Level = 1
+	require.Equal(t, 40, TargetLevel(4))
 }

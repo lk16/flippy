@@ -103,10 +103,7 @@ func TestHandleWebSocket_EvaluationRequest_FallsBackToMinimaxCache(t *testing.T)
 	require.Equal(t, evaluationSourceMinimax, entry["source"])
 }
 
-// TestHandleWebSocket_EvaluationRequest_OmitsUnlearnedBoards covers a board
-// that has a row but hasn't been learned yet (still the zero-valued
-// Evaluation): it must be omitted from the response just like a board with
-// no row at all, not returned as a real score of 0.
+// A board with a row but no evaluation yet must be omitted, not returned as a real score of 0.
 func TestHandleWebSocket_EvaluationRequest_OmitsUnlearnedBoards(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
@@ -228,8 +225,7 @@ func TestHandleWebSocket_AnalyzeRequest_EnqueuesMissingBoards(t *testing.T) {
 	require.Equal(t, board1.String(), entry["board"])
 
 	// board2 (normalized) should be in the priority queue.
-	pending, err := s.dequeuePriority(ctx, 10)
-	require.NoError(t, err)
+	pending := drainPriority(t, s)
 	pendingBoards := make([]string, len(pending))
 	for i, e := range pending {
 		pendingBoards[i] = e.Board
@@ -237,10 +233,8 @@ func TestHandleWebSocket_AnalyzeRequest_EnqueuesMissingBoards(t *testing.T) {
 	require.Contains(t, pendingBoards, board2.String())
 }
 
-// TestHandleWebSocket_AnalyzeRequest_ForcedPassEnqueuesPostPassBoard verifies that requesting
-// analysis of a forced-pass board (no legal move, opponent can move) enqueues the board *after*
-// the pass — whose negated evaluation is the pass board's evaluation — rather than the pass board
-// itself, which edax cannot search.
+// Analyzing a forced-pass board must enqueue the post-pass board instead: edax cannot search a
+// position with no legal move.
 func TestHandleWebSocket_AnalyzeRequest_ForcedPassEnqueuesPostPassBoard(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
@@ -261,8 +255,7 @@ func TestHandleWebSocket_AnalyzeRequest_ForcedPassEnqueuesPostPassBoard(t *testi
 	require.NoError(t, wsjson.Read(ctx, conn, &resp))
 	require.Equal(t, 1, resp.ID)
 
-	pending, err := s.dequeuePriority(ctx, 10)
-	require.NoError(t, err)
+	pending := drainPriority(t, s)
 	pendingBoards := make([]string, len(pending))
 	for i, e := range pending {
 		pendingBoards[i] = e.Board
@@ -304,8 +297,7 @@ func TestHandleWebSocket_AnalyzeRequest_SameSearchNotEnqueued(t *testing.T) {
 	require.Equal(t, float64(73), entry["confidence"])
 
 	// ... and no job is queued to compute it again.
-	pending, err := s.dequeuePriority(ctx, 10)
-	require.NoError(t, err)
+	pending := drainPriority(t, s)
 	require.Empty(t, pending)
 }
 
@@ -322,10 +314,9 @@ func TestHandleWebSocket_AnalyzeRequest_FinalResultNotEnqueued(t *testing.T) {
 		Level: 10, Depth: 20, Confidence: 100, Score: 6, Source: evaluationSourceEdax,
 	})
 
-	s.handleAnalyzeRequest(ctx, []string{board.String()}, 28)
+	s.handleAnalyzeRequest(ctx, []string{board.String()}, 28, "")
 
-	pending, err := s.dequeuePriority(ctx, 10)
-	require.NoError(t, err)
+	pending := drainPriority(t, s)
 	require.Empty(t, pending)
 }
 
@@ -397,8 +388,7 @@ func TestHandleWebSocket_AnalyzeRequest_GameOverNotEnqueued(t *testing.T) {
 	var resp wsOutgoing
 	require.NoError(t, wsjson.Read(ctx, conn, &resp))
 
-	pending, err := s.dequeuePriority(ctx, 10)
-	require.NoError(t, err)
+	pending := drainPriority(t, s)
 	require.Empty(t, pending)
 }
 
@@ -424,8 +414,7 @@ func TestHandleWebSocket_AnalyzeRequest_NoDuplicatesInQueue(t *testing.T) {
 	send(2) // same board again
 
 	// Only one entry must be in the queue.
-	dequeued, err := s.dequeuePriority(ctx, 10)
-	require.NoError(t, err)
+	dequeued := drainPriority(t, s)
 	count := 0
 	for _, entry := range dequeued {
 		if entry.Board == board.String() {

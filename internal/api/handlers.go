@@ -7,22 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
+	"log"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
 	"github.com/lk16/flippy/internal/edax"
 	"github.com/lk16/flippy/internal/othello"
-)
-
-// minJobsPerRequest and maxJobsPerRequest bound the count param on GET /api/jobs.
-const (
-	minJobsPerRequest = 1
-	maxJobsPerRequest = 10
 )
 
 // writeJSON encodes v as the JSON response body with the given status code.
@@ -37,8 +31,7 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": err.Error()})
 }
 
-// handleGetJob handles GET /api/jobs: claims and returns up to count available jobs as a JSON array,
-// or 204 if none.
+// handleGetJob handles GET /api/jobs: claims and returns one available job, or 204 if none.
 func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	workerID := r.URL.Query().Get("worker_id")
 	if workerID == "" {
@@ -46,39 +39,21 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	countParam := r.URL.Query().Get("count")
-	if countParam == "" {
-		writeError(w, http.StatusBadRequest, errors.New("missing count"))
-		return
-	}
-	count, err := strconv.Atoi(countParam)
-	if err != nil || count < minJobsPerRequest || count > maxJobsPerRequest {
-		writeError(w, http.StatusBadRequest,
-			fmt.Errorf("count must be an integer between %d and %d", minJobsPerRequest, maxJobsPerRequest))
-		return
-	}
-
-	jobs, err := s.claimJobs(r.Context(), workerID, count)
+	job, ok, err := s.claimJob(r.Context(), workerID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if len(jobs) == 0 {
+	if !ok {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
-	responses := make([]jobResponse, len(jobs))
-	for i, job := range jobs {
-		responses[i] = jobResponse{Board: job.Board.String(), Level: job.Level}
-	}
-
-	writeJSON(w, http.StatusOK, responses)
+	writeJSON(w, http.StatusOK, jobResponse{Board: job.Board.String(), Level: job.Level})
 }
 
-// maxLevel bounds a submitted edax search level. It's well above any level flippy actually requests
-// (see TargetLevel) but stays within the smallint column the evaluation is stored in, so an
-// out-of-range value is a clean 400 rather than a Postgres error surfaced as a 500.
+// maxLevel bounds a submitted search level: above anything flippy requests, but within the
+// smallint column, so an out-of-range value is a 400 rather than a Postgres error.
 const maxLevel = 60
 
 // validateJobResult checks that a submitted evaluation's stored values are within sane bounds.
@@ -92,12 +67,9 @@ func validateJobResult(req jobResultRequest) error {
 	return nil
 }
 
-// checkReportedSearchParams logs when the depth/confidence a worker reports differ from what
-// edax.SearchParams derives from (disc count, level). Neither is stored -- deriving them is only
-// sound as long as the worker's edax agrees with the ported search_global_init, and this is the one
-// place that comparison can still be made. A mismatch means an edax build that retuned the level
-// table, so it's worth knowing about, but the score is still a real result: warn, don't reject.
-// Workers that send neither field are silently accepted.
+// checkReportedSearchParams logs when a worker's reported depth/confidence disagree with
+// edax.SearchParams -- the sign of an edax build with a retuned level table. The score is still a
+// real result: log, don't reject. Workers that send neither field are silently accepted.
 func checkReportedSearchParams(req jobResultRequest, discCount int) {
 	if req.Depth == 0 && req.Confidence == 0 {
 		return
@@ -105,22 +77,14 @@ func checkReportedSearchParams(req jobResultRequest, discCount int) {
 
 	depth, confidence := edax.SearchParams(discCount, req.Level)
 	if req.Depth != depth || req.Confidence != confidence {
-		slog.Warn("worker reported search params that disagree with edax's level table",
-			"board", req.Board, "level", req.Level, "disc_count", discCount,
-			"reported_depth", req.Depth, "reported_confidence", req.Confidence,
-			"derived_depth", depth, "derived_confidence", confidence)
+		log.Printf("board %s (%d discs) at level %d: worker reported %d@%d%%, edax's level table says %d@%d%%",
+			req.Board, discCount, req.Level, req.Depth, req.Confidence, depth, confidence)
 	}
 }
 
-// isBookQuality reports whether an evaluation is deep enough to belong in the boards table.
-// Interactive (priority) analysis walks a board up from PriorityLevel in +2 rounds and every rung
-// is its own job, so without this floor a single PGN review would write a dozen searches shallower
-// than TargetLevel -- the depth the book is defined at -- into the DB, each of them a row
-// ListLearnable then has to redo anyway. A search that already ran the game out counts as book
-// quality whatever its level: no deeper search can change its score (edax.IsFinal).
-//
-// Only the priority path needs the check: ListLearnable jobs are always handed out at
-// TargetLevel(discCount) (see claimJobs), so they clear the floor by construction.
+// isBookQuality reports whether an evaluation is deep enough for the boards table: at least the
+// board's target level, or a search that ran the game out, which no deeper search can improve on.
+// Enforced on every submission so interactive analysis's shallow rungs never enter the book.
 func isBookQuality(discCount, level int) bool {
 	return level >= TargetLevel(discCount) || edax.IsFinal(discCount, level)
 }
@@ -167,23 +131,32 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 		Source: evaluationSourceEdax,
 	})
 
-	// Check whether this job originated from the priority queue.
 	isPriority, err := s.consumePriorityClaim(r.Context(), normalized.String())
 	if err != nil {
-		slog.Warn("failed to check priority claim; treating as non-priority", "error", err)
+		log.Printf("failed to check priority claim; treating as non-priority: %v", err)
 	}
 
 	savedToDB := false
 
-	if isPriority {
-		if discCount <= book.MaxSavableDiscs && isBookQuality(discCount, req.Level) {
+	switch {
+	case !isBookQuality(discCount, req.Level):
+		// Below book quality: accepted but never persisted; the ephemeral cache is the only record.
+		// A savable priority board still gets an empty-evaluation row so ListLearnable finds it
+		// later (AddBoards never downgrades an existing row).
+		if isPriority && discCount <= book.MaxSavableDiscs {
+			if err := s.repo.AddBoards(r.Context(), []othello.NormalizedBoard{normalized}); err != nil {
+				log.Printf("failed to schedule priority board for learning: %v", err)
+			}
+		}
+	case isPriority:
+		if discCount <= book.MaxSavableDiscs {
 			if saveErr := s.repo.SaveEvaluation(r.Context(), normalized, eval); saveErr != nil {
 				if errors.Is(saveErr, db.ErrBoardNotFound) {
 					// Board has no row yet; add one and retry.
 					if addErr := s.repo.AddBoards(r.Context(), []othello.NormalizedBoard{normalized}); addErr != nil {
-						slog.Error("failed to add priority board", "error", addErr)
+						log.Printf("failed to add priority board: %v", addErr)
 					} else if saveErr2 := s.repo.SaveEvaluation(r.Context(), normalized, eval); saveErr2 != nil {
-						slog.Error("failed to save priority evaluation after AddBoards", "error", saveErr2)
+						log.Printf("failed to save priority evaluation after AddBoards: %v", saveErr2)
 					} else {
 						savedToDB = true
 					}
@@ -195,12 +168,9 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 				savedToDB = true
 			}
 		}
-		// Ineligible (too many discs, or shallower than the book's target level): the ephemeral
-		// cache is the only record, and the frontend keeps asking one level deeper until a result
-		// that does qualify comes back.
-	} else {
-		// Non-priority path: SaveEvaluation must succeed; ErrBoardNotFound is a real bug here since every
-		// ListLearnable-originated board is guaranteed to already have a row.
+		// Too many discs: the ephemeral cache is the only record.
+	default:
+		// ErrBoardNotFound is a real bug here: every ListLearnable board already has a row.
 		if err := s.repo.SaveEvaluation(r.Context(), normalized, eval); err != nil {
 			if errors.Is(err, db.ErrBoardNotFound) {
 				writeError(w, http.StatusNotFound, err)
@@ -213,8 +183,6 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if savedToDB {
-		s.invalidateStatsCache(r.Context())
-
 		// Only a leaf-disc-count save can change the minimax backfill.
 		if discCount == book.LeafDiscs {
 			if err := s.cache.Rebuild(r.Context()); err != nil {
@@ -238,8 +206,7 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleReleaseJob handles POST /api/jobs/release: releases a worker's claim on a board it didn't
-// finish (e.g. a graceful shutdown with the job still queued or in flight), so another worker can pick
-// it up without waiting out claimTTL.
+// finish, so another worker can pick it up without waiting out claimTTL.
 func (s *Server) handleReleaseJob(w http.ResponseWriter, r *http.Request) {
 	var req releaseJobRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -298,8 +265,7 @@ func (s *Server) lookupEvaluation(ctx context.Context, board othello.Board) (eva
 		return evaluationResponse{Score: score, Source: evaluationSourceMinimax}, true, nil
 	}
 
-	// Ephemeral cache: covers priority-computed evaluations for boards with no DB row (>30 discs)
-	// or not yet persisted.
+	// Covers priority-computed evaluations that never reach the DB (too many discs, below target).
 	if cached, ok, err := s.getAnalysisResult(ctx, board.Normalize().String()); err == nil && ok {
 		return cached, true, nil
 	}
@@ -368,7 +334,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.heartbeat(r.Context(), req.WorkerID, req.Hostname, req.GitCommit); err != nil {
+	if err := s.heartbeat(r.Context(), req.WorkerID, req.Hostname, req.GitCommit, req.Board); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -392,15 +358,13 @@ func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, entries)
 }
 
-// handleStats handles GET /api/stats: returns move-counts per (disc count, level) cell.
-// The result is Redis-cached because the underlying GROUP BY scans every row in the boards table
-// and becomes slow at millions of rows. The cache is invalidated whenever an evaluation is saved
-// (see handleSubmitJobResult) and expires after statsTTL as a safety net for loader-added boards.
+// handleStats handles GET /api/stats: returns position counts per (disc count, depth, confidence)
+// cell, served from the periodically rebuilt book_stats hash (see RunBookStatsRefresh). If the hash
+// is missing (Redis flushed, first boot race), the DB is queried directly.
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
-	if cached, err := s.getCachedStats(r.Context()); err == nil && cached != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(cached)
+	entries, ok, err := s.getBookStats(r.Context())
+	if err == nil && ok {
+		writeJSON(w, http.StatusOK, entries)
 		return
 	}
 
@@ -410,26 +374,12 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := json.Marshal(statEntries(stats))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	data = append(data, '\n')
-
-	s.setCachedStats(r.Context(), data)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	writeJSON(w, http.StatusOK, statEntries(stats))
 }
 
-// statEntries turns per-(disc count, level) counts into per-(disc count, depth, confidence) counts.
-// Levels are an implementation detail of how a search is requested: what a board is actually worth
-// is the search it got, so levels describing the same search at the same disc count are merged.
-// Unlearned boards (level 0) are reported as depth 0, confidence 0 rather than what the level table
-// says a zero-level search would be, which would read as a full-confidence result.
-// The result is ordered by disc count, then depth, then confidence.
+// statEntries merges per-(disc count, level) counts into sorted per-(disc count, depth, confidence)
+// entries: levels describing the same search are one entry, and unlearned boards (level 0) report
+// depth 0, confidence 0 rather than what the level table would claim for them.
 func statEntries(stats []db.LevelStat) []statEntry {
 	counts := make(map[statEntry]int, len(stats))
 	for _, stat := range stats {
@@ -446,6 +396,12 @@ func statEntries(stats []db.LevelStat) []statEntry {
 		entries = append(entries, key)
 	}
 
+	sortStatEntries(entries)
+	return entries
+}
+
+// sortStatEntries orders entries by disc count, then depth, then confidence.
+func sortStatEntries(entries []statEntry) {
 	slices.SortFunc(entries, func(a, b statEntry) int {
 		return cmp.Or(
 			cmp.Compare(a.DiscCount, b.DiscCount),
@@ -453,8 +409,6 @@ func statEntries(stats []db.LevelStat) []statEntry {
 			cmp.Compare(a.Confidence, b.Confidence),
 		)
 	})
-
-	return entries
 }
 
 // handleLevelConfig handles GET /api/level-config: returns the constants the frontend needs to
@@ -498,8 +452,6 @@ func (s *Server) handlePGN(w http.ResponseWriter, r *http.Request) {
 		}
 		firstGame = game
 	} else {
-		// ParsePGNLenient accepts any PGN regardless of which metadata tags are present;
-		// handlePGN only needs the board sequence, not game metadata.
 		games, parseErr := othello.ParsePGNLenient(text)
 		if parseErr != nil {
 			writeError(w, http.StatusBadRequest, parseErr)
@@ -519,4 +471,86 @@ func (s *Server) handlePGN(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, pgnResponse{Boards: boardStrings})
+}
+
+// jobResponse is the JSON shape of a Job returned by GET /api/jobs.
+type jobResponse struct {
+	Board string `json:"board"`
+	Level int    `json:"level"`
+}
+
+// jobResultRequest is the JSON body POSTed to /api/jobs/result. Depth and Confidence are not
+// stored; they stay on the wire so checkReportedSearchParams can catch a mismatched edax build.
+type jobResultRequest struct {
+	WorkerID   string `json:"worker_id"`
+	Board      string `json:"board"`
+	Level      int    `json:"level"`
+	Depth      int    `json:"depth"`
+	Confidence int    `json:"confidence"`
+	Score      int    `json:"score"`
+}
+
+// releaseJobRequest is the JSON body POSTed to /api/jobs/release.
+type releaseJobRequest struct {
+	WorkerID string `json:"worker_id"`
+	Board    string `json:"board"`
+}
+
+// heartbeatRequest is the JSON body POSTed to /api/workers/heartbeat. Board is the board the worker
+// currently holds a claim on, if any, so the server can refresh that claim's TTL.
+type heartbeatRequest struct {
+	WorkerID  string `json:"worker_id"`
+	Hostname  string `json:"hostname"`
+	GitCommit string `json:"git_commit"`
+	Board     string `json:"board,omitempty"`
+}
+
+// evaluationSourceEdax marks an evaluationResponse as a directly-learned edax result.
+const evaluationSourceEdax = "edax"
+
+// evaluationSourceMinimax marks an evaluationResponse as backfilled from the internal/book cache.
+const evaluationSourceMinimax = "minimax"
+
+// evaluationSourceFinal marks an evaluationResponse as a board's actual final score.
+const evaluationSourceFinal = "final"
+
+// evaluationResponse is the JSON shape of an evaluation, returned by GET /api/boards. Depth and
+// Confidence are derived via edax.SearchParams, not stored per board.
+type evaluationResponse struct {
+	Level      int    `json:"level"`
+	Depth      int    `json:"depth"`
+	Confidence int    `json:"confidence"`
+	Score      int    `json:"score"`
+	Source     string `json:"source"`
+}
+
+// statEntry is one row of the GET /api/stats response: how many boards with DiscCount discs have
+// been searched to Depth at Confidence percent.
+type statEntry struct {
+	DiscCount  int `json:"disc_count"`
+	Depth      int `json:"depth"`
+	Confidence int `json:"confidence"`
+	Count      int `json:"count"`
+}
+
+// workerResponse is one entry of the GET /api/workers response.
+type workerResponse struct {
+	ID                string    `json:"id"`
+	Hostname          string    `json:"hostname"`
+	GitCommit         string    `json:"git_commit"`
+	PositionsComputed int       `json:"positions_computed"`
+	LastActive        time.Time `json:"last_active"`
+}
+
+// pgnResponse is the JSON body returned by POST /api/pgn.
+type pgnResponse struct {
+	Boards []string `json:"boards"`
+}
+
+// levelConfigResponse is the JSON body returned by GET /api/level-config. TargetLevels carries the
+// whole tier table so the frontend computes exactly the targets the server enforces.
+type levelConfigResponse struct {
+	PriorityLevel   int               `json:"priority_level"`
+	MaxSavableDiscs int               `json:"max_savable_discs"`
+	TargetLevels    []TargetLevelTier `json:"target_levels"`
 }

@@ -12,10 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestLogRequests_SupportsWebSocketUpgrade guards against the statusRecorder
-// wrapper hiding the underlying http.Hijacker: a WebSocket upgrade routed
-// through logRequests must still complete (it previously returned 501 because
-// coder/websocket's Accept type-asserts the ResponseWriter to http.Hijacker).
+// A WebSocket upgrade through logRequests must complete: the statusRecorder wrapper must not
+// hide the underlying http.Hijacker from websocket.Accept.
 func TestLogRequests_SupportsWebSocketUpgrade(t *testing.T) {
 	echo := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)

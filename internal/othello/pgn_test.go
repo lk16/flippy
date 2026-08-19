@@ -232,11 +232,8 @@ func TestParsePGN_DrawResult(t *testing.T) {
 	require.Nil(t, games[0].Metadata().Winner)
 }
 
-// TestParsePGN_UnknownWinner covers Result values seen in the wild that
-// don't fit the "<black>-<white>" disc count format: absent entirely (some
-// older exports), PGN's own draw notation, and a malformed/placeholder
-// value questgames.net writes for at least one unfinished game. None of
-// these should fail parsing, since nothing downstream relies on Winner.
+// TestParsePGN_UnknownWinner covers Result values seen in the wild that don't fit the
+// "<black>-<white>" disc format: absent, PGN draw notation, and a malformed questgames.net value.
 func TestParsePGN_UnknownWinner(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -257,8 +254,7 @@ func TestParsePGN_UnknownWinner(t *testing.T) {
 	}
 }
 
-// TestParsePGN_ProvisionalRating covers flyordie.com's convention of
-// prefixing a provisional rating with "?" (e.g. "?144").
+// TestParsePGN_ProvisionalRating covers flyordie.com's "?" provisional-rating prefix ("?144").
 func TestParsePGN_ProvisionalRating(t *testing.T) {
 	games, err := ParsePGN(pgnBase(map[string]string{"WhiteElo": "?144"}, "1. e6 f4"), "")
 	require.NoError(t, err)
@@ -266,9 +262,8 @@ func TestParsePGN_ProvisionalRating(t *testing.T) {
 	require.Equal(t, 144, games[0].Metadata().Players[White].Rating)
 }
 
-// TestParsePGN_StarTerminator covers PGN's "*" result token, written for an
-// unfinished or ongoing game: it must be skipped like the disc-count result
-// tokens rather than parsed as a move (which would fail).
+// TestParsePGN_StarTerminator covers PGN's "*" result token (unfinished game): it must be
+// skipped rather than parsed as a move.
 func TestParsePGN_StarTerminator(t *testing.T) {
 	games, err := ParsePGN(pgnBase(nil, "1. e6 f4 *"), "")
 	require.NoError(t, err)
@@ -281,9 +276,7 @@ func TestParsePGN_StarTerminator(t *testing.T) {
 	require.Equal(t, []int{moves, f4}, games[0].Moves())
 }
 
-// TestParsePGN_VariantCaseInsensitive covers XOT variant tags written in any
-// case (e.g. "XOT", "Xot"): they must be recognized rather than rejected as an
-// unknown variant.
+// TestParsePGN_VariantCaseInsensitive covers XOT variant tags written in any case ("XOT", "Xot").
 func TestParsePGN_VariantCaseInsensitive(t *testing.T) {
 	for _, variant := range []string{"xot", "XOT", "Xot"} {
 		t.Run(variant, func(t *testing.T) {

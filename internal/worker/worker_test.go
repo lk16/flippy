@@ -19,22 +19,23 @@ import (
 type fakeAPIClient struct {
 	mu sync.Mutex
 
-	getJobs         func(ctx context.Context, count int) ([]Job, error)
+	getJob          func(ctx context.Context) (Job, bool, error)
 	submitJobResult func(ctx context.Context, board string, level int, eval edax.Evaluation) error
 	releaseJob      func(ctx context.Context, board string) error
-	heartbeat       func(ctx context.Context) error
+	heartbeat       func(ctx context.Context, board string) error
 
-	getJobsCalls   []int
-	submitCalls    []jobResultRequest
-	releaseCalls   []string
-	heartbeatCalls int
+	getJobCalls     int
+	submitCalls     []jobResultRequest
+	releaseCalls    []string
+	heartbeatCalls  int
+	heartbeatBoards []string
 }
 
-func (f *fakeAPIClient) GetJobs(ctx context.Context, count int) ([]Job, error) {
+func (f *fakeAPIClient) GetJob(ctx context.Context) (Job, bool, error) {
 	f.mu.Lock()
-	f.getJobsCalls = append(f.getJobsCalls, count)
+	f.getJobCalls++
 	f.mu.Unlock()
-	return f.getJobs(ctx, count)
+	return f.getJob(ctx)
 }
 
 func (f *fakeAPIClient) SubmitJobResult(ctx context.Context, board string, level int, eval edax.Evaluation) error {
@@ -53,11 +54,12 @@ func (f *fakeAPIClient) ReleaseJob(ctx context.Context, board string) error {
 	return f.releaseJob(ctx, board)
 }
 
-func (f *fakeAPIClient) Heartbeat(ctx context.Context) error {
+func (f *fakeAPIClient) Heartbeat(ctx context.Context, board string) error {
 	f.mu.Lock()
 	f.heartbeatCalls++
+	f.heartbeatBoards = append(f.heartbeatBoards, board)
 	f.mu.Unlock()
-	return f.heartbeat(ctx)
+	return f.heartbeat(ctx, board)
 }
 
 func (f *fakeAPIClient) submitCallCount() int {
@@ -72,10 +74,10 @@ func (f *fakeAPIClient) heartbeatCallCount() int {
 	return f.heartbeatCalls
 }
 
-func (f *fakeAPIClient) getJobsCallCount() int {
+func (f *fakeAPIClient) getJobCallCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return len(f.getJobsCalls)
+	return f.getJobCalls
 }
 
 func (f *fakeAPIClient) releasedBoards() []string {
@@ -93,8 +95,7 @@ func (f *fakeEvaluator) Evaluate(board othello.Board, level int) (edax.Evaluatio
 	return f.evaluate(board, level)
 }
 
-// testWorker returns a Worker with fast intervals and a small job queue (capacity 3, low water 1),
-// suitable for deterministic tests of dequeueJob/runRefill interaction.
+// testWorker returns a Worker with fast intervals for deterministic tests.
 func testWorker(api apiClient, eval evaluator) *Worker {
 	return &Worker{
 		api:               api,
@@ -102,11 +103,7 @@ func testWorker(api apiClient, eval evaluator) *Worker {
 		heartbeatInterval: time.Millisecond,
 		noJobSleep:        time.Millisecond,
 		errorSleep:        time.Millisecond,
-		jobBatchSize:      3,
-		jobLowWater:       1,
 		statsInterval:     time.Hour,
-		jobs:              make(chan Job, 3),
-		refill:            make(chan struct{}, 1),
 	}
 }
 
@@ -116,10 +113,7 @@ func TestNew_SetsDefaults(t *testing.T) {
 	require.Equal(t, defaultHeartbeatInterval, w.heartbeatInterval)
 	require.Equal(t, defaultNoJobSleep, w.noJobSleep)
 	require.Equal(t, defaultErrorSleep, w.errorSleep)
-	require.Equal(t, defaultJobBatchSize, w.jobBatchSize)
-	require.Equal(t, defaultJobLowWater, w.jobLowWater)
 	require.Equal(t, defaultStatsInterval, w.statsInterval)
-	require.Equal(t, defaultJobBatchSize, cap(w.jobs))
 }
 
 func TestSleep_RespectsContextCancellation(t *testing.T) {
@@ -140,60 +134,6 @@ func TestSleep_WaitsFullDuration(t *testing.T) {
 	require.GreaterOrEqual(t, time.Since(start), 20*time.Millisecond)
 }
 
-// --- dequeueJob ---
-
-func TestWorker_DequeueJob_ReturnsQueuedJob(t *testing.T) {
-	w := testWorker(&fakeAPIClient{}, &fakeEvaluator{})
-	job := Job{Board: othello.NewBoardStart().String(), Level: 16}
-	w.jobs <- job
-
-	got, ok := w.dequeueJob(context.Background())
-	require.True(t, ok)
-	require.Equal(t, job, got)
-}
-
-func TestWorker_DequeueJob_ReturnsFalseOnContextCancellation(t *testing.T) {
-	w := testWorker(&fakeAPIClient{}, &fakeEvaluator{})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, ok := w.dequeueJob(ctx)
-	require.False(t, ok)
-}
-
-func TestWorker_DequeueJob_SignalsRefillAtLowWater(t *testing.T) {
-	w := testWorker(&fakeAPIClient{}, &fakeEvaluator{})
-	// jobLowWater is 1: queuing exactly 1 and dequeuing it drops the queue to 0, at or below low water.
-	w.jobs <- Job{Board: othello.NewBoardStart().String(), Level: 16}
-
-	_, ok := w.dequeueJob(context.Background())
-	require.True(t, ok)
-
-	select {
-	case <-w.refill:
-	default:
-		t.Fatal("expected a refill signal after dequeuing to at or below low water")
-	}
-}
-
-func TestWorker_DequeueJob_DoesNotSignalAboveLowWater(t *testing.T) {
-	w := testWorker(&fakeAPIClient{}, &fakeEvaluator{})
-	// jobLowWater is 1: queuing 3 (capacity) and dequeuing one leaves 2 in the queue, above low water.
-	for range 3 {
-		w.jobs <- Job{Board: othello.NewBoardStart().String(), Level: 16}
-	}
-
-	_, ok := w.dequeueJob(context.Background())
-	require.True(t, ok)
-
-	select {
-	case <-w.refill:
-		t.Fatal("did not expect a refill signal while the queue is above low water")
-	default:
-	}
-}
-
 // --- processJob ---
 
 func TestWorker_ProcessJob_EvaluatesAndSubmitsResult(t *testing.T) {
@@ -211,8 +151,9 @@ func TestWorker_ProcessJob_EvaluatesAndSubmitsResult(t *testing.T) {
 	}
 	w := testWorker(api, eval)
 
-	w.processJob(context.Background(), Job{Board: board.String(), Level: 24})
+	stillClaimed := w.processJob(context.Background(), Job{Board: board.String(), Level: 24})
 
+	require.False(t, stillClaimed)
 	require.Equal(t, []jobResultRequest{
 		{Board: board.String(), Level: 24, Depth: 24, Confidence: 100, Score: 6},
 	}, api.submitCalls)
@@ -228,8 +169,9 @@ func TestWorker_ProcessJob_UnparseableBoardIsSkipped(t *testing.T) {
 	}
 	w := testWorker(api, eval)
 
-	w.processJob(context.Background(), Job{Board: "not-a-board", Level: 24})
+	stillClaimed := w.processJob(context.Background(), Job{Board: "not-a-board", Level: 24})
 
+	require.False(t, stillClaimed)
 	require.Equal(t, 0, api.submitCallCount())
 }
 
@@ -240,19 +182,18 @@ func TestWorker_ProcessJob_EvaluateError(t *testing.T) {
 	}
 	w := testWorker(api, eval)
 
-	w.processJob(context.Background(), Job{Board: othello.NewBoardStart().String(), Level: 24})
+	stillClaimed := w.processJob(context.Background(), Job{Board: othello.NewBoardStart().String(), Level: 24})
 
+	require.False(t, stillClaimed)
 	require.Equal(t, 0, api.submitCallCount())
 }
 
-func TestWorker_ProcessJob_EvaluateErrorDuringShutdownReleasesClaimInsteadOfSubmitting(t *testing.T) {
+func TestWorker_ProcessJob_EvaluateErrorDuringShutdownKeepsClaim(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	board := othello.NewBoardStart().String()
-	api := &fakeAPIClient{
-		releaseJob: func(context.Context, string) error { return nil },
-	}
+	api := &fakeAPIClient{}
 	eval := &fakeEvaluator{
 		// Simulates the edax process having been killed by a concurrent
 		// shutdown while Evaluate was blocked on it.
@@ -262,10 +203,11 @@ func TestWorker_ProcessJob_EvaluateErrorDuringShutdownReleasesClaimInsteadOfSubm
 	}
 	w := testWorker(api, eval)
 
-	w.processJob(ctx, Job{Board: board, Level: 24})
+	stillClaimed := w.processJob(ctx, Job{Board: board, Level: 24})
 
+	// The claim is still held; Run releases it after the loops stop.
+	require.True(t, stillClaimed)
 	require.Equal(t, 0, api.submitCallCount())
-	require.Equal(t, []string{board}, api.releasedBoards())
 }
 
 func TestWorker_ProcessJob_SubmitError(t *testing.T) {
@@ -277,50 +219,27 @@ func TestWorker_ProcessJob_SubmitError(t *testing.T) {
 	}
 	w := testWorker(api, eval)
 
-	w.processJob(context.Background(), Job{Board: othello.NewBoardStart().String(), Level: 24})
+	stillClaimed := w.processJob(context.Background(), Job{Board: othello.NewBoardStart().String(), Level: 24})
 
+	require.False(t, stillClaimed)
 	// SubmitJobResult was attempted (and recorded) even though it failed.
 	require.Equal(t, 1, api.submitCallCount())
 }
 
-// --- releaseQueuedJobs ---
+// --- runJobs ---
 
-func TestWorker_ReleaseQueuedJobs_ReleasesEveryQueuedJob(t *testing.T) {
-	var released []string
-	api := &fakeAPIClient{
-		releaseJob: func(_ context.Context, board string) error {
-			released = append(released, board)
-			return nil
-		},
-	}
-	w := testWorker(api, &fakeEvaluator{})
-	w.jobs <- Job{Board: "board-a", Level: 16}
-	w.jobs <- Job{Board: "board-b", Level: 16}
-
-	w.releaseQueuedJobs()
-
-	require.ElementsMatch(t, []string{"board-a", "board-b"}, released)
-	require.Empty(t, w.jobs)
-}
-
-func TestWorker_ReleaseQueuedJobs_EmptyQueueIsNoop(t *testing.T) {
-	api := &fakeAPIClient{
-		releaseJob: func(context.Context, string) error {
-			t.Fatal("ReleaseJob must not be called for an empty queue")
-			return nil
-		},
-	}
-	w := testWorker(api, &fakeEvaluator{})
-
-	w.releaseQueuedJobs()
-}
-
-// --- runOneJob (dequeueJob + processJob wired together) ---
-
-func TestWorker_RunOneJob_ProcessesQueuedJob(t *testing.T) {
+func TestWorker_RunJobs_ClaimsEvaluatesAndSubmits(t *testing.T) {
 	board := othello.NewBoardStart()
+	var served bool
 
 	api := &fakeAPIClient{
+		getJob: func(context.Context) (Job, bool, error) {
+			if served {
+				return Job{}, false, nil
+			}
+			served = true
+			return Job{Board: board.String(), Level: 24}, true, nil
+		},
 		submitJobResult: func(context.Context, string, int, edax.Evaluation) error { return nil },
 	}
 	eval := &fakeEvaluator{
@@ -329,156 +248,66 @@ func TestWorker_RunOneJob_ProcessesQueuedJob(t *testing.T) {
 		},
 	}
 	w := testWorker(api, eval)
-	w.jobs <- Job{Board: board.String(), Level: 24}
-
-	w.runOneJob(context.Background())
-
-	require.Equal(t, 1, api.submitCallCount())
-}
-
-func TestWorker_RunOneJob_ReturnsOnEmptyQueueAndCanceledContext(t *testing.T) {
-	w := testWorker(&fakeAPIClient{}, &fakeEvaluator{})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	w.runOneJob(ctx)
-}
-
-// --- runRefill ---
-
-func TestWorker_RunRefill_FillsQueueUpToBatchSize(t *testing.T) {
-	board := othello.NewBoardStart().String()
-
-	api := &fakeAPIClient{
-		getJobs: func(_ context.Context, count int) ([]Job, error) {
-			jobs := make([]Job, count)
-			for i := range jobs {
-				jobs[i] = Job{Board: board, Level: 16}
-			}
-			return jobs, nil
-		},
-	}
-	w := testWorker(api, &fakeEvaluator{})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		w.runRefill(ctx)
-		close(done)
-	}()
-
-	require.Eventually(t, func() bool {
-		return len(w.jobs) == w.jobBatchSize
-	}, time.Second, time.Millisecond)
-
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("runRefill did not stop after context cancellation")
-	}
-}
-
-func TestWorker_RunRefill_RequestsExactlyTheRoomLeftInTheQueue(t *testing.T) {
-	board := othello.NewBoardStart().String()
-	// jobBatchSize is 3; pre-fill the queue with 1, leaving room for 2.
-	w := testWorker(&fakeAPIClient{}, &fakeEvaluator{})
-	w.jobs <- Job{Board: board, Level: 16}
-
-	requested := make(chan int, 1)
-	api := &fakeAPIClient{
-		getJobs: func(_ context.Context, count int) ([]Job, error) {
-			requested <- count
-			return nil, nil
-		},
-	}
-	w.api = api
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go w.runRefill(ctx)
+	go w.runJobs(ctx)
 
-	select {
-	case count := <-requested:
-		require.Equal(t, 2, count)
-	case <-time.After(time.Second):
-		t.Fatal("GetJobs was not called")
-	}
+	require.Eventually(t, func() bool {
+		return api.submitCallCount() >= 1
+	}, time.Second, time.Millisecond)
 }
 
-func TestWorker_RunRefill_WaitsForSignalOncePartiallyFilled(t *testing.T) {
-	board := othello.NewBoardStart().String()
-
+func TestWorker_RunJobs_SleepsWhenNoJobAvailable(t *testing.T) {
 	api := &fakeAPIClient{
-		getJobs: func(context.Context, int) ([]Job, error) {
-			// Fewer than requested: runRefill should back off rather than immediately retry.
-			return []Job{{Board: board, Level: 16}}, nil
-		},
+		getJob: func(context.Context) (Job, bool, error) { return Job{}, false, nil },
 	}
 	w := testWorker(api, &fakeEvaluator{})
 	w.noJobSleep = time.Hour // long enough that a spurious immediate retry would be caught below
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go w.runRefill(ctx)
+	go w.runJobs(ctx)
 
 	require.Eventually(t, func() bool {
-		return api.getJobsCallCount() >= 1
+		return api.getJobCallCount() >= 1
 	}, time.Second, time.Millisecond)
 
-	// Give runRefill a moment to (incorrectly) call GetJobs again if it doesn't back off.
+	// Give runJobs a moment to (incorrectly) call GetJob again if it doesn't back off.
 	time.Sleep(20 * time.Millisecond)
-	require.Equal(t, 1, api.getJobsCallCount())
+	require.Equal(t, 1, api.getJobCallCount())
 }
 
-func TestWorker_RunRefill_BacksOffAndRetriesOnError(t *testing.T) {
-	var calls int
+func TestWorker_RunJobs_BacksOffAndRetriesOnError(t *testing.T) {
 	api := &fakeAPIClient{
-		getJobs: func(context.Context, int) ([]Job, error) {
-			calls++
-			return nil, errors.New("boom")
-		},
+		getJob: func(context.Context) (Job, bool, error) { return Job{}, false, errors.New("boom") },
 	}
 	w := testWorker(api, &fakeEvaluator{})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go w.runRefill(ctx)
+	go w.runJobs(ctx)
 
 	require.Eventually(t, func() bool {
-		return api.getJobsCallCount() >= 2
+		return api.getJobCallCount() >= 2
 	}, time.Second, time.Millisecond)
 }
 
-func TestWorker_RunRefill_WaitsWhenQueueIsFull(t *testing.T) {
-	board := othello.NewBoardStart().String()
+func TestWorker_RunJobs_ReturnsOnContextCancellation(t *testing.T) {
 	w := testWorker(&fakeAPIClient{}, &fakeEvaluator{})
-	for range w.jobBatchSize {
-		w.jobs <- Job{Board: board, Level: 16}
-	}
-
-	api := &fakeAPIClient{
-		getJobs: func(context.Context, int) ([]Job, error) {
-			t.Fatal("GetJobs must not be called while the queue is already full")
-			return nil, nil
-		},
-	}
-	w.api = api
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go w.runRefill(ctx)
-
-	time.Sleep(20 * time.Millisecond)
 	cancel()
+
+	w.runJobs(ctx) // must return without calling GetJob (nil function would panic)
 }
 
 // --- Run (integration) ---
 
 func TestWorker_Run_StopsOnContextCancellation(t *testing.T) {
 	api := &fakeAPIClient{
-		getJobs:   func(context.Context, int) ([]Job, error) { return nil, nil },
-		heartbeat: func(context.Context) error { return nil },
+		getJob:    func(context.Context) (Job, bool, error) { return Job{}, false, nil },
+		heartbeat: func(context.Context, string) error { return nil },
 	}
 	w := testWorker(api, &fakeEvaluator{})
 
@@ -502,8 +331,8 @@ func TestWorker_Run_StopsOnContextCancellation(t *testing.T) {
 
 func TestWorker_Run_SendsHeartbeats(t *testing.T) {
 	api := &fakeAPIClient{
-		getJobs:   func(context.Context, int) ([]Job, error) { return nil, nil },
-		heartbeat: func(context.Context) error { return nil },
+		getJob:    func(context.Context) (Job, bool, error) { return Job{}, false, nil },
+		heartbeat: func(context.Context, string) error { return nil },
 	}
 	w := testWorker(api, &fakeEvaluator{})
 
@@ -517,34 +346,65 @@ func TestWorker_Run_SendsHeartbeats(t *testing.T) {
 	}, time.Second, time.Millisecond)
 }
 
-func TestWorker_Run_ReleasesQueuedJobsOnShutdown(t *testing.T) {
+func TestWorker_Run_HeartbeatReportsClaimedBoard(t *testing.T) {
 	board := othello.NewBoardStart().String()
 
-	// evaluate blocks until the test cancels ctx, simulating a worker mid-search on the one job it's
-	// actively processing while the rest of its prefetched batch sits untouched in the queue.
-	evaluating := make(chan struct{})
-	unblock := make(chan struct{})
+	// evaluate blocks until the heartbeat has reported the claimed board.
+	reported := make(chan struct{})
 	eval := &fakeEvaluator{
 		evaluate: func(othello.Board, int) (edax.Evaluation, error) {
-			close(evaluating)
+			<-reported
+			return edax.Evaluation{Depth: 24, Confidence: 100, Score: 6}, nil
+		},
+	}
+
+	var once sync.Once
+	api := &fakeAPIClient{
+		getJob: func(context.Context) (Job, bool, error) {
+			return Job{Board: board, Level: 16}, true, nil
+		},
+		submitJobResult: func(context.Context, string, int, edax.Evaluation) error { return nil },
+		heartbeat: func(_ context.Context, b string) error {
+			if b == board {
+				once.Do(func() { close(reported) })
+			}
+			return nil
+		},
+	}
+	w := testWorker(api, eval)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	select {
+	case <-reported:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat never reported the claimed board")
+	}
+}
+
+func TestWorker_Run_ReleasesClaimOnShutdownMidEvaluation(t *testing.T) {
+	board := othello.NewBoardStart().String()
+
+	// evaluate blocks until the test cancels ctx, simulating a worker mid-search.
+	evaluating := make(chan struct{})
+	unblock := make(chan struct{})
+	var once sync.Once
+	eval := &fakeEvaluator{
+		evaluate: func(othello.Board, int) (edax.Evaluation, error) {
+			once.Do(func() { close(evaluating) })
 			<-unblock
 			return edax.Evaluation{}, errors.New("process killed")
 		},
 	}
 
-	var released []string
-	var mu sync.Mutex
 	api := &fakeAPIClient{
-		getJobs: func(context.Context, int) ([]Job, error) {
-			return []Job{{Board: board, Level: 16}, {Board: board, Level: 16}, {Board: board, Level: 16}}, nil
+		getJob: func(context.Context) (Job, bool, error) {
+			return Job{Board: board, Level: 16}, true, nil
 		},
-		heartbeat: func(context.Context) error { return nil },
-		releaseJob: func(_ context.Context, board string) error {
-			mu.Lock()
-			released = append(released, board)
-			mu.Unlock()
-			return nil
-		},
+		heartbeat:  func(context.Context, string) error { return nil },
+		releaseJob: func(context.Context, string) error { return nil },
 	}
 	w := testWorker(api, eval)
 
@@ -565,44 +425,6 @@ func TestWorker_Run_ReleasesQueuedJobsOnShutdown(t *testing.T) {
 		t.Fatal("Run did not stop after context cancellation")
 	}
 
-	// 1 job was being evaluated (released via processJob's shutdown branch) and up to 2 more were
-	// still sitting in the queue (released via releaseQueuedJobs); jobBatchSize is 3 in testWorker.
-	mu.Lock()
-	defer mu.Unlock()
-	require.NotEmpty(t, released)
-	for _, b := range released {
-		require.Equal(t, board, b)
-	}
-}
-
-func TestWorker_Run_EvaluatesAndSubmitsJobsFromRefill(t *testing.T) {
-	board := othello.NewBoardStart()
-	var served bool
-
-	api := &fakeAPIClient{
-		getJobs: func(context.Context, int) ([]Job, error) {
-			if served {
-				return nil, nil
-			}
-			served = true
-			return []Job{{Board: board.String(), Level: 24}}, nil
-		},
-		submitJobResult: func(context.Context, string, int, edax.Evaluation) error { return nil },
-		heartbeat:       func(context.Context) error { return nil },
-	}
-	eval := &fakeEvaluator{
-		evaluate: func(othello.Board, int) (edax.Evaluation, error) {
-			return edax.Evaluation{Depth: 24, Confidence: 100, Score: 6}, nil
-		},
-	}
-	w := testWorker(api, eval)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go w.Run(ctx)
-
-	require.Eventually(t, func() bool {
-		return api.submitCallCount() >= 1
-	}, time.Second, time.Millisecond)
+	require.Equal(t, []string{board}, api.releasedBoards())
+	require.Empty(t, w.claimedBoard())
 }

@@ -44,7 +44,7 @@ resulting search, and `handleAnalyzeRequest` skips a level that means a
 search the board already got. What is still open:
 
 - The priority queue dedups by board string only
-  (`internal/api/priority.go`), so two requests at different levels
+  (`internal/api/redis.go`), so two requests at different levels
   collapse to whichever arrived first. Keying on the resulting
   `(depth, confidence)` instead would also merge different-level requests
   that describe the same search.

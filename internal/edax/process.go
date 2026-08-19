@@ -71,9 +71,7 @@ func (p *Process) Evaluate(board othello.Board, level int) (Evaluation, error) {
 	return eval, nil
 }
 
-// buildArgs returns the edax command-line arguments for a -solve search at level; tasks caps parallel
-// search threads via -n-tasks when positive, and is omitted (edax defaults to one thread per CPU)
-// otherwise.
+// buildArgs returns the edax arguments for a -solve search at level; -n-tasks only when tasks > 0.
 func buildArgs(level, tasks int) []string {
 	args := []string{"-solve", "/dev/stdin", "-level", strconv.Itoa(level), "-verbose", "3"}
 	if tasks > 0 {
@@ -94,8 +92,8 @@ func (p *Process) ensureStarted(level int) (io.Writer, *bufio.Reader, error) {
 	if p.cmd != nil {
 		_ = p.cmd.Process.Kill()
 		_ = p.cmd.Wait()
-		// Clear the fields now so that if starting the replacement below fails, we don't leave the
-		// killed process (and its closed pipes) in place for the next Evaluate to reuse.
+		// Clear the fields now so a failed restart below doesn't leave the killed process (and
+		// its closed pipes) in place for the next Evaluate to reuse.
 		p.cmd = nil
 		p.level = 0
 		p.stdin = nil
