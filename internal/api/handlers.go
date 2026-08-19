@@ -188,8 +188,6 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if savedToDB {
-		s.invalidateStatsCache(r.Context())
-
 		// Only a leaf-disc-count save can change the minimax backfill.
 		if discCount == book.LeafDiscs {
 			if err := s.cache.Rebuild(r.Context()); err != nil {
@@ -367,15 +365,13 @@ func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, entries)
 }
 
-// handleStats handles GET /api/stats: returns move-counts per (disc count, level) cell.
-// The result is Redis-cached because the underlying GROUP BY scans every row in the boards table
-// and becomes slow at millions of rows. The cache is invalidated whenever an evaluation is saved
-// (see handleSubmitJobResult) and expires after statsTTL as a safety net for loader-added boards.
+// handleStats handles GET /api/stats: returns position counts per (disc count, depth, confidence)
+// cell, served from the periodically rebuilt book_stats hash (see RunBookStatsRefresh). If the hash
+// is missing (Redis flushed, first boot race), the DB is queried directly.
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
-	if cached, err := s.getCachedStats(r.Context()); err == nil && cached != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(cached)
+	entries, ok, err := s.getBookStats(r.Context())
+	if err == nil && ok {
+		writeJSON(w, http.StatusOK, entries)
 		return
 	}
 
@@ -385,18 +381,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := json.Marshal(statEntries(stats))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	data = append(data, '\n')
-
-	s.setCachedStats(r.Context(), data)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	writeJSON(w, http.StatusOK, statEntries(stats))
 }
 
 // statEntries turns per-(disc count, level) counts into per-(disc count, depth, confidence) counts.
@@ -421,6 +406,12 @@ func statEntries(stats []db.LevelStat) []statEntry {
 		entries = append(entries, key)
 	}
 
+	sortStatEntries(entries)
+	return entries
+}
+
+// sortStatEntries orders entries by disc count, then depth, then confidence.
+func sortStatEntries(entries []statEntry) {
 	slices.SortFunc(entries, func(a, b statEntry) int {
 		return cmp.Or(
 			cmp.Compare(a.DiscCount, b.DiscCount),
@@ -428,8 +419,6 @@ func statEntries(stats []db.LevelStat) []statEntry {
 			cmp.Compare(a.Confidence, b.Confidence),
 		)
 	})
-
-	return entries
 }
 
 // handleLevelConfig handles GET /api/level-config: returns the constants the frontend needs to

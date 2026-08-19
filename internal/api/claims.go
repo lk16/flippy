@@ -3,32 +3,30 @@ package api
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/lk16/flippy/internal/book"
+	"github.com/lk16/flippy/internal/edax"
 )
 
 // claimTTL is how long a job claim or worker hash survives without a refresh.
 const claimTTL = 5 * time.Minute
 
-// jobFloorKey caches the lowest disc count that might still have unclaimed work, so claimJob can skip
-// re-scanning disc counts already known to be fully learned.
-const jobFloorKey = "job_floor_disc_count"
+// bookStatsKey is the Redis hash holding position counts per "<depth>:<confidence>:<discs>" field,
+// rebuilt periodically from the DB (see RunBookStatsRefresh). GET /api/stats serves it, and the job
+// floor is derived from it, since the underlying GROUP BY scans every row in the boards table and
+// becomes slow at millions of rows.
+const bookStatsKey = "book_stats"
 
-// jobFloorTTL bounds how long the cached job floor is trusted before a claim re-derives it from
-// scratch, so boards an import (see internal/loader) adds below the floor are eventually rediscovered.
-const jobFloorTTL = 10 * time.Minute
-
-// statsKey caches the JSON response for GET /api/stats, which aggregates all rows in the boards table
-// and becomes slow as the table grows to millions of rows.
-const statsKey = "stats"
-
-// statsTTL bounds how long the stats cache is trusted. Explicit invalidation (on each SaveEvaluation)
-// keeps it fresh in the common case; the TTL is a safety net so loader-added boards eventually appear
-// even without an explicit invalidation.
-const statsTTL = 60 * time.Second
+// bookStatsRefreshInterval is how often the book_stats hash is rebuilt from the DB. Both consumers
+// tolerate the staleness: stats are informational, and the job floor is only a lower bound for the
+// ListLearnable scan.
+const bookStatsRefreshInterval = 60 * time.Second
 
 // Redis field names within a worker's hash (see workerKey).
 const (
@@ -94,32 +92,124 @@ func (s *Server) releaseClaim(ctx context.Context, board, workerID string) error
 	return nil
 }
 
-// getJobFloor returns the cached lowest disc count worth querying for a job, or fallback if the cache
-// is unset, expired, or holds an unreadable value.
-func (s *Server) getJobFloor(ctx context.Context, fallback int) (int, error) {
-	value, err := s.redis.Get(ctx, jobFloorKey).Result()
-	if err == redis.Nil {
-		return fallback, nil
-	}
-	if err != nil {
-		return 0, fmt.Errorf("failed to get job floor: %w", err)
+// RunBookStatsRefresh rebuilds the book_stats hash immediately and then every
+// bookStatsRefreshInterval, until ctx is canceled.
+func (s *Server) RunBookStatsRefresh(ctx context.Context) {
+	if err := s.rebuildBookStats(ctx); err != nil {
+		slog.Error("failed to rebuild book stats", "error", err)
 	}
 
-	floor, err := strconv.Atoi(value)
-	if err != nil {
-		return fallback, nil
-	}
+	ticker := time.NewTicker(bookStatsRefreshInterval)
+	defer ticker.Stop()
 
-	return floor, nil
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := s.rebuildBookStats(ctx); err != nil {
+				slog.Error("failed to rebuild book stats", "error", err)
+			}
+		}
+	}
 }
 
-// setJobFloor caches floor as the lowest disc count worth querying for a job, expiring after
-// jobFloorTTL so boards later added below it (e.g. by an import) aren't skipped forever.
-func (s *Server) setJobFloor(ctx context.Context, floor int) error {
-	if err := s.redis.Set(ctx, jobFloorKey, floor, jobFloorTTL).Err(); err != nil {
-		return fmt.Errorf("failed to set job floor: %w", err)
+// bookStatsField formats a book_stats hash field name.
+func bookStatsField(e statEntry) string {
+	return fmt.Sprintf("%d:%d:%d", e.Depth, e.Confidence, e.DiscCount)
+}
+
+// rebuildBookStats queries the DB and replaces the book_stats hash, writing into a temp key and
+// atomically swapping it in with RENAME so readers never see a partial hash.
+func (s *Server) rebuildBookStats(ctx context.Context) error {
+	stats, err := s.repo.Stats(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to query stats: %w", err)
 	}
+
+	entries := statEntries(stats)
+	if len(entries) == 0 {
+		// RENAME fails on a missing source key; an absent hash already means "fall back to the DB".
+		if err := s.redis.Del(ctx, bookStatsKey).Err(); err != nil {
+			return fmt.Errorf("failed to clear book stats: %w", err)
+		}
+		return nil
+	}
+
+	fields := make([]any, 0, 2*len(entries))
+	for _, e := range entries {
+		fields = append(fields, bookStatsField(e), e.Count)
+	}
+
+	tempKey := bookStatsKey + ":rebuild"
+	pipe := s.redis.TxPipeline()
+	pipe.Del(ctx, tempKey)
+	pipe.HSet(ctx, tempKey, fields...)
+	pipe.Rename(ctx, tempKey, bookStatsKey)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("failed to rebuild book stats: %w", err)
+	}
+
 	return nil
+}
+
+// getBookStats reads the book_stats hash, sorted like statEntries; ok is false when the hash is
+// missing (Redis flushed, first boot race) and the caller should fall back to the DB.
+func (s *Server) getBookStats(ctx context.Context) (entries []statEntry, ok bool, err error) {
+	values, err := s.redis.HGetAll(ctx, bookStatsKey).Result()
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to get book stats: %w", err)
+	}
+	if len(values) == 0 {
+		return nil, false, nil
+	}
+
+	entries = make([]statEntry, 0, len(values))
+	for field, value := range values {
+		var e statEntry
+		if _, err := fmt.Sscanf(field, "%d:%d:%d", &e.Depth, &e.Confidence, &e.DiscCount); err != nil {
+			continue
+		}
+		count, err := strconv.Atoi(value)
+		if err != nil {
+			continue
+		}
+		e.Count = count
+		entries = append(entries, e)
+	}
+
+	sortStatEntries(entries)
+	return entries, true, nil
+}
+
+// jobFloor returns the lowest disc count that still has learnable positions according to the
+// book_stats hash: a field whose (depth, confidence) is below what a target-level search requires
+// (depth 0, an unlearned board, counts as learnable). Falls back to book.LeafDiscs when the hash is
+// missing. The result may be stale by up to bookStatsRefreshInterval, which is fine: it is only a
+// lower bound for the ListLearnable scan.
+func (s *Server) jobFloor(ctx context.Context) int {
+	entries, ok, err := s.getBookStats(ctx)
+	if err != nil || !ok {
+		return book.LeafDiscs
+	}
+
+	floor := book.MaxSavableDiscs
+	found := false
+	for _, e := range entries {
+		if e.DiscCount < book.LeafDiscs || e.DiscCount > book.MaxSavableDiscs {
+			continue
+		}
+		targetDepth, targetConfidence := edax.SearchParams(e.DiscCount, TargetLevel(e.DiscCount))
+		learnable := e.Depth == 0 ||
+			e.Depth < targetDepth ||
+			(e.Depth == targetDepth && e.Confidence < targetConfidence)
+		if learnable && (!found || e.DiscCount < floor) {
+			floor = e.DiscCount
+			found = true
+		}
+	}
+
+	return floor
 }
 
 // recordJobCompletion increments workerID's positions-computed counter.
@@ -216,27 +306,4 @@ func (s *Server) listWorkers(ctx context.Context) ([]workerInfo, error) {
 	})
 
 	return workers, nil
-}
-
-// getCachedStats returns the cached stats JSON bytes from Redis, or (nil, nil) on a cache miss.
-// Redis errors other than "key not found" are returned so callers can decide whether to fall through.
-func (s *Server) getCachedStats(ctx context.Context) ([]byte, error) {
-	data, err := s.redis.Get(ctx, statsKey).Bytes()
-	if err == redis.Nil {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to get cached stats: %w", err)
-	}
-	return data, nil
-}
-
-// setCachedStats stores pre-serialised stats JSON in Redis for statsTTL.
-func (s *Server) setCachedStats(ctx context.Context, data []byte) {
-	_ = s.redis.Set(ctx, statsKey, data, statsTTL).Err()
-}
-
-// invalidateStatsCache deletes the cached stats so the next GET /api/stats re-queries the DB.
-func (s *Server) invalidateStatsCache(ctx context.Context) {
-	_ = s.redis.Del(ctx, statsKey).Err()
 }

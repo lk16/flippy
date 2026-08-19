@@ -63,13 +63,8 @@ func (s *Server) claimJob(ctx context.Context, workerID string) (job Job, ok boo
 		return Job{Board: normalized, Level: entry.Level}, true, nil
 	}
 
-	floor, err := s.getJobFloor(ctx, book.LeafDiscs)
-	if err != nil {
-		return Job{}, false, err
-	}
-
 	candidates, err := s.repo.ListLearnable(ctx,
-		floor, book.MaxSavableDiscs,
+		s.jobFloor(ctx), book.MaxSavableDiscs,
 		book.LeafDiscs, TargetLevel(book.LeafDiscs), TargetLevel(book.LeafDiscs+1),
 		jobCandidateBatch,
 	)
@@ -95,15 +90,6 @@ func (s *Server) claimJob(ctx context.Context, workerID string) (job Job, ok boo
 		}
 		if !claimed {
 			continue
-		}
-
-		// A claim strictly above floor is proof nothing claimable remains below it, so it's safe to
-		// stop rescanning; never lower the floor here (see getJobFloor/jobFloorTTL for how a floor
-		// stuck above newly-imported boards self-heals).
-		if discCount > floor {
-			if err := s.setJobFloor(ctx, discCount); err != nil {
-				slog.Warn("failed to advance job floor cache", "error", err)
-			}
 		}
 
 		return Job{Board: candidate.Board, Level: target}, true, nil

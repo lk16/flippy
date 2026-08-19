@@ -454,6 +454,8 @@ func TestHandleStats_Empty(t *testing.T) {
 	require.JSONEq(t, `[]`, w.Body.String())
 }
 
+// TestHandleStats_ReturnsCounts covers the DB fallback: with no book_stats hash in Redis (first
+// boot, Redis flushed), the stats are queried directly.
 func TestHandleStats_ReturnsCounts(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
@@ -466,6 +468,27 @@ func TestHandleStats_ReturnsCounts(t *testing.T) {
 	var entries []statEntry
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &entries))
 	require.Contains(t, entries, statEntry{DiscCount: 12, Count: 1})
+}
+
+// TestHandleStats_ServesFromBookStatsHash proves the endpoint reads the rebuilt hash rather than the
+// DB: a board added after the rebuild is not reported.
+func TestHandleStats_ServesFromBookStatsHash(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	board12 := testBoard(t, 12)
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board12}))
+	require.NoError(t, s.rebuildBookStats(ctx))
+
+	board13 := testBoard(t, 13)
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board13}))
+
+	w := doRequest(t, s, http.MethodGet, "/api/stats", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var entries []statEntry
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &entries))
+	require.Equal(t, []statEntry{{DiscCount: 12, Count: 1}}, entries)
 }
 
 // TestHandleStats_ReportsDerivedSearchParams checks that a learned board is reported by the search

@@ -113,6 +113,7 @@ func main() {
 	log.Printf("minimax cache built: %d boards", cache.Len())
 
 	apiServer := api.NewServer(repo, redisClient, cache)
+	go apiServer.RunBookStatsRefresh(ctx)
 
 	webServer, err := web.NewServer()
 	if err != nil {
