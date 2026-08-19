@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"log"
 
 	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/othello"
@@ -57,7 +57,7 @@ func (s *Server) claimJob(ctx context.Context, workerID string) (job Job, ok boo
 		}
 
 		if err := s.setPriorityClaim(ctx, entry.Board); err != nil {
-			slog.Warn("failed to set priority claim marker", "board", entry.Board, "error", err)
+			log.Printf("failed to set priority claim marker for %s: %v", entry.Board, err)
 		}
 
 		return Job{Board: normalized, Level: entry.Level}, true, nil

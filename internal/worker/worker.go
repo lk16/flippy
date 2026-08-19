@@ -2,8 +2,7 @@ package worker
 
 import (
 	"context"
-	"fmt"
-	"log/slog"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -117,7 +116,7 @@ func (w *Worker) releaseJob(board string) {
 	ctx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
 	defer cancel()
 	if err := w.api.ReleaseJob(ctx, board); err != nil {
-		slog.Warn("failed to release job claim", "board", board, "error", err)
+		log.Printf("failed to release claim on %s: %v", board, err)
 	}
 }
 
@@ -153,18 +152,14 @@ func (w *Worker) logStats(start time.Time) {
 		secPerBoard = elapsed / float64(count)
 	}
 
-	slog.Info("throughput",
-		"boards", count,
-		"boards_per_sec", fmt.Sprintf("%.2f", boardsPerSec),
-		"sec_per_board", fmt.Sprintf("%.2f", secPerBoard),
-	)
+	log.Printf("%d boards done, %.2f boards/sec, %.2f sec/board", count, boardsPerSec, secPerBoard)
 }
 
 // runHeartbeat sends a heartbeat immediately, then every heartbeatInterval, until ctx is canceled.
 // Each heartbeat reports the currently claimed board so the server can refresh its claim TTL.
 func (w *Worker) runHeartbeat(ctx context.Context) {
 	if err := w.api.Heartbeat(ctx, w.claimedBoard()); err != nil {
-		slog.Error("failed to send heartbeat", "error", err)
+		log.Printf("failed to send heartbeat: %v", err)
 	}
 
 	ticker := time.NewTicker(w.heartbeatInterval)
@@ -176,7 +171,7 @@ func (w *Worker) runHeartbeat(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := w.api.Heartbeat(ctx, w.claimedBoard()); err != nil {
-				slog.Error("failed to send heartbeat", "error", err)
+				log.Printf("failed to send heartbeat: %v", err)
 			}
 		}
 	}
@@ -191,7 +186,7 @@ func (w *Worker) runJobs(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			slog.Error("failed to get job", "error", err)
+			log.Printf("failed to get job: %v", err)
 			sleep(ctx, w.errorSleep)
 			continue
 		}
@@ -214,7 +209,7 @@ func (w *Worker) processJob(ctx context.Context, job Job) (stillClaimed bool) {
 	board, err := othello.ParseBoard(job.Board)
 	if err != nil {
 		// The server always sends valid boards; this indicates a protocol mismatch, not a runtime fluke.
-		slog.Error("received unparseable board from server", "board", job.Board, "error", err)
+		log.Printf("received unparseable board %q from server: %v", job.Board, err)
 		return false
 	}
 
@@ -225,7 +220,7 @@ func (w *Worker) processJob(ctx context.Context, job Job) (stillClaimed bool) {
 			// releases it.
 			return true
 		}
-		slog.Error("failed to evaluate job", "error", err)
+		log.Printf("failed to evaluate job: %v", err)
 		sleep(ctx, w.errorSleep)
 		return false
 	}
@@ -234,7 +229,7 @@ func (w *Worker) processJob(ctx context.Context, job Job) (stillClaimed bool) {
 		if ctx.Err() != nil {
 			return true
 		}
-		slog.Error("failed to submit job result", "error", err)
+		log.Printf("failed to submit job result: %v", err)
 		sleep(ctx, w.errorSleep)
 		return false
 	}

@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"log"
 	"sort"
 	"strconv"
 	"time"
@@ -96,7 +96,7 @@ func (s *Server) releaseClaim(ctx context.Context, board, workerID string) error
 // bookStatsRefreshInterval, until ctx is canceled.
 func (s *Server) RunBookStatsRefresh(ctx context.Context) {
 	if err := s.rebuildBookStats(ctx); err != nil {
-		slog.Error("failed to rebuild book stats", "error", err)
+		log.Printf("failed to rebuild book stats: %v", err)
 	}
 
 	ticker := time.NewTicker(bookStatsRefreshInterval)
@@ -108,7 +108,7 @@ func (s *Server) RunBookStatsRefresh(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := s.rebuildBookStats(ctx); err != nil {
-				slog.Error("failed to rebuild book stats", "error", err)
+				log.Printf("failed to rebuild book stats: %v", err)
 			}
 		}
 	}

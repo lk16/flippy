@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -176,7 +176,7 @@ func (s *Server) handleAnalyzeRequest(ctx context.Context, boardStrings []string
 
 		// Enqueue the normalized form so the claim key and queue entry are consistent.
 		if err := s.enqueuePriority(ctx, normalized.String(), clampedLevel, connID); err != nil {
-			slog.Warn("failed to enqueue priority board", "board", normalized.String(), "error", err)
+			log.Printf("failed to enqueue priority board %s: %v", normalized.String(), err)
 		}
 	}
 }

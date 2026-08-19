@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
+	"log"
 	"net/http"
 	"slices"
 	"strings"
@@ -80,10 +80,8 @@ func checkReportedSearchParams(req jobResultRequest, discCount int) {
 
 	depth, confidence := edax.SearchParams(discCount, req.Level)
 	if req.Depth != depth || req.Confidence != confidence {
-		slog.Warn("worker reported search params that disagree with edax's level table",
-			"board", req.Board, "level", req.Level, "disc_count", discCount,
-			"reported_depth", req.Depth, "reported_confidence", req.Confidence,
-			"derived_depth", depth, "derived_confidence", confidence)
+		log.Printf("board %s (%d discs) at level %d: worker reported %d@%d%%, edax's level table says %d@%d%%",
+			req.Board, discCount, req.Level, req.Depth, req.Confidence, depth, confidence)
 	}
 }
 
@@ -146,7 +144,7 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 	// Check whether this job originated from the priority queue.
 	isPriority, err := s.consumePriorityClaim(r.Context(), normalized.String())
 	if err != nil {
-		slog.Warn("failed to check priority claim; treating as non-priority", "error", err)
+		log.Printf("failed to check priority claim; treating as non-priority: %v", err)
 	}
 
 	savedToDB := false
@@ -162,7 +160,7 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 		// insert-if-absent (ON CONFLICT DO NOTHING), so an existing evaluation is never downgraded.
 		if isPriority && discCount <= book.MaxSavableDiscs {
 			if err := s.repo.AddBoards(r.Context(), []othello.NormalizedBoard{normalized}); err != nil {
-				slog.Error("failed to schedule priority board for learning", "error", err)
+				log.Printf("failed to schedule priority board for learning: %v", err)
 			}
 		}
 	case isPriority:
@@ -171,9 +169,9 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 				if errors.Is(saveErr, db.ErrBoardNotFound) {
 					// Board has no row yet; add one and retry.
 					if addErr := s.repo.AddBoards(r.Context(), []othello.NormalizedBoard{normalized}); addErr != nil {
-						slog.Error("failed to add priority board", "error", addErr)
+						log.Printf("failed to add priority board: %v", addErr)
 					} else if saveErr2 := s.repo.SaveEvaluation(r.Context(), normalized, eval); saveErr2 != nil {
-						slog.Error("failed to save priority evaluation after AddBoards", "error", saveErr2)
+						log.Printf("failed to save priority evaluation after AddBoards: %v", saveErr2)
 					} else {
 						savedToDB = true
 					}

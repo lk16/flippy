@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -59,12 +58,7 @@ func logRequests(next http.Handler) http.Handler {
 
 		next.ServeHTTP(rec, r)
 
-		slog.Info("http request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", rec.status,
-			"duration", time.Since(start),
-		)
+		log.Printf("%s %s %d %.1fms", r.Method, r.URL.Path, rec.status, float64(time.Since(start).Microseconds())/1000)
 	})
 }
 
