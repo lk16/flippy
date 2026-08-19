@@ -443,7 +443,7 @@ func TestHandleGetBoard_GameOver(t *testing.T) {
 	for i := uint(40); i < 64; i++ {
 		white |= 1 << i
 	}
-	board, err := othello.NewBoard(black, white, othello.Black)
+	board, err := othello.NewBoard(black, white)
 	require.NoError(t, err)
 	require.False(t, board.HasMoves())
 	passed, err := board.DoMove(othello.PassMove)

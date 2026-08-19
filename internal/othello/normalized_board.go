@@ -2,7 +2,7 @@ package othello
 
 import "fmt"
 
-// NormalizedBoard wraps a Board in canonical spatial form (see Board.Normalize), turn preserved.
+// NormalizedBoard wraps a Board in canonical spatial form (see Board.Normalize).
 type NormalizedBoard struct {
 	board Board
 }
@@ -18,21 +18,6 @@ func NewNormalizedBoard(board Board) (NormalizedBoard, error) {
 // Board returns the underlying board.
 func (nb NormalizedBoard) Board() Board {
 	return nb.board
-}
-
-// Black returns the bitboard of black discs.
-func (nb NormalizedBoard) Black() uint64 {
-	return nb.board.Black()
-}
-
-// White returns the bitboard of white discs.
-func (nb NormalizedBoard) White() uint64 {
-	return nb.board.White()
-}
-
-// Turn returns the color to move.
-func (nb NormalizedBoard) Turn() Color {
-	return nb.board.Turn()
 }
 
 // CountDiscs returns the total number of discs on the board.

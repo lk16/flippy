@@ -26,7 +26,7 @@ func main() {
 	}
 	sort.Strings(lines)
 
-	out := make([]byte, 0, len(lines)*35)
+	out := make([]byte, 0, len(lines)*(othello.BoardStringLength+1))
 	for _, line := range lines {
 		out = append(out, line...)
 		out = append(out, '\n')

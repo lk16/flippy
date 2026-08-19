@@ -1,17 +1,13 @@
 package othello
 
-// Color identifies a side in an Othello game.
+// Color identifies a side in an Othello game. A Board has no color to move (see Board), so this is
+// only used for the parts of a game that really are per-color: a PGN's players and winner.
 type Color int
 
 const (
 	Black Color = iota
 	White
 )
-
-// Opponent returns the other color.
-func (c Color) Opponent() Color {
-	return Black + White - c
-}
 
 // String returns "black" or "white".
 func (c Color) String() string {

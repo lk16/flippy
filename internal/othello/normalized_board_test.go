@@ -10,9 +10,8 @@ import (
 // collapses all 8 symmetries to the same NormalizedBoard.
 func rotateBoard(b Board, r int) Board {
 	return Board{
-		black: rotateBits(b.black, r),
-		white: rotateBits(b.white, r),
-		turn:  b.turn,
+		player:   rotateBits(b.player, r),
+		opponent: rotateBits(b.opponent, r),
 	}
 }
 
@@ -51,12 +50,6 @@ func TestBoard_Normalize_Idempotent(t *testing.T) {
 	}
 }
 
-func TestBoard_Normalize_PreservesTurn(t *testing.T) {
-	for _, board := range testBoards(t) {
-		require.Equal(t, board.Turn(), board.Normalize().Turn())
-	}
-}
-
 func TestBoard_Normalize_PreservesDiscCount(t *testing.T) {
 	for _, board := range testBoards(t) {
 		require.Equal(t, board.CountDiscs(), board.Normalize().CountDiscs())
@@ -79,9 +72,6 @@ func TestNewNormalizedBoard(t *testing.T) {
 func TestNormalizedBoard_Accessors(t *testing.T) {
 	nb := NewBoardStart().Normalize()
 
-	require.Equal(t, nb.Board().Black(), nb.Black())
-	require.Equal(t, nb.Board().White(), nb.White())
-	require.Equal(t, nb.Board().Turn(), nb.Turn())
 	require.Equal(t, nb.Board().CountDiscs(), nb.CountDiscs())
 	require.Equal(t, nb.Board().HasMoves(), nb.HasMoves())
 	require.Equal(t, nb.Board().String(), nb.String())

@@ -20,7 +20,6 @@ func TestGame_PushMove(t *testing.T) {
 
 	require.NoError(t, game.PushMove(19))
 	require.Equal(t, []int{19}, game.Moves())
-	require.Equal(t, White, game.Board().Turn())
 
 	require.NoError(t, game.PushMove(18))
 	require.Equal(t, []int{19, 18}, game.Moves())
@@ -106,7 +105,7 @@ func TestGame_PopMove(t *testing.T) {
 func TestGame_PopMove_LoneTrailingPass(t *testing.T) {
 	// The only pushed move is a pass: popping must remove just that pass, not also a
 	// (nonexistent) preceding move and slice out of bounds.
-	board, err := NewBoard(0xFFFFFFFFFFFFFFFF, 0, Black)
+	board, err := NewBoard(0xFFFFFFFFFFFFFFFF, 0)
 	require.NoError(t, err)
 
 	game := NewGameWithStart(board)

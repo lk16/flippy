@@ -395,7 +395,7 @@ func TestClaimJob_PrioritySkipsNoMovesBoard(t *testing.T) {
 	for i := uint(40); i < 64; i++ {
 		whiteBits |= 1 << i
 	}
-	noMoveBoard, err := othello.NewBoard(blackBits, whiteBits, othello.Black)
+	noMoveBoard, err := othello.NewBoard(blackBits, whiteBits)
 	require.NoError(t, err)
 	require.False(t, noMoveBoard.HasMoves())
 	normalizedNoMove := noMoveBoard.Normalize()

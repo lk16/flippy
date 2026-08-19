@@ -374,7 +374,7 @@ func TestHandleWebSocket_AnalyzeRequest_GameOverNotEnqueued(t *testing.T) {
 	ctx := context.Background()
 
 	// A full board with only one color: no moves for either player → game over.
-	gameOver, err := othello.NewBoard(0xFFFFFFFFFFFFFFFF, 0, othello.Black)
+	gameOver, err := othello.NewBoard(0xFFFFFFFFFFFFFFFF, 0)
 	require.NoError(t, err)
 	require.False(t, gameOver.HasMoves())
 

@@ -50,7 +50,7 @@ func (c *Cache) Rebuild(ctx context.Context) error {
 	return nil
 }
 
-// Get returns the minimax score for board, from the mover's perspective, if it's covered by the cache.
+// Get returns the minimax score for board, from the perspective of the player to move, if it's covered by the cache.
 func (c *Cache) Get(board othello.Board) (int, bool) {
 	normalized := board.Normalize().Board()
 

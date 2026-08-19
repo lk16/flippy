@@ -9,21 +9,15 @@ import (
 func TestNewBoardStart(t *testing.T) {
 	board := NewBoardStart()
 
-	require.Equal(t, Black, board.Turn())
+	require.Equal(t, uint64(startPlayerDiscs), board.Player())
+	require.Equal(t, uint64(startOpponentDiscs), board.Opponent())
 	require.Equal(t, 4, board.CountDiscs())
 	require.True(t, board.HasMoves())
 }
 
 func TestNewBoard_Overlap(t *testing.T) {
-	_, err := NewBoard(0x1, 0x1, Black)
+	_, err := NewBoard(0x1, 0x1)
 	require.Error(t, err)
-}
-
-func TestNewBoardEmpty(t *testing.T) {
-	board := NewBoardEmpty()
-
-	require.Equal(t, Black, board.Turn())
-	require.Equal(t, 0, board.CountDiscs())
 }
 
 func TestColor_String(t *testing.T) {
@@ -56,9 +50,9 @@ func TestBoard_IsValidMove_OutOfRange(t *testing.T) {
 }
 
 func TestBoard_PassDetection(t *testing.T) {
-	// A board with no empty squares for black has no legal moves, so a pass
+	// A board where the mover owns every square has no legal moves, so a pass
 	// is the only legal move.
-	board, err := NewBoard(0xFFFFFFFFFFFFFFFF, 0, Black)
+	board, err := NewBoard(0xFFFFFFFFFFFFFFFF, 0)
 	require.NoError(t, err)
 
 	require.False(t, board.HasMoves())
@@ -71,9 +65,12 @@ func TestBoard_DoMove(t *testing.T) {
 
 	next, err := board.DoMove(19)
 	require.NoError(t, err)
-	require.Equal(t, White, next.Turn())
-	require.NotEqual(t, board.Black(), next.Black())
+
+	// The board is always seen from the player to move, so the discs that were
+	// the mover's are the opponent's afterwards.
+	require.NotEqual(t, board.Player(), next.Player())
 	require.Greater(t, next.CountDiscs(), board.CountDiscs())
+	require.Equal(t, board.Player()|(uint64(1)<<19)|flippedDiscs(board.Player(), board.Opponent(), 19), next.Opponent())
 }
 
 func TestBoard_DoMove_Invalid(t *testing.T) {
@@ -84,17 +81,16 @@ func TestBoard_DoMove_Invalid(t *testing.T) {
 }
 
 func TestBoard_DoMove_Pass(t *testing.T) {
-	board, err := NewBoard(0xFFFFFFFFFFFFFFFF, 0, Black)
+	board, err := NewBoard(0xFFFFFFFFFFFFFFFF, 0)
 	require.NoError(t, err)
 
 	passed, err := board.DoMove(PassMove)
 	require.NoError(t, err)
 
-	// A pass flips whose turn it is, but never changes who owns which
-	// square: black/white discs are absolute colors, not mover-relative.
-	require.Equal(t, board.Black(), passed.Black())
-	require.Equal(t, board.White(), passed.White())
-	require.Equal(t, White, passed.Turn())
+	// A pass changes no square's owner, only whose turn it is -- which is the
+	// same thing as swapping the two bitboards.
+	require.Equal(t, board.Player(), passed.Opponent())
+	require.Equal(t, board.Opponent(), passed.Player())
 }
 
 func TestBoard_DoMove_PassInvalidWhenMovesExist(t *testing.T) {
@@ -112,37 +108,34 @@ func TestBoard_Children(t *testing.T) {
 
 	seen := make(map[Board]bool)
 	for _, child := range children {
-		require.Equal(t, White, child.Turn())
 		seen[child] = true
 	}
 	require.Len(t, seen, 4)
 }
 
 func TestBoard_Children_NoMoves(t *testing.T) {
-	board, err := NewBoard(0xFFFFFFFFFFFFFFFF, 0, Black)
+	board, err := NewBoard(0xFFFFFFFFFFFFFFFF, 0)
 	require.NoError(t, err)
 
 	require.Empty(t, board.Children())
 }
 
 func TestBoard_FinalScore(t *testing.T) {
-	// 40 black discs, 24 white discs, black to move: black is ahead.
-	black := uint64(0xFFFFFFFFFF000000)
-	white := uint64(0x0000000000FFFFFF)
-	board, err := NewBoard(black, white, Black)
+	// 40 discs for the mover, 24 for the opponent: the mover is ahead.
+	mover := uint64(0xFFFFFFFFFF000000)
+	other := uint64(0x0000000000FFFFFF)
+	board, err := NewBoard(mover, other)
 	require.NoError(t, err)
 
 	require.Equal(t, 64-2*24, board.FinalScore())
 
-	board, err = NewBoard(black, white, White)
+	board, err = NewBoard(other, mover)
 	require.NoError(t, err)
 	require.Equal(t, -64+2*24, board.FinalScore())
 }
 
 func TestBoard_FinalScore_Tie(t *testing.T) {
-	black := uint64(0x00000000FFFF0000)
-	white := uint64(0x0000FFFF00000000)
-	board, err := NewBoard(black, white, Black)
+	board, err := NewBoard(0x00000000FFFF0000, 0x0000FFFF00000000)
 	require.NoError(t, err)
 
 	require.Equal(t, 0, board.FinalScore())
@@ -151,12 +144,8 @@ func TestBoard_FinalScore_Tie(t *testing.T) {
 func TestBoard_String(t *testing.T) {
 	board := NewBoardStart()
 
-	require.Len(t, board.String(), 16+16+2)
-	require.Equal(t, "-b", board.String()[32:])
-
-	next, err := board.DoMove(19)
-	require.NoError(t, err)
-	require.Equal(t, "-w", next.String()[32:])
+	require.Len(t, board.String(), BoardStringLength)
+	require.Equal(t, "00000008100000000000001008000000", board.String())
 }
 
 func TestParseBoard_RoundTrip(t *testing.T) {
@@ -171,25 +160,24 @@ func TestParseBoard_RoundTrip(t *testing.T) {
 func TestParseBoard_InvalidLength(t *testing.T) {
 	_, err := ParseBoard("too-short")
 	require.Error(t, err)
-}
 
-func TestParseBoard_InvalidBlackHex(t *testing.T) {
-	_, err := ParseBoard("zzzzzzzzzzzzzzzz0000000000000000-b")
+	// The old 34-character format, black/white discs plus a turn suffix.
+	_, err = ParseBoard("00000008100000000000001008000000-b")
 	require.Error(t, err)
 }
 
-func TestParseBoard_InvalidWhiteHex(t *testing.T) {
-	_, err := ParseBoard("0000000000000000zzzzzzzzzzzzzzzz-b")
+func TestParseBoard_InvalidPlayerHex(t *testing.T) {
+	_, err := ParseBoard("zzzzzzzzzzzzzzzz0000000000000000")
 	require.Error(t, err)
 }
 
-func TestParseBoard_InvalidTurnSuffix(t *testing.T) {
-	_, err := ParseBoard("00000000000000000000000000000000-x")
+func TestParseBoard_InvalidOpponentHex(t *testing.T) {
+	_, err := ParseBoard("0000000000000000zzzzzzzzzzzzzzzz")
 	require.Error(t, err)
 }
 
 func TestParseBoard_Overlap(t *testing.T) {
-	_, err := ParseBoard("ffffffffffffffffffffffffffffffff-b")
+	_, err := ParseBoard("ffffffffffffffffffffffffffffffff")
 	require.Error(t, err)
 }
 
@@ -205,24 +193,21 @@ func TestBoard_Bytes_RoundTrip(t *testing.T) {
 	require.Equal(t, board, parsed)
 }
 
-func TestBoard_Bytes_TurnByte(t *testing.T) {
-	black := NewBoardStart()
-	require.Equal(t, byte(0), black.Bytes()[16])
-
-	white, err := black.DoMove(19)
+func TestBoard_Bytes_PlayerFirst(t *testing.T) {
+	board, err := NewBoard(0x00000000000000FF, 0xFF00000000000000)
 	require.NoError(t, err)
-	require.Equal(t, byte(1), white.Bytes()[16])
+
+	require.Equal(t,
+		[]byte{0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0, 0},
+		board.Bytes())
 }
 
 func TestParseBoardBytes_InvalidLength(t *testing.T) {
 	_, err := ParseBoardBytes([]byte{1, 2, 3})
 	require.Error(t, err)
-}
 
-func TestParseBoardBytes_InvalidTurnByte(t *testing.T) {
-	buf := make([]byte, BoardBytesLength)
-	buf[16] = 2
-	_, err := ParseBoardBytes(buf)
+	// The old 17-byte format, black/white discs plus a turn byte.
+	_, err = ParseBoardBytes(make([]byte, 17))
 	require.Error(t, err)
 }
 

@@ -97,8 +97,8 @@ func TestBuildCache_FullLeavesCoverAllAncestors(t *testing.T) {
 }
 
 func TestBuildCache_ForcedPass(t *testing.T) {
-	// Reachable board where black has no legal move, but white does after the pass.
-	board, err := othello.ParseBoard("00000038180c00010000000000030204-b")
+	// Reachable board where the player to move has no legal move, but the opponent does after the pass.
+	board, err := othello.ParseBoard("00000038180c00010000000000030204")
 	require.NoError(t, err)
 	require.False(t, board.HasMoves())
 
@@ -130,7 +130,7 @@ func TestBuildCache_ForcedPass(t *testing.T) {
 }
 
 func TestBuildCache_ForcedPassUndeterminedSuccessorExcludesBoard(t *testing.T) {
-	board, err := othello.ParseBoard("00000038180c00010000000000030204-b")
+	board, err := othello.ParseBoard("00000038180c00010000000000030204")
 	require.NoError(t, err)
 	require.False(t, board.HasMoves())
 
@@ -142,7 +142,7 @@ func TestBuildCache_ForcedPassUndeterminedSuccessorExcludesBoard(t *testing.T) {
 
 func TestBuildCache_GameOver(t *testing.T) {
 	// Reachable board where the game is over: both players are out of moves.
-	board, err := othello.ParseBoard("3fb0888090a0c080c04f777f6f5f3f7f-b")
+	board, err := othello.ParseBoard("3fb0888090a0c080c04f777f6f5f3f7f")
 	require.NoError(t, err)
 	require.False(t, board.HasMoves())
 
@@ -160,7 +160,7 @@ func TestBuildCache_GameOver(t *testing.T) {
 func TestMinimaxValue_ForcedPassAtLeafBoundary(t *testing.T) {
 	// The forced-pass board is itself at the leaf boundary; leaves can only hold the passed-to
 	// board (edax never evaluates a no-legal-move position), so the value must be its negation.
-	board, err := othello.ParseBoard("00000038180c00010000000000030204-b")
+	board, err := othello.ParseBoard("00000038180c00010000000000030204")
 	require.NoError(t, err)
 	require.False(t, board.HasMoves())
 
@@ -177,7 +177,7 @@ func TestMinimaxValue_ForcedPassAtLeafBoundary(t *testing.T) {
 }
 
 func TestMinimaxValue_ForcedPassAtLeafBoundaryUnlearnedSuccessorIsUndetermined(t *testing.T) {
-	board, err := othello.ParseBoard("00000038180c00010000000000030204-b")
+	board, err := othello.ParseBoard("00000038180c00010000000000030204")
 	require.NoError(t, err)
 	require.False(t, board.HasMoves())
 
@@ -190,7 +190,7 @@ func TestMinimaxValue_ForcedPassAtLeafBoundaryUnlearnedSuccessorIsUndetermined(t
 func TestMinimaxValue_GameOverAtLeafBoundary(t *testing.T) {
 	// Game-over board at the leaf boundary: minimaxPass's game-over short-circuit must fire
 	// before the leafDiscs lookup misses on a board that was never in leaves.
-	board, err := othello.ParseBoard("3fb0888090a0c080c04f777f6f5f3f7f-b")
+	board, err := othello.ParseBoard("3fb0888090a0c080c04f777f6f5f3f7f")
 	require.NoError(t, err)
 	require.False(t, board.HasMoves())
 

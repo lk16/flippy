@@ -76,7 +76,7 @@ func TestExtractBoards_IncludesMaxSavableDiscsBoundary(t *testing.T) {
 func TestExtractBoards_ExcludesBoardWithNoLegalMove(t *testing.T) {
 	// Black holds row 0, white row 7, black to move: black has no legal move even though the
 	// disc count (16) is within the savable range.
-	board, err := othello.NewBoard(0xFF, 0xFF00000000000000, othello.Black)
+	board, err := othello.NewBoard(0xFF, 0xFF00000000000000)
 	require.NoError(t, err)
 	require.False(t, board.HasMoves(), "test board must have no legal move for this test to be meaningful")
 	require.Equal(t, 16, board.CountDiscs())

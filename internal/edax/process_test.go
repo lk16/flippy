@@ -150,7 +150,7 @@ func TestProcess_Evaluate_InvalidLevel(t *testing.T) {
 func TestProcess_Evaluate_NoLegalMoves(t *testing.T) {
 	p := testProcess(t)
 
-	board, err := othello.NewBoard(^uint64(0), 0, othello.Black)
+	board, err := othello.NewBoard(^uint64(0), 0)
 	require.NoError(t, err)
 
 	_, err = p.Evaluate(board, 10)

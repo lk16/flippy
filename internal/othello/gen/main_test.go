@@ -31,7 +31,7 @@ func TestExplore_StopsWhenGameEndsEarly(t *testing.T) {
 	// No legal moves for either player below targetDiscs discs: the game is over, so no
 	// targetDiscs board can be reached.
 	full := ^uint64(0)
-	board, err := othello.NewBoard(full, 0, othello.Black)
+	board, err := othello.NewBoard(full, 0)
 	require.NoError(t, err)
 
 	found := make(map[string]struct{})
@@ -50,7 +50,7 @@ func TestExplore_FromStart_MatchesPrecomputedCount(t *testing.T) {
 func TestExplore_FollowsForcedPassAtTargetDiscBoard(t *testing.T) {
 	// A real 12-disc board where black (to move) must pass: the board itself is skipped (edax
 	// can't evaluate it), but the passed-into position is a genuine targetDiscs board to keep.
-	board, err := othello.ParseBoard("0000001c183000800000000000c04020-b")
+	board, err := othello.ParseBoard("0000001c183000800000000000c04020")
 	require.NoError(t, err)
 	require.Equal(t, targetDiscs, board.CountDiscs())
 	require.False(t, board.HasMoves(), "test board must have no legal move for this test to be meaningful")
