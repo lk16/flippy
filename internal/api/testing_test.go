@@ -53,35 +53,35 @@ func testServer(t *testing.T) *Server {
 	return NewServer(repo, redisClient, book.NewCache(repo))
 }
 
-// testBoard returns a NormalizedBoard reached by playing the first available
+// testPosition returns a NormalizedPosition reached by playing the first available
 // legal move (or pass) from start until it has exactly discs discs.
-var testBoard = othellotest.Board
+var testPosition = othellotest.Position
 
-// testPassRequiredBoard returns a Board where the player to move must pass but the game is not
+// testPassRequiredPosition returns a Position where the player to move must pass but the game is not
 // over.
-func testPassRequiredBoard(t *testing.T) othello.Board {
+func testPassRequiredPosition(t *testing.T) othello.Position {
 	t.Helper()
 
-	board := othello.NewBoardStart()
+	position := othello.NewStartPosition()
 	for range 200 {
-		if !board.HasMoves() {
-			passed, err := board.DoMove(othello.PassMove)
+		if !position.HasMoves() {
+			passed, err := position.DoMove(othello.PassMove)
 			require.NoError(t, err)
 			if passed.HasMoves() {
-				return board
+				return position
 			}
 			t.Fatal("hit a game-ending double pass before finding a single forced pass")
 		}
 
-		children := board.Children()
+		children := position.Children()
 		require.NotEmpty(t, children)
-		board = children[0]
+		position = children[0]
 	}
 
 	t.Fatal("no forced-pass position found within ply bound")
-	return othello.Board{}
+	return othello.Position{}
 }
 
-// testDistinctBoards returns n distinct NormalizedBoards with exactly discs
+// testDistinctPositions returns n distinct NormalizedPositions with exactly discs
 // discs, found via breadth-first search from the starting position.
-var testDistinctBoards = othellotest.DistinctBoards
+var testDistinctPositions = othellotest.DistinctPositions

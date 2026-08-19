@@ -10,93 +10,93 @@ import (
 	"github.com/lk16/flippy/internal/othello/othellotest"
 )
 
-var testBoard = othellotest.Board
+var testPosition = othellotest.Position
 
-func TestExtractBoards_PlayedLineWithinRange(t *testing.T) {
+func TestExtractPositions_PlayedLineWithinRange(t *testing.T) {
 	// A known-legal move sequence that reaches 14 discs with no passes.
 	game, err := othello.NewGameFromMoves([]int{19, 18, 17, 9, 1, 0, 37, 43, 51, 2})
 	require.NoError(t, err)
-	require.Equal(t, 14, game.Board().CountDiscs())
+	require.Equal(t, 14, game.Position().CountDiscs())
 
-	boards := ExtractBoards([]*othello.Game{game})
-	require.NotEmpty(t, boards)
+	positions := ExtractPositions([]*othello.Game{game})
+	require.NotEmpty(t, positions)
 
-	for _, b := range boards {
+	for _, b := range positions {
 		require.True(t, b.HasMoves())
 		require.GreaterOrEqual(t, b.CountDiscs(), book.LeafDiscs)
 		require.LessOrEqual(t, b.CountDiscs(), book.MaxSavableDiscs)
 	}
 }
 
-func TestExtractBoards_IncludesChildrenOfPlayedLine(t *testing.T) {
-	start := testBoard(t, book.LeafDiscs).Board()
+func TestExtractPositions_IncludesChildrenOfPlayedLine(t *testing.T) {
+	start := testPosition(t, book.LeafDiscs).Position()
 	game := othello.NewGameWithStart(start)
 
-	boards := ExtractBoards([]*othello.Game{game})
+	positions := ExtractPositions([]*othello.Game{game})
 
 	// start itself (LeafDiscs discs) plus its children (LeafDiscs+1 discs).
-	require.Contains(t, boards, start.Normalize())
+	require.Contains(t, positions, start.Normalize())
 
 	childFound := false
 	for _, child := range start.Children() {
-		if containsBoard(boards, child.Normalize()) {
+		if containsBoard(positions, child.Normalize()) {
 			childFound = true
 		}
 	}
-	require.True(t, childFound, "expected at least one child of the start board to be extracted")
+	require.True(t, childFound, "expected at least one child of the start position to be extracted")
 }
 
-func TestExtractBoards_ExcludesBelowLeafDiscs(t *testing.T) {
-	start := testBoard(t, book.LeafDiscs-1).Board()
+func TestExtractPositions_ExcludesBelowLeafDiscs(t *testing.T) {
+	start := testPosition(t, book.LeafDiscs-1).Position()
 	game := othello.NewGameWithStart(start)
 
-	boards := ExtractBoards([]*othello.Game{game})
+	positions := ExtractPositions([]*othello.Game{game})
 
-	require.NotContains(t, boards, start.Normalize())
+	require.NotContains(t, positions, start.Normalize())
 }
 
-func TestExtractBoards_ExcludesAboveMaxSavableDiscs(t *testing.T) {
-	start := testBoard(t, book.MaxSavableDiscs+1).Board()
+func TestExtractPositions_ExcludesAboveMaxSavableDiscs(t *testing.T) {
+	start := testPosition(t, book.MaxSavableDiscs+1).Position()
 	game := othello.NewGameWithStart(start)
 
-	boards := ExtractBoards([]*othello.Game{game})
+	positions := ExtractPositions([]*othello.Game{game})
 
-	require.NotContains(t, boards, start.Normalize())
+	require.NotContains(t, positions, start.Normalize())
 }
 
-func TestExtractBoards_IncludesMaxSavableDiscsBoundary(t *testing.T) {
-	start := testBoard(t, book.MaxSavableDiscs).Board()
+func TestExtractPositions_IncludesMaxSavableDiscsBoundary(t *testing.T) {
+	start := testPosition(t, book.MaxSavableDiscs).Position()
 	game := othello.NewGameWithStart(start)
 
-	boards := ExtractBoards([]*othello.Game{game})
+	positions := ExtractPositions([]*othello.Game{game})
 
-	require.Contains(t, boards, start.Normalize())
+	require.Contains(t, positions, start.Normalize())
 }
 
-func TestExtractBoards_ExcludesBoardWithNoLegalMove(t *testing.T) {
+func TestExtractPositions_ExcludesBoardWithNoLegalMove(t *testing.T) {
 	// Black holds row 0, white row 7, black to move: black has no legal move even though the
 	// disc count (16) is within the savable range.
-	board, err := othello.NewBoard(0xFF, 0xFF00000000000000, othello.Black)
+	position, err := othello.NewPosition(0xFF, 0xFF00000000000000)
 	require.NoError(t, err)
-	require.False(t, board.HasMoves(), "test board must have no legal move for this test to be meaningful")
-	require.Equal(t, 16, board.CountDiscs())
+	require.False(t, position.HasMoves(), "test position must have no legal move for this test to be meaningful")
+	require.Equal(t, 16, position.CountDiscs())
 
-	game := othello.NewGameWithStart(board)
+	game := othello.NewGameWithStart(position)
 
-	boards := ExtractBoards([]*othello.Game{game})
+	positions := ExtractPositions([]*othello.Game{game})
 
-	require.NotContains(t, boards, board.Normalize())
+	require.NotContains(t, positions, position.Normalize())
 }
 
-func TestExtractBoards_DedupesAcrossGames(t *testing.T) {
-	start := testBoard(t, book.LeafDiscs).Board()
+func TestExtractPositions_DedupesAcrossGames(t *testing.T) {
+	start := testPosition(t, book.LeafDiscs).Position()
 	game1 := othello.NewGameWithStart(start)
 	game2 := othello.NewGameWithStart(start)
 
-	boards := ExtractBoards([]*othello.Game{game1, game2})
+	positions := ExtractPositions([]*othello.Game{game1, game2})
 
 	count := 0
-	for _, b := range boards {
+	for _, b := range positions {
 		if b == start.Normalize() {
 			count++
 		}
@@ -104,12 +104,12 @@ func TestExtractBoards_DedupesAcrossGames(t *testing.T) {
 	require.Equal(t, 1, count)
 }
 
-func TestExtractBoards_NoGames(t *testing.T) {
-	require.Empty(t, ExtractBoards(nil))
+func TestExtractPositions_NoGames(t *testing.T) {
+	require.Empty(t, ExtractPositions(nil))
 }
 
-func containsBoard(boards []othello.NormalizedBoard, target othello.NormalizedBoard) bool {
-	for _, b := range boards {
+func containsBoard(positions []othello.NormalizedPosition, target othello.NormalizedPosition) bool {
+	for _, b := range positions {
 		if b == target {
 			return true
 		}

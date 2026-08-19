@@ -10,17 +10,17 @@ import (
 	"github.com/lk16/flippy/internal/othello"
 )
 
-// jobCandidateBatch is how many candidate boards are fetched per claim attempt.
+// jobCandidateBatch is how many candidate positions are fetched per claim attempt.
 const jobCandidateBatch = 50
 
-// Job is a board a worker should evaluate, and the level to search it at.
+// Job is a position a worker should evaluate, and the level to search it at.
 type Job struct {
-	Board othello.NormalizedBoard
-	Level int
+	Position othello.NormalizedPosition
+	Level    int
 }
 
-// claimJob atomically claims one board for workerID: the oldest claimable priority-queue board
-// (from interactive analysis requests) if any, else the lowest disc-count/level learnable board.
+// claimJob atomically claims one position for workerID: the oldest claimable priority-queue position
+// (from interactive analysis requests) if any, else the lowest disc-count/level learnable position.
 // ok is false when nothing is claimable.
 func (s *Server) claimJob(ctx context.Context, workerID string) (job Job, ok bool, err error) {
 	// Drain the priority queue before falling back to ListLearnable.
@@ -33,23 +33,23 @@ func (s *Server) claimJob(ctx context.Context, workerID string) (job Job, ok boo
 			break
 		}
 
-		board, err := othello.ParseBoard(entry.Board)
+		position, err := othello.ParsePosition(entry.Position)
 		if err != nil {
 			continue
 		}
 
 		// edax crashes on a position with no legal move.
-		if !board.HasMoves() {
+		if !position.HasMoves() {
 			continue
 		}
 
-		normalized, err := othello.NewNormalizedBoard(board)
+		normalized, err := othello.NewNormalizedPosition(position)
 		if err != nil {
-			// Board from queue wasn't normalized; skip rather than corrupt the claim key.
+			// Position from queue wasn't normalized; skip rather than corrupt the claim key.
 			continue
 		}
 
-		claimed, err := s.tryClaim(ctx, entry.Board, workerID)
+		claimed, err := s.tryClaim(ctx, entry.Position, workerID)
 		if err != nil {
 			return Job{}, false, err
 		}
@@ -57,11 +57,11 @@ func (s *Server) claimJob(ctx context.Context, workerID string) (job Job, ok boo
 			continue
 		}
 
-		if err := s.setPriorityClaim(ctx, entry.Board); err != nil {
-			log.Printf("failed to set priority claim marker for %s: %v", entry.Board, err)
+		if err := s.setPriorityClaim(ctx, entry.Position); err != nil {
+			log.Printf("failed to set priority claim marker for %s: %v", entry.Position, err)
 		}
 
-		return Job{Board: normalized, Level: entry.Level}, true, nil
+		return Job{Position: normalized, Level: entry.Level}, true, nil
 	}
 
 	candidates, err := s.repo.ListLearnable(ctx,
@@ -70,22 +70,22 @@ func (s *Server) claimJob(ctx context.Context, workerID string) (job Job, ok boo
 		jobCandidateBatch,
 	)
 	if err != nil {
-		return Job{}, false, fmt.Errorf("failed to list candidate boards: %w", err)
+		return Job{}, false, fmt.Errorf("failed to list candidate positions: %w", err)
 	}
 
 	for _, candidate := range candidates {
 		// edax crashes on a position with no legal move.
-		if !candidate.Board.HasMoves() {
+		if !candidate.Position.HasMoves() {
 			continue
 		}
 
-		discCount := candidate.Board.CountDiscs()
+		discCount := candidate.Position.CountDiscs()
 		target := TargetLevel(discCount)
 		if candidate.Evaluation.Level >= target {
 			continue
 		}
 
-		claimed, err := s.tryClaim(ctx, candidate.Board.String(), workerID)
+		claimed, err := s.tryClaim(ctx, candidate.Position.String(), workerID)
 		if err != nil {
 			return Job{}, false, err
 		}
@@ -93,14 +93,14 @@ func (s *Server) claimJob(ctx context.Context, workerID string) (job Job, ok boo
 			continue
 		}
 
-		return Job{Board: candidate.Board, Level: target}, true, nil
+		return Job{Position: candidate.Position, Level: target}, true, nil
 	}
 
 	return Job{}, false, nil
 }
 
-// TargetLevelTier maps an upper disc-count bound to the edax search level boards up to that count
-// get. Tiers are ordered by MaxDiscs; the last one is a catch-all for the rest of the board.
+// TargetLevelTier maps an upper disc-count bound to the edax search level positions up to that count
+// get. Tiers are ordered by MaxDiscs; the last one is a catch-all for the rest of the position.
 type TargetLevelTier struct {
 	MaxDiscs int `json:"max_discs"`
 	Level    int `json:"level"`
@@ -121,7 +121,7 @@ func TargetLevelTiers() []TargetLevelTier {
 	return slices.Clone(targetLevelTiers)
 }
 
-// TargetLevel returns the edax search level for a board with discCount discs; deeper boards get
+// TargetLevel returns the edax search level for a position with discCount discs; deeper positions get
 // shallower searches to keep evaluation time roughly bounded.
 func TargetLevel(discCount int) int {
 	for _, tier := range targetLevelTiers {
@@ -132,8 +132,8 @@ func TargetLevel(discCount int) int {
 	return targetLevelTiers[len(targetLevelTiers)-1].Level
 }
 
-// EffectiveTargetLevel returns the target level for a board at the given disc count, capping at
-// TargetLevel(MaxSavableDiscs) for boards that exceed that count and are not persisted to the DB.
+// EffectiveTargetLevel returns the target level for a position at the given disc count, capping at
+// TargetLevel(MaxSavableDiscs) for positions that exceed that count and are not persisted to the DB.
 func EffectiveTargetLevel(discCount int) int {
 	if discCount > book.MaxSavableDiscs {
 		discCount = book.MaxSavableDiscs

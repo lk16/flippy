@@ -1,4 +1,4 @@
-// Package loader adds boards to the DB, from the precomputed 12-disc set or extracted from game files.
+// Package loader adds positions to the DB, from the precomputed 12-disc set or extracted from game files.
 package loader
 
 import (
@@ -9,11 +9,11 @@ import (
 	"github.com/lk16/flippy/internal/othello"
 )
 
-// SeedBoards adds every precomputed 12-disc board to the DB; idempotent, since AddBoards leaves
-// existing rows untouched.
-func SeedBoards(ctx context.Context, repo *db.Repository) error {
-	if err := repo.AddBoards(ctx, othello.PrecomputedBoards12()); err != nil {
-		return fmt.Errorf("failed to seed precomputed boards: %w", err)
+// SeedPositions adds every precomputed 12-disc position to the DB; idempotent, since AddPositions
+// leaves existing rows untouched.
+func SeedPositions(ctx context.Context, repo *db.Repository) error {
+	if err := repo.AddPositions(ctx, othello.PrecomputedPositions12()); err != nil {
+		return fmt.Errorf("failed to seed precomputed positions: %w", err)
 	}
 	return nil
 }

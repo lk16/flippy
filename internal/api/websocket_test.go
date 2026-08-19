@@ -37,16 +37,16 @@ func TestHandleWebSocket_EvaluationRequest_ReturnsFoundEvaluations(t *testing.T)
 	s := testServer(t)
 	ctx := context.Background()
 
-	board := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Score: 3}))
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, position, db.Evaluation{Level: 20, Score: 3}))
 
 	conn := testWebSocket(t, s)
 
-	unknownBoard := testBoard(t, 13)
+	unknownBoard := testPosition(t, 13)
 	require.NoError(t, wsjson.Write(ctx, conn, wsIncoming{
 		ID: 1, Event: "evaluation_request",
-		Data: mustMarshal(t, wsEvaluationRequest{Boards: []string{board.String(), unknownBoard.String()}}),
+		Data: mustMarshal(t, wsEvaluationRequest{Positions: []string{position.String(), unknownBoard.String()}}),
 	}))
 
 	var resp wsOutgoing
@@ -61,7 +61,7 @@ func TestHandleWebSocket_EvaluationRequest_ReturnsFoundEvaluations(t *testing.T)
 
 	entry, ok := evaluations[0].(map[string]any)
 	require.True(t, ok)
-	require.Equal(t, board.String(), entry["board"])
+	require.Equal(t, position.String(), entry["board"])
 	require.Equal(t, float64(20), entry["level"])
 	require.Equal(t, evaluationSourceEdax, entry["source"])
 }
@@ -70,15 +70,15 @@ func TestHandleWebSocket_EvaluationRequest_FallsBackToMinimaxCache(t *testing.T)
 	s := testServer(t)
 	ctx := context.Background()
 
-	board11 := testBoard(t, book.LeafDiscs-1)
-	children := board11.Board().Children()
+	position11 := testPosition(t, book.LeafDiscs-1)
+	children := position11.Position().Children()
 	require.NotEmpty(t, children)
 
-	normalizedChildren := make([]othello.NormalizedBoard, len(children))
+	normalizedChildren := make([]othello.NormalizedPosition, len(children))
 	for i, child := range children {
 		normalizedChildren[i] = child.Normalize()
 	}
-	require.NoError(t, s.repo.AddBoards(ctx, normalizedChildren))
+	require.NoError(t, s.repo.AddPositions(ctx, normalizedChildren))
 	for _, child := range normalizedChildren {
 		require.NoError(t, s.repo.SaveEvaluation(ctx, child, db.Evaluation{Level: 20, Score: 1}))
 	}
@@ -88,7 +88,7 @@ func TestHandleWebSocket_EvaluationRequest_FallsBackToMinimaxCache(t *testing.T)
 
 	require.NoError(t, wsjson.Write(ctx, conn, wsIncoming{
 		ID: 7, Event: "evaluation_request",
-		Data: mustMarshal(t, wsEvaluationRequest{Boards: []string{board11.String()}}),
+		Data: mustMarshal(t, wsEvaluationRequest{Positions: []string{position11.String()}}),
 	}))
 
 	var resp wsOutgoing
@@ -99,23 +99,23 @@ func TestHandleWebSocket_EvaluationRequest_FallsBackToMinimaxCache(t *testing.T)
 	require.Len(t, evaluations, 1)
 
 	entry := evaluations[0].(map[string]any)
-	require.Equal(t, board11.String(), entry["board"])
+	require.Equal(t, position11.String(), entry["board"])
 	require.Equal(t, evaluationSourceMinimax, entry["source"])
 }
 
-// A board with a row but no evaluation yet must be omitted, not returned as a real score of 0.
+// A position with a row but no evaluation yet must be omitted, not returned as a real score of 0.
 func TestHandleWebSocket_EvaluationRequest_OmitsUnlearnedBoards(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	board := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 
 	conn := testWebSocket(t, s)
 
 	require.NoError(t, wsjson.Write(ctx, conn, wsIncoming{
 		ID: 1, Event: "evaluation_request",
-		Data: mustMarshal(t, wsEvaluationRequest{Boards: []string{board.String()}}),
+		Data: mustMarshal(t, wsEvaluationRequest{Positions: []string{position.String()}}),
 	}))
 
 	var resp wsOutgoing
@@ -129,10 +129,10 @@ func TestHandleWebSocket_EvaluationRequest_EmptyWhenNothingFound(t *testing.T) {
 	s := testServer(t)
 	conn := testWebSocket(t, s)
 
-	board := testBoard(t, 12)
+	position := testPosition(t, 12)
 	require.NoError(t, wsjson.Write(context.Background(), conn, wsIncoming{
 		ID: 1, Event: "evaluation_request",
-		Data: mustMarshal(t, wsEvaluationRequest{Boards: []string{board.String()}}),
+		Data: mustMarshal(t, wsEvaluationRequest{Positions: []string{position.String()}}),
 	}))
 
 	var resp wsOutgoing
@@ -146,15 +146,15 @@ func TestHandleWebSocket_MalformedBoardIsSkippedNotFatal(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	board := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Score: 3}))
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, position, db.Evaluation{Level: 20, Score: 3}))
 
 	conn := testWebSocket(t, s)
 
 	require.NoError(t, wsjson.Write(ctx, conn, wsIncoming{
 		ID: 1, Event: "evaluation_request",
-		Data: mustMarshal(t, wsEvaluationRequest{Boards: []string{"garbage", board.String()}}),
+		Data: mustMarshal(t, wsEvaluationRequest{Positions: []string{"garbage", position.String()}}),
 	}))
 
 	var resp wsOutgoing
@@ -169,15 +169,15 @@ func TestHandleWebSocket_UnknownEventIgnoredConnectionStaysOpen(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	board := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 
 	conn := testWebSocket(t, s)
 
 	require.NoError(t, wsjson.Write(ctx, conn, wsIncoming{ID: 1, Event: "unknown_event"}))
 	require.NoError(t, wsjson.Write(ctx, conn, wsIncoming{
 		ID: 2, Event: "evaluation_request",
-		Data: mustMarshal(t, wsEvaluationRequest{Boards: []string{board.String()}}),
+		Data: mustMarshal(t, wsEvaluationRequest{Positions: []string{position.String()}}),
 	}))
 
 	var resp wsOutgoing
@@ -192,55 +192,55 @@ func mustMarshal(t *testing.T, v any) json.RawMessage {
 	return data
 }
 
-// TestHandleWebSocket_AnalyzeRequest_EnqueuesMissingBoards verifies that boards without an
-// existing evaluation are placed on the priority queue, while already-resolved boards are not.
+// TestHandleWebSocket_AnalyzeRequest_EnqueuesMissingBoards verifies that positions without an
+// existing evaluation are placed on the priority queue, while already-resolved positions are not.
 func TestHandleWebSocket_AnalyzeRequest_EnqueuesMissingBoards(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	// board1 is already evaluated (DB).
-	board1 := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board1}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board1, db.Evaluation{Level: 20, Score: 4}))
+	// position1 is already evaluated (DB).
+	position1 := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position1}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, position1, db.Evaluation{Level: 20, Score: 4}))
 
-	// board2 has no evaluation.
-	board2 := testBoard(t, 13)
+	// position2 has no evaluation.
+	position2 := testPosition(t, 13)
 
 	conn := testWebSocket(t, s)
 
 	require.NoError(t, wsjson.Write(ctx, conn, wsIncoming{
 		ID: 1, Event: "analyze_request",
-		Data: mustMarshal(t, wsEvaluationRequest{Boards: []string{board1.String(), board2.String()}}),
+		Data: mustMarshal(t, wsEvaluationRequest{Positions: []string{position1.String(), position2.String()}}),
 	}))
 
 	var resp wsOutgoing
 	require.NoError(t, wsjson.Read(ctx, conn, &resp))
 	require.Equal(t, 1, resp.ID)
 
-	// board1 should already be in the response (it's resolved); board2 is not yet.
+	// position1 should already be in the response (it's resolved); position2 is not yet.
 	data := resp.Data.(map[string]any)
 	evaluations, _ := data["evaluations"].([]any)
 	require.Len(t, evaluations, 1)
 	entry := evaluations[0].(map[string]any)
-	require.Equal(t, board1.String(), entry["board"])
+	require.Equal(t, position1.String(), entry["board"])
 
-	// board2 (normalized) should be in the priority queue.
+	// position2 (normalized) should be in the priority queue.
 	pending := drainPriority(t, s)
 	pendingBoards := make([]string, len(pending))
 	for i, e := range pending {
-		pendingBoards[i] = e.Board
+		pendingBoards[i] = e.Position
 	}
-	require.Contains(t, pendingBoards, board2.String())
+	require.Contains(t, pendingBoards, position2.String())
 }
 
-// Analyzing a forced-pass board must enqueue the post-pass board instead: edax cannot search a
+// Analyzing a forced-pass position must enqueue the post-pass position instead: edax cannot search a
 // position with no legal move.
 func TestHandleWebSocket_AnalyzeRequest_ForcedPassEnqueuesPostPassBoard(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	passBoard := testPassRequiredBoard(t)
-	passed, err := passBoard.DoMove(othello.PassMove)
+	passPosition := testPassRequiredPosition(t)
+	passed, err := passPosition.DoMove(othello.PassMove)
 	require.NoError(t, err)
 	postPassNormalized := passed.Normalize()
 
@@ -248,7 +248,7 @@ func TestHandleWebSocket_AnalyzeRequest_ForcedPassEnqueuesPostPassBoard(t *testi
 
 	require.NoError(t, wsjson.Write(ctx, conn, wsIncoming{
 		ID: 1, Event: "analyze_request",
-		Data: mustMarshal(t, wsEvaluationRequest{Boards: []string{passBoard.String()}}),
+		Data: mustMarshal(t, wsEvaluationRequest{Positions: []string{passPosition.String()}}),
 	}))
 
 	var resp wsOutgoing
@@ -258,30 +258,30 @@ func TestHandleWebSocket_AnalyzeRequest_ForcedPassEnqueuesPostPassBoard(t *testi
 	pending := drainPriority(t, s)
 	pendingBoards := make([]string, len(pending))
 	for i, e := range pending {
-		pendingBoards[i] = e.Board
+		pendingBoards[i] = e.Position
 	}
 
-	// The post-pass board is enqueued; the un-searchable pass board is not.
+	// The post-pass position is enqueued; the un-searchable pass position is not.
 	require.Contains(t, pendingBoards, postPassNormalized.String())
-	require.NotContains(t, pendingBoards, passBoard.Normalize().String())
+	require.NotContains(t, pendingBoards, passPosition.Normalize().String())
 }
 
 // TestHandleWebSocket_AnalyzeRequest_SameSearchNotEnqueued verifies that a deeper level asking for
-// a search the board already got is answered from the DB instead of queued: at 30 discs levels 28
+// a search the position already got is answered from the DB instead of queued: at 30 discs levels 28
 // and 29 both mean a 34-ply search at 73%.
 func TestHandleWebSocket_AnalyzeRequest_SameSearchNotEnqueued(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	board := testBoard(t, 30)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 28, Score: 7}))
+	position := testPosition(t, 30)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, position, db.Evaluation{Level: 28, Score: 7}))
 
 	conn := testWebSocket(t, s)
 
 	require.NoError(t, wsjson.Write(ctx, conn, wsIncoming{
 		ID: 1, Event: "analyze_request",
-		Data: mustMarshal(t, wsEvaluationRequest{Boards: []string{board.String()}, Level: 29}),
+		Data: mustMarshal(t, wsEvaluationRequest{Positions: []string{position.String()}, Level: 29}),
 	}))
 
 	var resp wsOutgoing
@@ -301,7 +301,7 @@ func TestHandleWebSocket_AnalyzeRequest_SameSearchNotEnqueued(t *testing.T) {
 	require.Empty(t, pending)
 }
 
-// TestHandleWebSocket_AnalyzeRequest_FinalResultNotEnqueued verifies that a board already searched
+// TestHandleWebSocket_AnalyzeRequest_FinalResultNotEnqueued verifies that a position already searched
 // to the end of the game is never re-queued, however deep a level is requested. At 44 discs every
 // level from 10 up solves the 20 remaining empties outright.
 func TestHandleWebSocket_AnalyzeRequest_FinalResultNotEnqueued(t *testing.T) {
@@ -309,12 +309,12 @@ func TestHandleWebSocket_AnalyzeRequest_FinalResultNotEnqueued(t *testing.T) {
 	ctx := context.Background()
 
 	// Past MaxSavableDiscs, so the ephemeral analysis cache is where its evaluation lives.
-	board := testBoard(t, 44)
-	s.setAnalysisResult(ctx, board.String(), evaluationResponse{
+	position := testPosition(t, 44)
+	s.setAnalysisResult(ctx, position.String(), evaluationResponse{
 		Level: 10, Depth: 20, Confidence: 100, Score: 6, Source: evaluationSourceEdax,
 	})
 
-	s.handleAnalyzeRequest(ctx, []string{board.String()}, 28, "")
+	s.handleAnalyzeRequest(ctx, []string{position.String()}, 28, "")
 
 	pending := drainPriority(t, s)
 	require.Empty(t, pending)
@@ -367,14 +367,14 @@ func TestSearchAddsNothing(t *testing.T) {
 	}
 }
 
-// TestHandleWebSocket_AnalyzeRequest_GameOverNotEnqueued verifies that a game-over board (neither
+// TestHandleWebSocket_AnalyzeRequest_GameOverNotEnqueued verifies that a game-over position (neither
 // player can move) is not enqueued for analysis, since its score is final.
 func TestHandleWebSocket_AnalyzeRequest_GameOverNotEnqueued(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	// A full board with only one color: no moves for either player → game over.
-	gameOver, err := othello.NewBoard(0xFFFFFFFFFFFFFFFF, 0, othello.Black)
+	// A full position with only one color: no moves for either player → game over.
+	gameOver, err := othello.NewPosition(0xFFFFFFFFFFFFFFFF, 0)
 	require.NoError(t, err)
 	require.False(t, gameOver.HasMoves())
 
@@ -382,7 +382,7 @@ func TestHandleWebSocket_AnalyzeRequest_GameOverNotEnqueued(t *testing.T) {
 
 	require.NoError(t, wsjson.Write(ctx, conn, wsIncoming{
 		ID: 1, Event: "analyze_request",
-		Data: mustMarshal(t, wsEvaluationRequest{Boards: []string{gameOver.String()}}),
+		Data: mustMarshal(t, wsEvaluationRequest{Positions: []string{gameOver.String()}}),
 	}))
 
 	var resp wsOutgoing
@@ -393,31 +393,31 @@ func TestHandleWebSocket_AnalyzeRequest_GameOverNotEnqueued(t *testing.T) {
 }
 
 // TestHandleWebSocket_AnalyzeRequest_NoDuplicatesInQueue verifies that repeated analyze_request
-// calls for the same board only enqueue it once.
+// calls for the same position only enqueue it once.
 func TestHandleWebSocket_AnalyzeRequest_NoDuplicatesInQueue(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	board := testBoard(t, 13)
+	position := testPosition(t, 13)
 	conn := testWebSocket(t, s)
 
 	send := func(id int) {
 		require.NoError(t, wsjson.Write(ctx, conn, wsIncoming{
 			ID: id, Event: "analyze_request",
-			Data: mustMarshal(t, wsEvaluationRequest{Boards: []string{board.String()}}),
+			Data: mustMarshal(t, wsEvaluationRequest{Positions: []string{position.String()}}),
 		}))
 		var resp wsOutgoing
 		require.NoError(t, wsjson.Read(ctx, conn, &resp))
 	}
 
 	send(1)
-	send(2) // same board again
+	send(2) // same position again
 
 	// Only one entry must be in the queue.
 	dequeued := drainPriority(t, s)
 	count := 0
 	for _, entry := range dequeued {
-		if entry.Board == board.String() {
+		if entry.Position == position.String() {
 			count++
 		}
 	}
@@ -430,15 +430,15 @@ func TestHandleWebSocket_AnalyzeRequest_SameShapeAsEvaluationRequest(t *testing.
 	s := testServer(t)
 	ctx := context.Background()
 
-	board := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Score: 3}))
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, position, db.Evaluation{Level: 20, Score: 3}))
 
 	conn := testWebSocket(t, s)
 
 	require.NoError(t, wsjson.Write(ctx, conn, wsIncoming{
 		ID: 5, Event: "analyze_request",
-		Data: mustMarshal(t, wsEvaluationRequest{Boards: []string{board.String()}}),
+		Data: mustMarshal(t, wsEvaluationRequest{Positions: []string{position.String()}}),
 	}))
 
 	var resp wsOutgoing

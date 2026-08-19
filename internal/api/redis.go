@@ -50,19 +50,19 @@ const (
 	workerFieldLastActive        = "last_active"
 )
 
-// claimKey is the redis key holding the worker ID that currently holds board's job, if any.
-func claimKey(board string) string {
-	return "claim:" + board
+// claimKey is the redis key holding the worker ID that currently holds position's job, if any.
+func claimKey(position string) string {
+	return "claim:" + position
 }
 
-// workerKey is the redis key of the hash describing a worker's hostname, git commit, stats, and claimed board.
+// workerKey is the redis key of the hash describing a worker's hostname, git commit, stats, and claimed position.
 func workerKey(workerID string) string {
 	return "worker:" + workerID
 }
 
-// tryClaim atomically claims board for workerID, reporting false with no error if already claimed.
-func (s *Server) tryClaim(ctx context.Context, board, workerID string) (bool, error) {
-	ok, err := s.redis.SetNX(ctx, claimKey(board), workerID, claimTTL).Result()
+// tryClaim atomically claims position for workerID, reporting false with no error if already claimed.
+func (s *Server) tryClaim(ctx context.Context, position, workerID string) (bool, error) {
+	ok, err := s.redis.SetNX(ctx, claimKey(position), workerID, claimTTL).Result()
 	if err != nil {
 		return false, fmt.Errorf("failed to claim job: %w", err)
 	}
@@ -82,11 +82,11 @@ func (s *Server) tryClaim(ctx context.Context, board, workerID string) (bool, er
 	return true, nil
 }
 
-// releaseClaim deletes the claim on board only if it still belongs to workerID, so a late release
+// releaseClaim deletes the claim on position only if it still belongs to workerID, so a late release
 // can't revoke a claim another worker took over. GET-then-DEL is not atomic; the worst case of the
 // race is one duplicated evaluation, which is acceptable.
-func (s *Server) releaseClaim(ctx context.Context, board, workerID string) error {
-	owner, err := s.redis.Get(ctx, claimKey(board)).Result()
+func (s *Server) releaseClaim(ctx context.Context, position, workerID string) error {
+	owner, err := s.redis.Get(ctx, claimKey(position)).Result()
 	if err == redis.Nil || (err == nil && owner != workerID) {
 		return nil
 	}
@@ -95,7 +95,7 @@ func (s *Server) releaseClaim(ctx context.Context, board, workerID string) error
 	}
 
 	pipe := s.redis.TxPipeline()
-	pipe.Del(ctx, claimKey(board))
+	pipe.Del(ctx, claimKey(position))
 	pipe.Expire(ctx, workerKey(workerID), claimTTL)
 	if _, err := pipe.Exec(ctx); err != nil {
 		return fmt.Errorf("failed to release claim: %w", err)
@@ -228,10 +228,10 @@ func (s *Server) recordJobCompletion(ctx context.Context, workerID string) error
 	return nil
 }
 
-// heartbeat records workerID as active and refreshes its claim on board ("" for none), but never
+// heartbeat records workerID as active and refreshes its claim on position ("" for none), but never
 // another worker's claim. GET-compare-EXPIRE is not atomic; the worst case of the race is one
 // duplicated evaluation, which is acceptable.
-func (s *Server) heartbeat(ctx context.Context, workerID, hostname, gitCommit, board string) error {
+func (s *Server) heartbeat(ctx context.Context, workerID, hostname, gitCommit, position string) error {
 	pipe := s.redis.TxPipeline()
 	pipe.HSet(ctx, workerKey(workerID),
 		workerFieldHostname, hostname,
@@ -243,11 +243,11 @@ func (s *Server) heartbeat(ctx context.Context, workerID, hostname, gitCommit, b
 		return fmt.Errorf("failed to record heartbeat: %w", err)
 	}
 
-	if board == "" {
+	if position == "" {
 		return nil
 	}
 
-	owner, err := s.redis.Get(ctx, claimKey(board)).Result()
+	owner, err := s.redis.Get(ctx, claimKey(position)).Result()
 	if err == redis.Nil || (err == nil && owner != workerID) {
 		return nil
 	}
@@ -255,7 +255,7 @@ func (s *Server) heartbeat(ctx context.Context, workerID, hostname, gitCommit, b
 		return fmt.Errorf("failed to refresh worker claim: %w", err)
 	}
 
-	if err := s.redis.Expire(ctx, claimKey(board), claimTTL).Err(); err != nil {
+	if err := s.redis.Expire(ctx, claimKey(position), claimTTL).Err(); err != nil {
 		return fmt.Errorf("failed to refresh worker claim: %w", err)
 	}
 
@@ -317,12 +317,12 @@ func (s *Server) listWorkers(ctx context.Context) ([]workerInfo, error) {
 // the websocket connection that requested it ("" for none); entries whose connection has since
 // closed are discarded at dequeue.
 type priorityEntry struct {
-	Board  string `json:"board"`
-	Level  int    `json:"level"`
-	ConnID string `json:"conn_id,omitempty"`
+	Position string `json:"board"`
+	Level    int    `json:"level"`
+	ConnID   string `json:"conn_id,omitempty"`
 }
 
-// priorityQueueKey is a Redis list: boards waiting for priority evaluation (LPUSH to enqueue, RPOP to drain).
+// priorityQueueKey is a Redis list: positions waiting for priority evaluation (LPUSH to enqueue, RPOP to drain).
 const priorityQueueKey = "priority_jobs"
 
 // priorityPendingKey is a Redis set mirroring priorityQueueKey's contents for O(1) duplicate detection.
@@ -333,20 +333,20 @@ const priorityPendingKey = "priority_pending"
 const analysisResultTTL = 30 * time.Minute
 
 // priorityClaimKey is the Redis key marking a claimed job as priority-originated.
-func priorityClaimKey(board string) string {
-	return "priority_claim:" + board
+func priorityClaimKey(position string) string {
+	return "priority_claim:" + position
 }
 
 // analysisResultKey is the Redis key holding a priority-computed evaluation as JSON.
-func analysisResultKey(board string) string {
-	return "analysis:" + board
+func analysisResultKey(position string) string {
+	return "analysis:" + position
 }
 
-// enqueuePriority adds board to the priority queue unless already pending. Dedupe is by board
-// alone: a board pending at another level or for another (possibly dead) connection is not
+// enqueuePriority adds position to the priority queue unless already pending. Dedupe is by position
+// alone: a position pending at another level or for another (possibly dead) connection is not
 // re-queued — the frontend re-requests until it gets a result, so drops heal themselves.
-func (s *Server) enqueuePriority(ctx context.Context, board string, level int, connID string) error {
-	isMember, err := s.redis.SIsMember(ctx, priorityPendingKey, board).Result()
+func (s *Server) enqueuePriority(ctx context.Context, position string, level int, connID string) error {
+	isMember, err := s.redis.SIsMember(ctx, priorityPendingKey, position).Result()
 	if err != nil {
 		return fmt.Errorf("failed to check priority pending set: %w", err)
 	}
@@ -354,16 +354,16 @@ func (s *Server) enqueuePriority(ctx context.Context, board string, level int, c
 		return nil
 	}
 
-	data, err := json.Marshal(priorityEntry{Board: board, Level: level, ConnID: connID})
+	data, err := json.Marshal(priorityEntry{Position: position, Level: level, ConnID: connID})
 	if err != nil {
 		return fmt.Errorf("failed to marshal priority entry: %w", err)
 	}
 
 	pipe := s.redis.TxPipeline()
-	pipe.SAdd(ctx, priorityPendingKey, board)
+	pipe.SAdd(ctx, priorityPendingKey, position)
 	pipe.LPush(ctx, priorityQueueKey, string(data))
 	if _, err := pipe.Exec(ctx); err != nil {
-		return fmt.Errorf("failed to enqueue priority board: %w", err)
+		return fmt.Errorf("failed to enqueue priority position: %w", err)
 	}
 	return nil
 }
@@ -378,16 +378,16 @@ func (s *Server) dequeuePriority(ctx context.Context) (priorityEntry, bool, erro
 			return priorityEntry{}, false, nil
 		}
 		if err != nil {
-			return priorityEntry{}, false, fmt.Errorf("failed to dequeue priority board: %w", err)
+			return priorityEntry{}, false, fmt.Errorf("failed to dequeue priority position: %w", err)
 		}
 
 		var entry priorityEntry
 		if jsonErr := json.Unmarshal([]byte(data), &entry); jsonErr != nil {
-			// Legacy entries are plain board strings.
-			entry = priorityEntry{Board: data, Level: PriorityLevel}
+			// Legacy entries are plain position strings.
+			entry = priorityEntry{Position: data, Level: PriorityLevel}
 		}
 
-		_ = s.redis.SRem(ctx, priorityPendingKey, entry.Board).Err()
+		_ = s.redis.SRem(ctx, priorityPendingKey, entry.Position).Err()
 
 		if entry.ConnID != "" && !s.connLive(entry.ConnID) {
 			continue
@@ -397,18 +397,18 @@ func (s *Server) dequeuePriority(ctx context.Context) (priorityEntry, bool, erro
 	}
 }
 
-// setPriorityClaim marks board's claim as priority-originated.
-func (s *Server) setPriorityClaim(ctx context.Context, board string) error {
-	if err := s.redis.Set(ctx, priorityClaimKey(board), "1", claimTTL).Err(); err != nil {
+// setPriorityClaim marks position's claim as priority-originated.
+func (s *Server) setPriorityClaim(ctx context.Context, position string) error {
+	if err := s.redis.Set(ctx, priorityClaimKey(position), "1", claimTTL).Err(); err != nil {
 		return fmt.Errorf("failed to set priority claim: %w", err)
 	}
 	return nil
 }
 
-// consumePriorityClaim atomically reads and deletes board's priority claim marker, reporting
+// consumePriorityClaim atomically reads and deletes position's priority claim marker, reporting
 // whether one existed.
-func (s *Server) consumePriorityClaim(ctx context.Context, board string) (bool, error) {
-	val, err := s.redis.GetDel(ctx, priorityClaimKey(board)).Result()
+func (s *Server) consumePriorityClaim(ctx context.Context, position string) (bool, error) {
+	val, err := s.redis.GetDel(ctx, priorityClaimKey(position)).Result()
 	if err == redis.Nil {
 		return false, nil
 	}
@@ -420,18 +420,18 @@ func (s *Server) consumePriorityClaim(ctx context.Context, board string) (bool, 
 
 // setAnalysisResult stores eval in the ephemeral analysis cache; best-effort, so a Redis hiccup
 // never fails the submission path.
-func (s *Server) setAnalysisResult(ctx context.Context, board string, eval evaluationResponse) {
+func (s *Server) setAnalysisResult(ctx context.Context, position string, eval evaluationResponse) {
 	data, err := json.Marshal(eval)
 	if err != nil {
 		return
 	}
-	_ = s.redis.Set(ctx, analysisResultKey(board), data, analysisResultTTL).Err()
+	_ = s.redis.Set(ctx, analysisResultKey(position), data, analysisResultTTL).Err()
 }
 
 // getAnalysisResult retrieves a priority-computed evaluation from the ephemeral cache; ok is false
 // on a miss.
-func (s *Server) getAnalysisResult(ctx context.Context, board string) (evaluationResponse, bool, error) {
-	data, err := s.redis.Get(ctx, analysisResultKey(board)).Bytes()
+func (s *Server) getAnalysisResult(ctx context.Context, position string) (evaluationResponse, bool, error) {
+	data, err := s.redis.Get(ctx, analysisResultKey(position)).Bytes()
 	if err == redis.Nil {
 		return evaluationResponse{}, false, nil
 	}

@@ -83,7 +83,7 @@ func main() {
 
 	switch os.Args[1] {
 	case "seed":
-		if err := loader.SeedBoards(ctx, repo); err != nil {
+		if err := loader.SeedPositions(ctx, repo); err != nil {
 			log.Fatalf("failed to seed boards: %v", err)
 		}
 		log.Println("seeded the precomputed 12-disc board set (existing rows left untouched)")

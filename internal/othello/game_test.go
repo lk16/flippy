@@ -9,7 +9,7 @@ import (
 func TestNewGame(t *testing.T) {
 	game := NewGame()
 
-	require.Equal(t, NewBoardStart(), game.Board())
+	require.Equal(t, NewStartPosition(), game.Position())
 	require.Empty(t, game.Moves())
 	require.Empty(t, game.Filename())
 	require.Nil(t, game.Metadata())
@@ -20,7 +20,6 @@ func TestGame_PushMove(t *testing.T) {
 
 	require.NoError(t, game.PushMove(19))
 	require.Equal(t, []int{19}, game.Moves())
-	require.Equal(t, White, game.Board().Turn())
 
 	require.NoError(t, game.PushMove(18))
 	require.Equal(t, []int{19, 18}, game.Moves())
@@ -35,7 +34,7 @@ func TestGame_PushMove_Invalid(t *testing.T) {
 }
 
 func TestGame_PushMove_AutoPass(t *testing.T) {
-	// This sequence reaches a board where black (to move) has no legal move but white does, so
+	// This sequence reaches a position where black (to move) has no legal move but white does, so
 	// pushing the final move should auto-insert a pass.
 	moves := []int{19, 18, 17, 9, 1, 0, 37, 43, 51, 2}
 
@@ -43,7 +42,7 @@ func TestGame_PushMove_AutoPass(t *testing.T) {
 	for _, m := range moves[:len(moves)-1] {
 		require.NoError(t, game.PushMove(m))
 	}
-	require.True(t, game.Board().HasMoves())
+	require.True(t, game.Position().HasMoves())
 
 	last := moves[len(moves)-1]
 	require.NoError(t, game.PushMove(last))
@@ -51,11 +50,11 @@ func TestGame_PushMove_AutoPass(t *testing.T) {
 	recorded := game.Moves()
 	require.Equal(t, PassMove, recorded[len(recorded)-1], "a pass should have been auto-inserted")
 
-	// The board right after the regular move (before the pass) has no legal move.
-	require.False(t, game.BoardAt(len(recorded)-1).HasMoves())
+	// The position right after the regular move (before the pass) has no legal move.
+	require.False(t, game.PositionAt(len(recorded)-1).HasMoves())
 
 	// After the pass, it's the other player's turn, who does have moves.
-	require.True(t, game.Board().HasMoves())
+	require.True(t, game.Position().HasMoves())
 }
 
 func TestGame_PushMove_NoDoublePass(t *testing.T) {
@@ -67,24 +66,24 @@ func TestGame_PushMove_NoDoublePass(t *testing.T) {
 }
 
 func TestGame_PushMove_ExplicitPass(t *testing.T) {
-	// The game is built directly from boards (bypassing PushMove) so no pass has been
+	// The game is built directly from positions (bypassing PushMove) so no pass has been
 	// auto-inserted yet, testing that pushing PassMove explicitly is also accepted.
 	moves := []int{19, 18, 17, 9, 1, 0, 37, 43, 51, 2}
 
-	boards := make([]Board, len(moves)+1)
-	boards[0] = NewBoardStart()
+	positions := make([]Position, len(moves)+1)
+	positions[0] = NewStartPosition()
 	for i, m := range moves {
 		var err error
-		boards[i+1], err = boards[i].DoMove(m)
+		positions[i+1], err = positions[i].DoMove(m)
 		require.NoError(t, err)
 	}
-	require.False(t, boards[len(boards)-1].HasMoves())
+	require.False(t, positions[len(positions)-1].HasMoves())
 
-	game := &Game{moves: append([]int(nil), moves...), boards: boards}
+	game := &Game{moves: append([]int(nil), moves...), positions: positions}
 
 	require.NoError(t, game.PushMove(PassMove))
 	require.Equal(t, PassMove, game.Moves()[len(game.Moves())-1])
-	require.True(t, game.Board().HasMoves())
+	require.True(t, game.Position().HasMoves())
 }
 
 func TestGame_PopMove(t *testing.T) {
@@ -106,24 +105,24 @@ func TestGame_PopMove(t *testing.T) {
 func TestGame_PopMove_LoneTrailingPass(t *testing.T) {
 	// The only pushed move is a pass: popping must remove just that pass, not also a
 	// (nonexistent) preceding move and slice out of bounds.
-	board, err := NewBoard(0xFFFFFFFFFFFFFFFF, 0, Black)
+	position, err := NewPosition(0xFFFFFFFFFFFFFFFF, 0)
 	require.NoError(t, err)
 
-	game := NewGameWithStart(board)
+	game := NewGameWithStart(position)
 	require.NoError(t, game.PushMove(PassMove))
 	require.Equal(t, []int{PassMove}, game.Moves())
 
 	require.NotPanics(t, game.PopMove)
 	require.Empty(t, game.Moves())
-	require.Equal(t, board, game.Board())
+	require.Equal(t, position, game.Position())
 }
 
 func TestGame_PopMove_RemovesTrailingPass(t *testing.T) {
-	// PopMove only inspects move values and slice lengths, so the boards' content doesn't
+	// PopMove only inspects move values and slice lengths, so the positions' content doesn't
 	// matter as long as the slice length tracks moves.
 	game := &Game{
-		moves:  []int{19, 18, PassMove},
-		boards: make([]Board, 4),
+		moves:     []int{19, 18, PassMove},
+		positions: make([]Position, 4),
 	}
 
 	game.PopMove()
@@ -135,9 +134,9 @@ func TestGame_BoardAt(t *testing.T) {
 	require.NoError(t, game.PushMove(19))
 	require.NoError(t, game.PushMove(18))
 
-	require.Equal(t, NewBoardStart(), game.BoardAt(0))
-	require.Equal(t, 4, game.BoardAt(0).CountDiscs())
-	require.Equal(t, 6, game.BoardAt(2).CountDiscs())
+	require.Equal(t, NewStartPosition(), game.PositionAt(0))
+	require.Equal(t, 4, game.PositionAt(0).CountDiscs())
+	require.Equal(t, 6, game.PositionAt(2).CountDiscs())
 }
 
 func TestGame_Boards(t *testing.T) {
@@ -145,11 +144,11 @@ func TestGame_Boards(t *testing.T) {
 	require.NoError(t, game.PushMove(19))
 	require.NoError(t, game.PushMove(18))
 
-	boards := game.Boards()
-	require.Len(t, boards, 3)
-	require.Equal(t, game.BoardAt(0), boards[0])
-	require.Equal(t, game.BoardAt(1), boards[1])
-	require.Equal(t, game.BoardAt(2), boards[2])
+	positions := game.Positions()
+	require.Len(t, positions, 3)
+	require.Equal(t, game.PositionAt(0), positions[0])
+	require.Equal(t, game.PositionAt(1), positions[1])
+	require.Equal(t, game.PositionAt(2), positions[2])
 }
 
 func TestNewGameFromMoves(t *testing.T) {

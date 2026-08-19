@@ -13,7 +13,7 @@ const boardSquares = 64
 // MaxLevel is the highest edax search level search_global_init defines behavior for.
 const MaxLevel = 60
 
-// SearchParams returns the (depth, confidence) an edax search at level reports for a board with
+// SearchParams returns the (depth, confidence) an edax search at level reports for a position with
 // discCount discs. Direct port of search_global_init (search.c:161-346), the same mapping
 // wasm/edax-eval/src/search.rs ports as depth_and_selectivity; confidence is the selectivity
 // percentage edax prints, so 100 means full-width rather than "solved".
@@ -24,7 +24,7 @@ func SearchParams(discCount, level int) (depth, confidence int) {
 	return depth, selectivityPercent[selectivity]
 }
 
-// IsFinal reports whether a search at level on a board with discCount discs reaches the end of the
+// IsFinal reports whether a search at level on a position with discCount discs reaches the end of the
 // game full-width, making its score the game-theoretic result: no deeper search can change it.
 func IsFinal(discCount, level int) bool {
 	depth, confidence := SearchParams(discCount, level)

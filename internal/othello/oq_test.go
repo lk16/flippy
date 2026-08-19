@@ -14,7 +14,7 @@ func TestParseOthelloQuestMoves(t *testing.T) {
 
 func TestParseOthelloQuestMoves_AutoPass(t *testing.T) {
 	// Field-string equivalent of the move sequence [19, 18, 17, 9, 1, 0, 37,
-	// 43, 51, 2], which is known (see game_test.go) to reach a board with no
+	// 43, 51, 2], which is known (see game_test.go) to reach a position with no
 	// legal move for the player to move but one for their opponent, and so
 	// should get a pass auto-inserted.
 	game, err := ParseOthelloQuestMoves("d3c3b3b2b1a1f5d6d7c1")

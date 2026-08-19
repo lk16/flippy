@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/lk16/flippy/internal/othello"
 )
 
 // doRequestRaw sends a request with a raw byte body and the given Content-Type.
@@ -40,13 +42,15 @@ func TestHandlePGN_ValidGame(t *testing.T) {
 
 	var resp pgnResponse
 	require.NoError(t, json.Unmarshal(req.Body.Bytes(), &resp))
-	require.NotEmpty(t, resp.Boards)
-	// A full game has 61 boards (positions 0–60).
-	require.GreaterOrEqual(t, len(resp.Boards), 2)
+	require.NotEmpty(t, resp.Positions)
+	// A full game has 61 positions (positions 0–60).
+	require.GreaterOrEqual(t, len(resp.Positions), 2)
 
-	// Every entry must be a parseable 34-char board string.
-	for _, b := range resp.Boards {
-		require.Len(t, b, 34, "board string length")
+	// Every entry must be a parseable position string.
+	for _, b := range resp.Positions {
+		require.Len(t, b, othello.PositionStringLength, "position string length")
+		_, err := othello.ParsePosition(b)
+		require.NoError(t, err)
 	}
 }
 
@@ -72,5 +76,5 @@ func TestHandlePGN_MultiGameUsesFirst(t *testing.T) {
 
 	var resp pgnResponse
 	require.NoError(t, json.Unmarshal(req.Body.Bytes(), &resp))
-	require.NotEmpty(t, resp.Boards)
+	require.NotEmpty(t, resp.Positions)
 }

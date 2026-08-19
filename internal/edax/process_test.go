@@ -58,7 +58,7 @@ func TestPathFromEnv_Set(t *testing.T) {
 func TestProcess_Evaluate(t *testing.T) {
 	p := testProcess(t)
 
-	eval, err := p.Evaluate(othello.NewBoardStart(), 10)
+	eval, err := p.Evaluate(othello.NewStartPosition(), 10)
 	require.NoError(t, err)
 	require.Equal(t, 10, eval.Depth)
 	require.Equal(t, 100, eval.Confidence)
@@ -68,7 +68,7 @@ func TestProcess_Evaluate(t *testing.T) {
 func TestProcess_Evaluate_BinaryNotFound(t *testing.T) {
 	p := NewProcess("/does/not/exist/lEdax-x64", 0)
 
-	_, err := p.Evaluate(othello.NewBoardStart(), 10)
+	_, err := p.Evaluate(othello.NewStartPosition(), 10)
 	require.Error(t, err)
 }
 
@@ -82,12 +82,12 @@ func TestProcess_Evaluate_FailedStartDoesNotLeakFDs(t *testing.T) {
 	p := NewProcess("/does/not/exist/lEdax-x64", 0)
 
 	// Warm up once so any one-time allocations aren't counted as a leak.
-	_, err := p.Evaluate(othello.NewBoardStart(), 10)
+	_, err := p.Evaluate(othello.NewStartPosition(), 10)
 	require.Error(t, err)
 
 	before := openFDCount(t)
 	for range 50 {
-		_, err := p.Evaluate(othello.NewBoardStart(), 10)
+		_, err := p.Evaluate(othello.NewStartPosition(), 10)
 		require.Error(t, err)
 	}
 	after := openFDCount(t)
@@ -143,31 +143,31 @@ func TestProcess_EnsureStarted_FailedRestartClearsStaleState(t *testing.T) {
 func TestProcess_Evaluate_InvalidLevel(t *testing.T) {
 	p := testProcess(t)
 
-	_, err := p.Evaluate(othello.NewBoardStart(), 0)
+	_, err := p.Evaluate(othello.NewStartPosition(), 0)
 	require.Error(t, err)
 }
 
 func TestProcess_Evaluate_NoLegalMoves(t *testing.T) {
 	p := testProcess(t)
 
-	board, err := othello.NewBoard(^uint64(0), 0, othello.Black)
+	position, err := othello.NewPosition(^uint64(0), 0)
 	require.NoError(t, err)
 
-	_, err = p.Evaluate(board, 10)
+	_, err = p.Evaluate(position, 10)
 	require.Error(t, err)
 }
 
 func TestProcess_Evaluate_ReusesProcessAtSameLevel(t *testing.T) {
 	p := testProcess(t)
 
-	_, err := p.Evaluate(othello.NewBoardStart(), 8)
+	_, err := p.Evaluate(othello.NewStartPosition(), 8)
 	require.NoError(t, err)
 	pid1 := p.cmd.Process.Pid
 
-	board, err := othello.NewBoardStart().DoMove(19)
+	position, err := othello.NewStartPosition().DoMove(19)
 	require.NoError(t, err)
 
-	_, err = p.Evaluate(board, 8)
+	_, err = p.Evaluate(position, 8)
 	require.NoError(t, err)
 	pid2 := p.cmd.Process.Pid
 
@@ -177,11 +177,11 @@ func TestProcess_Evaluate_ReusesProcessAtSameLevel(t *testing.T) {
 func TestProcess_Evaluate_RestartsOnLevelChange(t *testing.T) {
 	p := testProcess(t)
 
-	_, err := p.Evaluate(othello.NewBoardStart(), 6)
+	_, err := p.Evaluate(othello.NewStartPosition(), 6)
 	require.NoError(t, err)
 	pid1 := p.cmd.Process.Pid
 
-	_, err = p.Evaluate(othello.NewBoardStart(), 8)
+	_, err = p.Evaluate(othello.NewStartPosition(), 8)
 	require.NoError(t, err)
 	pid2 := p.cmd.Process.Pid
 
@@ -191,7 +191,7 @@ func TestProcess_Evaluate_RestartsOnLevelChange(t *testing.T) {
 func TestProcess_Close_KillsProcess(t *testing.T) {
 	p := testProcess(t)
 
-	_, err := p.Evaluate(othello.NewBoardStart(), 6)
+	_, err := p.Evaluate(othello.NewStartPosition(), 6)
 	require.NoError(t, err)
 	proc := p.cmd.Process
 
@@ -210,13 +210,13 @@ func TestProcess_Close_WithoutStart(t *testing.T) {
 func TestProcess_Evaluate_AfterClose(t *testing.T) {
 	p := testProcess(t)
 
-	_, err := p.Evaluate(othello.NewBoardStart(), 6)
+	_, err := p.Evaluate(othello.NewStartPosition(), 6)
 	require.NoError(t, err)
 	pid1 := p.cmd.Process.Pid
 
 	require.NoError(t, p.Close())
 
-	_, err = p.Evaluate(othello.NewBoardStart(), 6)
+	_, err = p.Evaluate(othello.NewStartPosition(), 6)
 	require.NoError(t, err)
 	pid2 := p.cmd.Process.Pid
 

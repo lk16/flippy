@@ -37,7 +37,7 @@ const path = require('path');
 const zlib = require('zlib');
 const assert = require('assert');
 const { EdaxEval } = require('./edax-eval');
-const { OthelloBoard } = require('../../../static/board.js');
+const { OthelloPosition } = require('../../../static/board.js');
 
 const DIST_WASM = path.join(__dirname, '..', 'dist', 'edax_eval.wasm');
 const FRESH_WASM = path.join(__dirname, '..', 'target', 'wasm32-unknown-unknown', 'release', 'edax_eval.wasm');
@@ -61,7 +61,7 @@ const CORPUS = [
 const LEVEL4_BUDGET_MS = 25;
 
 function playToDiscCount(seed, discCount) {
-    let board = new OthelloBoard();
+    let board = new OthelloPosition();
     let state = seed;
     const rand = () => {
         state = (state * 1103515245 + 12345) & 0x7fffffff;

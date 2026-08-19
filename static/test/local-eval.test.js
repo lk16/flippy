@@ -7,7 +7,7 @@
 const assert = require('node:assert');
 const { test } = require('./framework');
 const {
-  buildGame, buildNormalGame, OthelloBoard, LOCAL_EVAL_LEVELS, localEvalLevelsFor, mockWorkerPool, flush,
+  buildGame, buildNormalGame, OthelloPosition, LOCAL_EVAL_LEVELS, localEvalLevelsFor, mockWorkerPool, flush,
 } = require('./harness');
 const { FORCED_PASS_BOARDS } = require('./fixtures');
 
@@ -192,7 +192,7 @@ test('queueLocalEvaluations: a late stale result never downgrades a deeper score
 test('requestMissingEvaluations: moving on abandons the previous position\'s local work', async () => {
   // One move in: the starting position's own children are all symmetric to each other, so it
   // would queue a single search -- too few to tell a cancelled queue from an empty one.
-  const game = buildNormalGame(new OthelloBoard().getChildren()[0]);
+  const game = buildNormalGame(new OthelloPosition().getChildren()[0]);
   const pool = mockWorkerPool();
   game.edaxWorkerPool = pool;
 

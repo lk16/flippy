@@ -21,22 +21,22 @@ func TestImportGames_AddsExtractedBoards(t *testing.T) {
 	game, err := othello.NewGameFromMoves([]int{19, 18, 17, 9, 1, 0, 37, 43, 51, 2})
 	require.NoError(t, err)
 
-	want := ExtractBoards([]*othello.Game{game})
+	want := ExtractPositions([]*othello.Game{game})
 	require.NotEmpty(t, want)
 
 	count, err := ImportGames(ctx, repo, []*othello.Game{game})
 	require.NoError(t, err)
 	require.Equal(t, len(want), count)
 
-	for _, board := range want {
-		eval, err := repo.GetBoard(ctx, board.Board())
+	for _, position := range want {
+		eval, err := repo.GetPosition(ctx, position.Position())
 		require.NoError(t, err)
 		require.Equal(t, db.Evaluation{}, eval)
 	}
 }
 
 // TestImportGames_CountReflectsOnlyNewlyInserted: re-importing the same games must report 0
-// added, not the extracted board count again.
+// added, not the extracted position count again.
 func TestImportGames_CountReflectsOnlyNewlyInserted(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
@@ -44,7 +44,7 @@ func TestImportGames_CountReflectsOnlyNewlyInserted(t *testing.T) {
 	game, err := othello.NewGameFromMoves([]int{19, 18, 17, 9, 1, 0, 37, 43, 51, 2})
 	require.NoError(t, err)
 
-	extracted := ExtractBoards([]*othello.Game{game})
+	extracted := ExtractPositions([]*othello.Game{game})
 	require.NotEmpty(t, extracted)
 
 	first, err := ImportGames(ctx, repo, []*othello.Game{game})
@@ -61,19 +61,19 @@ func TestImportGames_DoesNotOverwriteLearnedEvaluation(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	board := testBoard(t, book.LeafDiscs)
-	game := othello.NewGameWithStart(board.Board())
+	position := testPosition(t, book.LeafDiscs)
+	game := othello.NewGameWithStart(position.Position())
 
 	_, err := ImportGames(ctx, repo, []*othello.Game{game})
 	require.NoError(t, err)
 
 	learned := db.Evaluation{Level: 24, Score: 3}
-	require.NoError(t, repo.SaveEvaluation(ctx, board, learned))
+	require.NoError(t, repo.SaveEvaluation(ctx, position, learned))
 
 	_, err = ImportGames(ctx, repo, []*othello.Game{game})
 	require.NoError(t, err)
 
-	got, err := repo.GetBoard(ctx, board.Board())
+	got, err := repo.GetPosition(ctx, position.Position())
 	require.NoError(t, err)
 	require.Equal(t, learned, got)
 }

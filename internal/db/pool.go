@@ -1,4 +1,4 @@
-// Package db provides Postgres-backed storage for Othello boards and their
+// Package db provides Postgres-backed storage for Othello positions and their
 // edax evaluations.
 package db
 

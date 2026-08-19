@@ -30,18 +30,18 @@ type wsOutgoing struct {
 // wsEvaluationRequest is the wsIncoming.Data shape for "evaluation_request" and "analyze_request" events.
 // Level is only used by "analyze_request"; if zero it defaults to PriorityLevel.
 type wsEvaluationRequest struct {
-	Boards []string `json:"boards"`
-	Level  int      `json:"level,omitempty"`
+	Positions []string `json:"boards"`
+	Level     int      `json:"level,omitempty"`
 }
 
-// wsEvaluation is one evaluation in a wsEvaluationResponse, alongside the board string it's for.
+// wsEvaluation is one evaluation in a wsEvaluationResponse, alongside the position string it's for.
 type wsEvaluation struct {
-	Board string `json:"board"`
+	Position string `json:"board"`
 	evaluationResponse
 }
 
 // wsEvaluationResponse is the wsOutgoing.Data shape sent back for evaluation and analysis events;
-// boards with no available evaluation are omitted rather than included with a placeholder.
+// positions with no available evaluation are omitted rather than included with a placeholder.
 type wsEvaluationResponse struct {
 	Evaluations []wsEvaluation `json:"evaluations"`
 }
@@ -99,7 +99,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 			outgoing := wsOutgoing{
 				ID:   incoming.ID,
-				Data: wsEvaluationResponse{Evaluations: s.lookupEvaluations(ctx, req.Boards)},
+				Data: wsEvaluationResponse{Evaluations: s.lookupEvaluations(ctx, req.Positions)},
 			}
 			if err := wsjson.Write(ctx, conn, outgoing); err != nil {
 				return
@@ -116,12 +116,12 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				level = PriorityLevel
 			}
 
-			s.handleAnalyzeRequest(ctx, req.Boards, level, connID)
+			s.handleAnalyzeRequest(ctx, req.Positions, level, connID)
 
 			// Respond with whatever is already available, using the same shape as evaluation_request.
 			outgoing := wsOutgoing{
 				ID:   incoming.ID,
-				Data: wsEvaluationResponse{Evaluations: s.lookupEvaluations(ctx, req.Boards)},
+				Data: wsEvaluationResponse{Evaluations: s.lookupEvaluations(ctx, req.Positions)},
 			}
 			if err := wsjson.Write(ctx, conn, outgoing); err != nil {
 				return
@@ -130,34 +130,34 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleAnalyzeRequest enqueues boards not yet at the requested edax search level, tagging each
+// handleAnalyzeRequest enqueues positions not yet at the requested edax search level, tagging each
 // queue entry with the requesting connection so the work is dropped if the requester disconnects.
-func (s *Server) handleAnalyzeRequest(ctx context.Context, boardStrings []string, level int, connID string) {
-	for _, bs := range boardStrings {
-		board, err := othello.ParseBoard(bs)
+func (s *Server) handleAnalyzeRequest(ctx context.Context, positionStrings []string, level int, connID string) {
+	for _, bs := range positionStrings {
+		position, err := othello.ParsePosition(bs)
 		if err != nil {
 			continue
 		}
 
-		// edax crashes on a position with no legal move: analyze the post-pass board instead (its
-		// negation is the pass board's evaluation, see lookupPassEvaluation). A game-over board has
+		// edax crashes on a position with no legal move: analyze the post-pass position instead (its
+		// negation is the pass position's evaluation, see lookupPassEvaluation). A game-over position has
 		// a final score and needs no analysis.
-		if !board.HasMoves() {
-			passed, passErr := board.DoMove(othello.PassMove)
+		if !position.HasMoves() {
+			passed, passErr := position.DoMove(othello.PassMove)
 			if passErr != nil || !passed.HasMoves() {
 				continue
 			}
-			board = passed
+			position = passed
 		}
 
-		normalized := board.Normalize()
+		normalized := position.Normalize()
 		discCount := normalized.CountDiscs()
 
 		// Cap the level so a malicious client cannot request arbitrarily deep searches.
 		clampedLevel := min(level, EffectiveTargetLevel(discCount))
 
-		// Skip boards whose stored evaluation already answers the request.
-		eval, ok, err := s.lookupEvaluation(ctx, board)
+		// Skip positions whose stored evaluation already answers the request.
+		eval, ok, err := s.lookupEvaluation(ctx, position)
 		if err == nil && ok {
 			if eval.Source != evaluationSourceEdax || eval.Level >= clampedLevel {
 				continue
@@ -169,7 +169,7 @@ func (s *Server) handleAnalyzeRequest(ctx context.Context, boardStrings []string
 
 		// Enqueue the normalized form so the claim key and queue entry are consistent.
 		if err := s.enqueuePriority(ctx, normalized.String(), clampedLevel, connID); err != nil {
-			log.Printf("failed to enqueue priority board %s: %v", normalized.String(), err)
+			log.Printf("failed to enqueue priority position %s: %v", normalized.String(), err)
 		}
 	}
 }
@@ -186,22 +186,22 @@ func searchAddsNothing(eval evaluationResponse, discCount, level int) bool {
 	return eval.Depth == depth && eval.Confidence == confidence
 }
 
-// lookupEvaluations looks up evaluations for a batch of board strings, skipping malformed or unevaluated ones.
-func (s *Server) lookupEvaluations(ctx context.Context, boardStrings []string) []wsEvaluation {
+// lookupEvaluations looks up evaluations for a batch of position strings, skipping malformed or unevaluated ones.
+func (s *Server) lookupEvaluations(ctx context.Context, positionStrings []string) []wsEvaluation {
 	var results []wsEvaluation
 
-	for _, bs := range boardStrings {
-		board, err := othello.ParseBoard(bs)
+	for _, bs := range positionStrings {
+		position, err := othello.ParsePosition(bs)
 		if err != nil {
 			continue
 		}
 
-		eval, ok, err := s.lookupEvaluation(ctx, board)
+		eval, ok, err := s.lookupEvaluation(ctx, position)
 		if err != nil || !ok {
 			continue
 		}
 
-		results = append(results, wsEvaluation{Board: bs, evaluationResponse: eval})
+		results = append(results, wsEvaluation{Position: bs, evaluationResponse: eval})
 	}
 
 	return results

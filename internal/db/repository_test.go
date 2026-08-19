@@ -37,9 +37,9 @@ func testRepository(t *testing.T) *Repository {
 	return NewRepository(tx)
 }
 
-var testBoard = othellotest.Board
+var testPosition = othellotest.Position
 
-var testDistinctBoards = othellotest.DistinctBoards
+var testDistinctPositions = othellotest.DistinctPositions
 
 func TestEvaluation_IsLearned(t *testing.T) {
 	require.False(t, Evaluation{}.IsLearned())
@@ -47,128 +47,128 @@ func TestEvaluation_IsLearned(t *testing.T) {
 	require.True(t, Evaluation{Level: 16, Score: 3}.IsLearned())
 }
 
-func TestRepository_AddBoards_GetBoard(t *testing.T) {
+func TestRepository_AddPositions_GetBoard(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
-	board := testBoard(t, 12)
+	position := testPosition(t, 12)
 
-	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 
-	eval, err := repo.GetBoard(ctx, board.Board())
+	eval, err := repo.GetPosition(ctx, position.Position())
 	require.NoError(t, err)
 	require.Equal(t, Evaluation{}, eval)
 }
 
-func TestRepository_AddBoards_DoesNotOverwriteExisting(t *testing.T) {
+func TestRepository_AddPositions_DoesNotOverwriteExisting(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
-	board := testBoard(t, 12)
+	position := testPosition(t, 12)
 
-	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 	saved := Evaluation{Level: 20, Score: 4}
-	require.NoError(t, repo.SaveEvaluation(ctx, board, saved))
+	require.NoError(t, repo.SaveEvaluation(ctx, position, saved))
 
-	// Adding the same board again must not clobber the evaluation just saved.
-	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	// Adding the same position again must not clobber the evaluation just saved.
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 
-	eval, err := repo.GetBoard(ctx, board.Board())
+	eval, err := repo.GetPosition(ctx, position.Position())
 	require.NoError(t, err)
 	require.Equal(t, saved, eval)
 }
 
-func TestRepository_AddBoards_Empty(t *testing.T) {
+func TestRepository_AddPositions_Empty(t *testing.T) {
 	repo := testRepository(t)
-	require.NoError(t, repo.AddBoards(context.Background(), nil))
+	require.NoError(t, repo.AddPositions(context.Background(), nil))
 }
 
-func TestRepository_AddBoardsInserted_CountsOnlyNewRows(t *testing.T) {
+func TestRepository_AddPositionsInserted_CountsOnlyNewRows(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	boards := othello.PrecomputedBoards12()[:5]
+	positions := othello.PrecomputedPositions12()[:5]
 
-	inserted, err := repo.AddBoardsInserted(ctx, boards)
+	inserted, err := repo.AddPositionsInserted(ctx, positions)
 	require.NoError(t, err)
-	require.Equal(t, len(boards), inserted)
+	require.Equal(t, len(positions), inserted)
 
-	// Re-inserting the same boards must count zero new rows (ON CONFLICT DO
+	// Re-inserting the same positions must count zero new rows (ON CONFLICT DO
 	// NOTHING skips them), rather than reporting the batch size again.
-	inserted, err = repo.AddBoardsInserted(ctx, boards)
+	inserted, err = repo.AddPositionsInserted(ctx, positions)
 	require.NoError(t, err)
 	require.Equal(t, 0, inserted)
 
 	// A batch that overlaps existing rows counts only the genuinely new ones.
-	extra := othello.PrecomputedBoards12()[3:8] // 2 overlap, 3 new
-	inserted, err = repo.AddBoardsInserted(ctx, extra)
+	extra := othello.PrecomputedPositions12()[3:8] // 2 overlap, 3 new
+	inserted, err = repo.AddPositionsInserted(ctx, extra)
 	require.NoError(t, err)
 	require.Equal(t, 3, inserted)
 }
 
-func TestRepository_AddBoardsInserted_Empty(t *testing.T) {
+func TestRepository_AddPositionsInserted_Empty(t *testing.T) {
 	repo := testRepository(t)
-	inserted, err := repo.AddBoardsInserted(context.Background(), nil)
+	inserted, err := repo.AddPositionsInserted(context.Background(), nil)
 	require.NoError(t, err)
 	require.Equal(t, 0, inserted)
 }
 
-func TestRepository_AddBoards_Multiple(t *testing.T) {
+func TestRepository_AddPositions_Multiple(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	boards := othello.PrecomputedBoards12()[:100]
+	positions := othello.PrecomputedPositions12()[:100]
 
-	require.NoError(t, repo.AddBoards(ctx, boards))
+	require.NoError(t, repo.AddPositions(ctx, positions))
 
-	for _, board := range boards {
-		eval, err := repo.GetBoard(ctx, board.Board())
+	for _, position := range positions {
+		eval, err := repo.GetPosition(ctx, position.Position())
 		require.NoError(t, err)
 		require.Equal(t, Evaluation{}, eval)
 	}
 }
 
-func TestRepository_GetBoard_NotFound(t *testing.T) {
+func TestRepository_GetPosition_NotFound(t *testing.T) {
 	repo := testRepository(t)
-	board := testBoard(t, 12)
+	position := testPosition(t, 12)
 
-	_, err := repo.GetBoard(context.Background(), board.Board())
-	require.ErrorIs(t, err, ErrBoardNotFound)
+	_, err := repo.GetPosition(context.Background(), position.Position())
+	require.ErrorIs(t, err, ErrPositionNotFound)
 }
 
-func TestRepository_GetBoard_NormalizesInput(t *testing.T) {
+func TestRepository_GetPosition_NormalizesInput(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	board, err := othello.NewBoardStart().DoMove(19)
+	position, err := othello.NewStartPosition().DoMove(19)
 	require.NoError(t, err)
-	require.False(t, board.IsNormalized())
+	require.False(t, position.IsNormalized())
 
-	normalized := board.Normalize()
-	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{normalized}))
+	normalized := position.Normalize()
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{normalized}))
 
-	eval, err := repo.GetBoard(ctx, board)
+	eval, err := repo.GetPosition(ctx, position)
 	require.NoError(t, err)
 	require.Equal(t, Evaluation{}, eval)
 }
 
 func TestRepository_SaveEvaluation_NotFound(t *testing.T) {
 	repo := testRepository(t)
-	board := testBoard(t, 12)
+	position := testPosition(t, 12)
 
-	err := repo.SaveEvaluation(context.Background(), board, Evaluation{Level: 20})
-	require.ErrorIs(t, err, ErrBoardNotFound)
+	err := repo.SaveEvaluation(context.Background(), position, Evaluation{Level: 20})
+	require.ErrorIs(t, err, ErrPositionNotFound)
 }
 
 func TestRepository_SaveEvaluation_Updates(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
-	board := testBoard(t, 12)
+	position := testPosition(t, 12)
 
-	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 
 	want := Evaluation{Level: 24, Score: -6}
-	require.NoError(t, repo.SaveEvaluation(ctx, board, want))
+	require.NoError(t, repo.SaveEvaluation(ctx, position, want))
 
-	got, err := repo.GetBoard(ctx, board.Board())
+	got, err := repo.GetPosition(ctx, position.Position())
 	require.NoError(t, err)
 	require.Equal(t, want, got)
 }
@@ -178,15 +178,15 @@ func TestRepository_SaveEvaluation_Updates(t *testing.T) {
 func TestRepository_SaveEvaluation_LowerLevelIsNoOp(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
-	board := testBoard(t, 12)
+	position := testPosition(t, 12)
 
-	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 	deep := Evaluation{Level: 24, Score: 2}
-	require.NoError(t, repo.SaveEvaluation(ctx, board, deep))
+	require.NoError(t, repo.SaveEvaluation(ctx, position, deep))
 
-	require.NoError(t, repo.SaveEvaluation(ctx, board, Evaluation{Level: 20, Score: 3}))
+	require.NoError(t, repo.SaveEvaluation(ctx, position, Evaluation{Level: 20, Score: 3}))
 
-	got, err := repo.GetBoard(ctx, board.Board())
+	got, err := repo.GetPosition(ctx, position.Position())
 	require.NoError(t, err)
 	require.Equal(t, deep, got)
 }
@@ -194,17 +194,17 @@ func TestRepository_SaveEvaluation_LowerLevelIsNoOp(t *testing.T) {
 func TestRepository_SaveEvaluation_NoOpWhenNotBetter(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
-	board := testBoard(t, 12)
+	position := testPosition(t, 12)
 
-	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 	first := Evaluation{Level: 20, Score: 2}
-	require.NoError(t, repo.SaveEvaluation(ctx, board, first))
+	require.NoError(t, repo.SaveEvaluation(ctx, position, first))
 
 	// Same level: the same search, so this is a no-op, not an error -- even if the score differs
 	// (parallel edax searches are not bit-for-bit deterministic).
-	require.NoError(t, repo.SaveEvaluation(ctx, board, Evaluation{Level: 20, Score: 3}))
+	require.NoError(t, repo.SaveEvaluation(ctx, position, Evaluation{Level: 20, Score: 3}))
 
-	got, err := repo.GetBoard(ctx, board.Board())
+	got, err := repo.GetPosition(ctx, position.Position())
 	require.NoError(t, err)
 	require.Equal(t, first, got)
 }
@@ -213,45 +213,45 @@ func TestRepository_ListLearnable_OrdersByDiscCountThenLevel(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	board12 := testBoard(t, 12)
-	board13s := testDistinctBoards(t, 13, 2)
-	board13, board13Other := board13s[0], board13s[1]
+	position12 := testPosition(t, 12)
+	position13s := testDistinctPositions(t, 13, 2)
+	position13, position13Other := position13s[0], position13s[1]
 
-	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board12, board13, board13Other}))
-	require.NoError(t, repo.SaveEvaluation(ctx, board13, Evaluation{Level: 10, Score: 0}))
-	require.NoError(t, repo.SaveEvaluation(ctx, board13Other, Evaluation{Level: 20, Score: 0}))
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position12, position13, position13Other}))
+	require.NoError(t, repo.SaveEvaluation(ctx, position13, Evaluation{Level: 10, Score: 0}))
+	require.NoError(t, repo.SaveEvaluation(ctx, position13Other, Evaluation{Level: 20, Score: 0}))
 
 	results, err := repo.ListLearnable(ctx, 12, 30, 12, 24, 24, 10)
 	require.NoError(t, err)
 	require.Len(t, results, 3)
 
-	require.Equal(t, board12, results[0].Board)
-	require.Equal(t, board13, results[1].Board)
-	require.Equal(t, board13Other, results[2].Board)
+	require.Equal(t, position12, results[0].Position)
+	require.Equal(t, position13, results[1].Position)
+	require.Equal(t, position13Other, results[2].Position)
 }
 
 // TestRepository_ListLearnable_LeafLevelDoesNotStarveDeeperCandidates covers the level cutoff's
-// purpose: once every minDiscs board reaches leafLevel, a batch without the filter would consist
-// entirely of those (they sort first), starving deeper boards.
+// purpose: once every minDiscs position reaches leafLevel, a batch without the filter would consist
+// entirely of those (they sort first), starving deeper positions.
 func TestRepository_ListLearnable_LeafLevelDoesNotStarveDeeperCandidates(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	leafBoards := testDistinctBoards(t, 12, 5)
-	require.NoError(t, repo.AddBoards(ctx, leafBoards))
-	for _, board := range leafBoards {
-		require.NoError(t, repo.SaveEvaluation(ctx, board, Evaluation{Level: 24, Score: 0}))
+	leafBoards := testDistinctPositions(t, 12, 5)
+	require.NoError(t, repo.AddPositions(ctx, leafBoards))
+	for _, position := range leafBoards {
+		require.NoError(t, repo.SaveEvaluation(ctx, position, Evaluation{Level: 24, Score: 0}))
 	}
 
-	board13 := testBoard(t, 13)
-	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board13}))
+	position13 := testPosition(t, 13)
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position13}))
 
 	// A batch smaller than the number of fully-learned leaves: without the
-	// level filter, this would return only leaves and miss board13 entirely.
+	// level filter, this would return only leaves and miss position13 entirely.
 	results, err := repo.ListLearnable(ctx, 12, 30, 12, 24, 16, 3)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
-	require.Equal(t, board13, results[0].Board)
+	require.Equal(t, position13, results[0].Position)
 }
 
 // TestRepository_ListLearnable_MinDiscsAboveLeafDiscsKeepsLeafThreshold covers a caller raising minDiscs
@@ -261,13 +261,13 @@ func TestRepository_ListLearnable_MinDiscsAboveLeafDiscsKeepsLeafThreshold(t *te
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	board13 := testBoard(t, 13)
-	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board13}))
+	position13 := testPosition(t, 13)
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position13}))
 	// Above deeperLevel (16) but below leafLevel (24): distinguishes the two thresholds.
-	require.NoError(t, repo.SaveEvaluation(ctx, board13, Evaluation{Level: 20, Score: 0}))
+	require.NoError(t, repo.SaveEvaluation(ctx, position13, Evaluation{Level: 20, Score: 0}))
 
-	// board13 must be judged against deeperLevel (16), not leafLevel (24): a bug binding the leaf
-	// check to minDiscs instead of leafDiscs would wrongly return board13 as needing level 24.
+	// position13 must be judged against deeperLevel (16), not leafLevel (24): a bug binding the leaf
+	// check to minDiscs instead of leafDiscs would wrongly return position13 as needing level 24.
 	results, err := repo.ListLearnable(ctx, 13, 30, 12, 24, 16, 10)
 	require.NoError(t, err)
 	require.Empty(t, results)
@@ -277,23 +277,23 @@ func TestRepository_ListLearnable_FiltersByDiscCountRange(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	board12 := testBoard(t, 12)
-	board35 := testBoard(t, 35)
+	position12 := testPosition(t, 12)
+	position35 := testPosition(t, 35)
 
-	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board12, board35}))
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position12, position35}))
 
 	results, err := repo.ListLearnable(ctx, 12, 30, 12, 24, 24, 10)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
-	require.Equal(t, board12, results[0].Board)
+	require.Equal(t, position12, results[0].Position)
 }
 
 func TestRepository_ListLearnable_RespectsLimit(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	boards := othello.PrecomputedBoards12()[:5]
-	require.NoError(t, repo.AddBoards(ctx, boards))
+	positions := othello.PrecomputedPositions12()[:5]
+	require.NoError(t, repo.AddPositions(ctx, positions))
 
 	results, err := repo.ListLearnable(ctx, 12, 30, 12, 24, 24, 3)
 	require.NoError(t, err)
@@ -308,45 +308,45 @@ func TestRepository_ListLearnable_Empty(t *testing.T) {
 	require.Empty(t, results)
 }
 
-func TestRepository_EvaluatedBoards_OnlyReturnsLearnedBoards(t *testing.T) {
+func TestRepository_EvaluatedPositions_OnlyReturnsLearnedBoards(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	boards := othello.PrecomputedBoards12()[:2]
-	learned, unlearned := boards[0], boards[1]
+	positions := othello.PrecomputedPositions12()[:2]
+	learned, unlearned := positions[0], positions[1]
 
-	require.NoError(t, repo.AddBoards(ctx, boards))
+	require.NoError(t, repo.AddPositions(ctx, positions))
 	require.NoError(t, repo.SaveEvaluation(ctx, learned, Evaluation{Level: 20, Score: 5}))
 
-	results, err := repo.EvaluatedBoards(ctx, 12)
+	results, err := repo.EvaluatedPositions(ctx, 12)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
-	require.Equal(t, learned, results[0].Board)
+	require.Equal(t, learned, results[0].Position)
 	require.Equal(t, Evaluation{Level: 20, Score: 5}, results[0].Evaluation)
 
-	require.NotContains(t, results, BoardEvaluation{Board: unlearned})
+	require.NotContains(t, results, PositionEvaluation{Position: unlearned})
 }
 
-func TestRepository_EvaluatedBoards_FiltersByDiscCount(t *testing.T) {
+func TestRepository_EvaluatedPositions_FiltersByDiscCount(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	board12 := testBoard(t, 12)
-	board13 := testBoard(t, 13)
-	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board12, board13}))
-	require.NoError(t, repo.SaveEvaluation(ctx, board12, Evaluation{Level: 20, Score: 0}))
-	require.NoError(t, repo.SaveEvaluation(ctx, board13, Evaluation{Level: 20, Score: 0}))
+	position12 := testPosition(t, 12)
+	position13 := testPosition(t, 13)
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position12, position13}))
+	require.NoError(t, repo.SaveEvaluation(ctx, position12, Evaluation{Level: 20, Score: 0}))
+	require.NoError(t, repo.SaveEvaluation(ctx, position13, Evaluation{Level: 20, Score: 0}))
 
-	results, err := repo.EvaluatedBoards(ctx, 12)
+	results, err := repo.EvaluatedPositions(ctx, 12)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
-	require.Equal(t, board12, results[0].Board)
+	require.Equal(t, position12, results[0].Position)
 }
 
-func TestRepository_EvaluatedBoards_Empty(t *testing.T) {
+func TestRepository_EvaluatedPositions_Empty(t *testing.T) {
 	repo := testRepository(t)
 
-	results, err := repo.EvaluatedBoards(context.Background(), 12)
+	results, err := repo.EvaluatedPositions(context.Background(), 12)
 	require.NoError(t, err)
 	require.Empty(t, results)
 }
@@ -355,12 +355,12 @@ func TestRepository_Stats(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	board12s := testDistinctBoards(t, 12, 2)
-	board12a, board12b := board12s[0], board12s[1]
-	board13 := testBoard(t, 13)
+	position12s := testDistinctPositions(t, 12, 2)
+	position12a, position12b := position12s[0], position12s[1]
+	position13 := testPosition(t, 13)
 
-	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board12a, board12b, board13}))
-	require.NoError(t, repo.SaveEvaluation(ctx, board12a, Evaluation{Level: 20, Score: 0}))
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position12a, position12b, position13}))
+	require.NoError(t, repo.SaveEvaluation(ctx, position12a, Evaluation{Level: 20, Score: 0}))
 
 	stats, err := repo.Stats(ctx)
 	require.NoError(t, err)

@@ -4,7 +4,7 @@
 // a pass auto-advances; and the score graph's data is untouched by a divergence excursion.
 const assert = require('node:assert');
 const { test } = require('./framework');
-const { buildGame, OthelloBoard } = require('./harness');
+const { buildGame, OthelloPosition } = require('./harness');
 const { FORCED_PASS_BOARDS } = require('./fixtures');
 
 // recordingGame wires up a fake wsClient that records what pgnRequestDivergedEvals sends.
@@ -138,8 +138,8 @@ test('a diverged move that forces a pass auto-advances through it', () => {
   // Simulate being mid-exploration on a board identical to ply 54 (black to move), so the
   // pass-forcing move is treated as a divergence rather than a line match.
   game.pgnCurrentPly = 10; // frozen elsewhere; irrelevant to the divergence branch
-  game.pgnAlternativeMoves = [OthelloBoard.fromString(FORCED_PASS_BOARDS[54])];
-  const passForcing = firstMoveTo(game.pgnDisplayBoard(), OthelloBoard.fromString(FORCED_PASS_BOARDS[55]));
+  game.pgnAlternativeMoves = [OthelloPosition.fromString(FORCED_PASS_BOARDS[54])];
+  const passForcing = firstMoveTo(game.pgnDisplayBoard(), OthelloPosition.fromString(FORCED_PASS_BOARDS[55]));
   assert.ok(passForcing >= 0, 'found the pass-forcing move');
 
   game.pgnOnSquareClick(passForcing);
