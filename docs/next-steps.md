@@ -43,7 +43,7 @@ migration 000002 dropped the columns, the stats page groups by the
 resulting search, and `handleAnalyzeRequest` skips a level that means a
 search the board already got. What is still open:
 
-- The priority queue dedups by board string only
+- The priority queue dedups by position string only
   (`internal/api/redis.go`), so two requests at different levels
   collapse to whichever arrived first. Keying on the resulting
   `(depth, confidence)` instead would also merge different-level requests
@@ -86,7 +86,7 @@ Not started. Numbers below come from `old/ignored/edax_1763247601.sql.gz`
 Both tables store one row per position with the colour thrown away, on the
 same grounds: **the score depends only on `(mover, opponent)`, never on
 which colour holds which discs.** Three independent confirmations, which
-are also why `othello.Board` has no turn:
+are also why `othello.Position` has no turn:
 
 - **Edax's own representation.** `Board` is `{player, opponent}`
   (`bit.h:147`). `board_set` (`board.c:101-146`) reads `X` into `player`

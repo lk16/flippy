@@ -10,7 +10,7 @@
 // move immediately instead of after the server's (seconds-to-minutes) analysis.
 const assert = require('node:assert');
 const { test } = require('./framework');
-const { buildNormalGame, OthelloBoard } = require('./harness');
+const { buildNormalGame, OthelloPosition } = require('./harness');
 
 function recordingWsClient() {
   const sent = [];
@@ -43,7 +43,7 @@ function recordingWorkerPool() {
 }
 
 function bitsOf(boardStr) {
-  const b = OthelloBoard.fromString(boardStr);
+  const b = OthelloPosition.fromString(boardStr);
   return `${b.playerBits}:${b.opponentBits}`;
 }
 
@@ -194,6 +194,6 @@ test('setPGNState: stops any running normal-mode eval poll', () => {
 });
 
 test('a board with valid moves always has children to evaluate (sanity check for the fixtures above)', () => {
-  const board = new OthelloBoard();
+  const board = new OthelloPosition();
   assert.ok(board.getChildren().length > 0);
 });

@@ -35,11 +35,11 @@ func TestServer_TryClaim_SecondClaimFails(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	ok, err := s.tryClaim(ctx, "board-a", "worker-1")
+	ok, err := s.tryClaim(ctx, "position-a", "worker-1")
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	ok, err = s.tryClaim(ctx, "board-a", "worker-2")
+	ok, err = s.tryClaim(ctx, "position-a", "worker-2")
 	require.NoError(t, err)
 	require.False(t, ok)
 }
@@ -48,11 +48,11 @@ func TestServer_TryClaim_DistinctBoardsBothSucceed(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	ok, err := s.tryClaim(ctx, "board-a", "worker-1")
+	ok, err := s.tryClaim(ctx, "position-a", "worker-1")
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	ok, err = s.tryClaim(ctx, "board-b", "worker-1")
+	ok, err = s.tryClaim(ctx, "position-b", "worker-1")
 	require.NoError(t, err)
 	require.True(t, ok)
 }
@@ -61,24 +61,24 @@ func TestServer_ReleaseClaim_AllowsReclaim(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	ok, err := s.tryClaim(ctx, "board-a", "worker-1")
+	ok, err := s.tryClaim(ctx, "position-a", "worker-1")
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	require.NoError(t, s.releaseClaim(ctx, "board-a", "worker-1"))
+	require.NoError(t, s.releaseClaim(ctx, "position-a", "worker-1"))
 
-	ok, err = s.tryClaim(ctx, "board-a", "worker-2")
+	ok, err = s.tryClaim(ctx, "position-a", "worker-2")
 	require.NoError(t, err)
 	require.True(t, ok)
 }
 
 func TestServer_ReleaseClaim_NoActiveClaimIsNoop(t *testing.T) {
 	s := testServer(t)
-	require.NoError(t, s.releaseClaim(context.Background(), "board-a", "worker-1"))
+	require.NoError(t, s.releaseClaim(context.Background(), "position-a", "worker-1"))
 }
 
 // TestServer_ReleaseClaim_DoesNotRevokeAnotherWorkersClaim covers the race
-// where worker-1's claim TTL expired and worker-2 re-claimed the same board:
+// where worker-1's claim TTL expired and worker-2 re-claimed the same position:
 // worker-1 finishing late and releasing must not delete worker-2's claim.
 func TestServer_ReleaseClaim_DoesNotRevokeAnotherWorkersClaim(t *testing.T) {
 	s := testServer(t)
@@ -86,16 +86,16 @@ func TestServer_ReleaseClaim_DoesNotRevokeAnotherWorkersClaim(t *testing.T) {
 
 	// worker-1 claims, then its claim is taken over by worker-2 (simulating the
 	// original TTL having expired and worker-2 winning the re-claim).
-	ok, err := s.tryClaim(ctx, "board-a", "worker-1")
+	ok, err := s.tryClaim(ctx, "position-a", "worker-1")
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	require.NoError(t, s.redis.Set(ctx, claimKey("board-a"), "worker-2", claimTTL).Err())
+	require.NoError(t, s.redis.Set(ctx, claimKey("position-a"), "worker-2", claimTTL).Err())
 
 	// worker-1's late release must leave worker-2's claim intact.
-	require.NoError(t, s.releaseClaim(ctx, "board-a", "worker-1"))
+	require.NoError(t, s.releaseClaim(ctx, "position-a", "worker-1"))
 
-	owner, err := s.redis.Get(ctx, claimKey("board-a")).Result()
+	owner, err := s.redis.Get(ctx, claimKey("position-a")).Result()
 	require.NoError(t, err)
 	require.Equal(t, "worker-2", owner)
 }
@@ -104,10 +104,10 @@ func TestServer_RebuildBookStats_ProducesExpectedFields(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	// One 12-disc board learned at level 20 (a 20@73% search), one unlearned (depth 0, confidence 0).
-	boards := testDistinctBoards(t, 12, 2)
-	require.NoError(t, s.repo.AddBoards(ctx, boards))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, boards[0], db.Evaluation{Level: 20, Score: 2}))
+	// One 12-disc position learned at level 20 (a 20@73% search), one unlearned (depth 0, confidence 0).
+	positions := testDistinctPositions(t, 12, 2)
+	require.NoError(t, s.repo.AddPositions(ctx, positions))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, positions[0], db.Evaluation{Level: 20, Score: 2}))
 
 	require.NoError(t, s.rebuildBookStats(ctx))
 
@@ -169,11 +169,11 @@ func TestServer_JobFloor_PicksLowestLearnableDiscCount(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	// 12-disc board fully learned, 13-disc board unlearned: the floor advances to 13.
-	board12 := testBoard(t, 12)
-	board13 := testBoard(t, 13)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board12, board13}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board12, db.Evaluation{Level: TargetLevel(12), Score: 0}))
+	// 12-disc position fully learned, 13-disc position unlearned: the floor advances to 13.
+	position12 := testPosition(t, 12)
+	position13 := testPosition(t, 13)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position12, position13}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, position12, db.Evaluation{Level: TargetLevel(12), Score: 0}))
 	require.NoError(t, s.rebuildBookStats(ctx))
 
 	require.Equal(t, 13, s.jobFloor(ctx))
@@ -184,9 +184,9 @@ func TestServer_JobFloor_BelowTargetSearchCountsAsLearnable(t *testing.T) {
 	ctx := context.Background()
 
 	// Learned, but below the target level: still learnable, so the floor stays at 12.
-	board12 := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board12}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board12, db.Evaluation{Level: 20, Score: 0}))
+	position12 := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position12}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, position12, db.Evaluation{Level: 20, Score: 0}))
 	require.NoError(t, s.rebuildBookStats(ctx))
 
 	require.Equal(t, 12, s.jobFloor(ctx))
@@ -196,9 +196,9 @@ func TestServer_JobFloor_IgnoresDiscCountsOutsideSavableRange(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	// An unlearned board above MaxSavableDiscs must not drag the floor up there.
-	board35 := testBoard(t, 35)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board35}))
+	// An unlearned position above MaxSavableDiscs must not drag the floor up there.
+	position35 := testPosition(t, 35)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position35}))
 	require.NoError(t, s.rebuildBookStats(ctx))
 
 	require.Equal(t, book.MaxSavableDiscs, s.jobFloor(ctx))
@@ -220,37 +220,37 @@ func TestServer_Heartbeat_RefreshesClaimTTL(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	ok, err := s.tryClaim(ctx, "board-a", "worker-1")
+	ok, err := s.tryClaim(ctx, "position-a", "worker-1")
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	require.NoError(t, s.redis.Expire(ctx, claimKey("board-a"), time.Second).Err())
+	require.NoError(t, s.redis.Expire(ctx, claimKey("position-a"), time.Second).Err())
 
-	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1", "board-a"))
+	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1", "position-a"))
 
-	ttl, err := s.redis.TTL(ctx, claimKey("board-a")).Result()
+	ttl, err := s.redis.TTL(ctx, claimKey("position-a")).Result()
 	require.NoError(t, err)
 	require.Greater(t, ttl, time.Second)
 }
 
 // TestServer_Heartbeat_DoesNotRefreshClaimTakenOverByAnotherWorker covers a
-// board whose claim expired and was re-claimed by another worker: the first
+// position whose claim expired and was re-claimed by another worker: the first
 // worker's heartbeat must not extend the new owner's claim.
 func TestServer_Heartbeat_DoesNotRefreshClaimTakenOverByAnotherWorker(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	ok, err := s.tryClaim(ctx, "board-a", "worker-1")
+	ok, err := s.tryClaim(ctx, "position-a", "worker-1")
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	// worker-2 takes over the board (as if worker-1's TTL had lapsed).
-	require.NoError(t, s.redis.Set(ctx, claimKey("board-a"), "worker-2", time.Second).Err())
+	// worker-2 takes over the position (as if worker-1's TTL had lapsed).
+	require.NoError(t, s.redis.Set(ctx, claimKey("position-a"), "worker-2", time.Second).Err())
 
-	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1", "board-a"))
+	require.NoError(t, s.heartbeat(ctx, "worker-1", "host-1", "commit-1", "position-a"))
 
 	// worker-2's short TTL must be left untouched.
-	ttl, err := s.redis.TTL(ctx, claimKey("board-a")).Result()
+	ttl, err := s.redis.TTL(ctx, claimKey("position-a")).Result()
 	require.NoError(t, err)
 	require.LessOrEqual(t, ttl, time.Second)
 }
@@ -273,9 +273,9 @@ func TestServer_Heartbeat_IdleWorkerIsNotAnError(t *testing.T) {
 	require.NoError(t, s.heartbeat(context.Background(), "worker-unknown", "host-1", "commit-1", ""))
 }
 
-func TestServer_Heartbeat_UnclaimedBoardIsNotAnError(t *testing.T) {
+func TestServer_Heartbeat_UnclaimedPositionIsNotAnError(t *testing.T) {
 	s := testServer(t)
-	require.NoError(t, s.heartbeat(context.Background(), "worker-1", "host-1", "commit-1", "board-a"))
+	require.NoError(t, s.heartbeat(context.Background(), "worker-1", "host-1", "commit-1", "position-a"))
 }
 
 func TestServer_ListWorkers_Empty(t *testing.T) {
@@ -326,7 +326,7 @@ func TestServer_ListWorkers_IncludesClaimAndPositionsComputed(t *testing.T) {
 	require.NoError(t, s.recordJobCompletion(ctx, "worker-1"))
 
 	// An active claim key must not confuse listWorkers' SCAN over "worker:*".
-	ok, err := s.tryClaim(ctx, "board-a", "worker-1")
+	ok, err := s.tryClaim(ctx, "position-a", "worker-1")
 	require.NoError(t, err)
 	require.True(t, ok)
 
@@ -355,39 +355,39 @@ func drainPriority(t *testing.T, s *Server) []priorityEntry {
 	}
 }
 
-// TestClaimJob_PriorityDrainedFirst verifies that priority-queue boards are returned before
+// TestClaimJob_PriorityDrainedFirst verifies that priority-queue positions are returned before
 // any ListLearnable candidates.
 func TestClaimJob_PriorityDrainedFirst(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	// Put a learnable board in the DB so ListLearnable has something to offer.
-	dbBoard := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{dbBoard}))
+	// Put a learnable position in the DB so ListLearnable has something to offer.
+	dbBoard := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{dbBoard}))
 
-	// Enqueue a different board as priority.
-	pBoard := testBoard(t, 14)
+	// Enqueue a different position as priority.
+	pBoard := testPosition(t, 14)
 	require.NoError(t, s.enqueuePriority(ctx, pBoard.String(), PriorityLevel, ""))
 
 	job, ok, err := s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, pBoard, job.Board)
+	require.Equal(t, pBoard, job.Position)
 	require.Equal(t, PriorityLevel, job.Level)
 
-	// The next claim falls back to the DB board.
+	// The next claim falls back to the DB position.
 	job, ok, err = s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, dbBoard, job.Board)
+	require.Equal(t, dbBoard, job.Position)
 }
 
-// TestClaimJob_PrioritySkipsNoMovesBoard ensures boards with no legal move are skipped in the priority path.
+// TestClaimJob_PrioritySkipsNoMovesBoard ensures positions with no legal move are skipped in the priority path.
 func TestClaimJob_PrioritySkipsNoMovesBoard(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	// Construct a no-legal-move board.
+	// Construct a no-legal-move position.
 	var blackBits, whiteBits uint64
 	for i := range uint(40) {
 		blackBits |= 1 << i
@@ -395,23 +395,23 @@ func TestClaimJob_PrioritySkipsNoMovesBoard(t *testing.T) {
 	for i := uint(40); i < 64; i++ {
 		whiteBits |= 1 << i
 	}
-	noMoveBoard, err := othello.NewBoard(blackBits, whiteBits)
+	noMovePosition, err := othello.NewPosition(blackBits, whiteBits)
 	require.NoError(t, err)
-	require.False(t, noMoveBoard.HasMoves())
-	normalizedNoMove := noMoveBoard.Normalize()
+	require.False(t, noMovePosition.HasMoves())
+	normalizedNoMove := noMovePosition.Normalize()
 
 	// Enqueue it in the priority queue (server shouldn't claim it).
 	require.NoError(t, s.enqueuePriority(ctx, normalizedNoMove.String(), PriorityLevel, ""))
 
-	// Add a normal DB board too.
-	dbBoard := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{dbBoard}))
+	// Add a normal DB position too.
+	dbBoard := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{dbBoard}))
 
-	// The no-move board is skipped; the claim falls through to the DB board.
+	// The no-move position is skipped; the claim falls through to the DB position.
 	job, ok, err := s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, dbBoard, job.Board)
+	require.Equal(t, dbBoard, job.Position)
 }
 
 // TestClaimJob_PriorityDeduplicates verifies that enqueuePriority skips duplicates.
@@ -419,7 +419,7 @@ func TestClaimJob_PriorityDeduplicates(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	pBoard := testBoard(t, 14)
+	pBoard := testPosition(t, 14)
 	require.NoError(t, s.enqueuePriority(ctx, pBoard.String(), PriorityLevel, ""))
 	require.NoError(t, s.enqueuePriority(ctx, pBoard.String(), PriorityLevel, "")) // duplicate — should be ignored
 
@@ -433,16 +433,16 @@ func TestDequeuePriority_DropsEntriesFromDeadConnections(t *testing.T) {
 	ctx := context.Background()
 
 	connID := s.registerConn()
-	board := testBoard(t, 14)
-	require.NoError(t, s.enqueuePriority(ctx, board.String(), PriorityLevel, connID))
+	position := testPosition(t, 14)
+	require.NoError(t, s.enqueuePriority(ctx, position.String(), PriorityLevel, connID))
 	s.unregisterConn(connID)
 
 	_, ok, err := s.dequeuePriority(ctx)
 	require.NoError(t, err)
 	require.False(t, ok)
 
-	// Removed from the pending set too, so the board can be re-queued.
-	isMember, err := s.redis.SIsMember(ctx, priorityPendingKey, board.String()).Result()
+	// Removed from the pending set too, so the position can be re-queued.
+	isMember, err := s.redis.SIsMember(ctx, priorityPendingKey, position.String()).Result()
 	require.NoError(t, err)
 	require.False(t, isMember)
 }
@@ -456,8 +456,8 @@ func TestDequeuePriority_KeepsEntriesFromLiveConnections(t *testing.T) {
 	deadConn := s.registerConn()
 	liveConn := s.registerConn()
 
-	deadBoard := testBoard(t, 14)
-	liveBoard := testBoard(t, 15)
+	deadBoard := testPosition(t, 14)
+	liveBoard := testPosition(t, 15)
 	require.NoError(t, s.enqueuePriority(ctx, deadBoard.String(), PriorityLevel, deadConn))
 	require.NoError(t, s.enqueuePriority(ctx, liveBoard.String(), PriorityLevel, liveConn))
 	s.unregisterConn(deadConn)
@@ -465,14 +465,14 @@ func TestDequeuePriority_KeepsEntriesFromLiveConnections(t *testing.T) {
 	entry, ok, err := s.dequeuePriority(ctx)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, liveBoard.String(), entry.Board)
+	require.Equal(t, liveBoard.String(), entry.Position)
 
 	_, ok, err = s.dequeuePriority(ctx)
 	require.NoError(t, err)
 	require.False(t, ok)
 }
 
-// Dedupe keys on the board alone: an entry whose first requester died is dropped even if a live
+// Dedupe keys on the position alone: an entry whose first requester died is dropped even if a live
 // connection asked too; that client's next request re-queues it.
 func TestDequeuePriority_DedupeIsByBoardOnly(t *testing.T) {
 	s := testServer(t)
@@ -480,22 +480,22 @@ func TestDequeuePriority_DedupeIsByBoardOnly(t *testing.T) {
 
 	connA := s.registerConn()
 	connB := s.registerConn()
-	board := testBoard(t, 14)
+	position := testPosition(t, 14)
 
-	require.NoError(t, s.enqueuePriority(ctx, board.String(), PriorityLevel, connA))
-	require.NoError(t, s.enqueuePriority(ctx, board.String(), PriorityLevel, connB)) // deduped: still tagged connA
+	require.NoError(t, s.enqueuePriority(ctx, position.String(), PriorityLevel, connA))
+	require.NoError(t, s.enqueuePriority(ctx, position.String(), PriorityLevel, connB)) // deduped: still tagged connA
 	s.unregisterConn(connA)
 
 	_, ok, err := s.dequeuePriority(ctx)
 	require.NoError(t, err)
 	require.False(t, ok)
 
-	// connB re-requesting after the drop queues the board again.
-	require.NoError(t, s.enqueuePriority(ctx, board.String(), PriorityLevel, connB))
+	// connB re-requesting after the drop queues the position again.
+	require.NoError(t, s.enqueuePriority(ctx, position.String(), PriorityLevel, connB))
 	entry, ok, err := s.dequeuePriority(ctx)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, board.String(), entry.Board)
+	require.Equal(t, position.String(), entry.Position)
 }
 
 // TestDequeuePriority_UntaggedEntriesAreNeverDropped covers entries with no connection ID (legacy
@@ -504,172 +504,172 @@ func TestDequeuePriority_UntaggedEntriesAreNeverDropped(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	board := testBoard(t, 14)
-	require.NoError(t, s.enqueuePriority(ctx, board.String(), PriorityLevel, ""))
+	position := testPosition(t, 14)
+	require.NoError(t, s.enqueuePriority(ctx, position.String(), PriorityLevel, ""))
 
 	entry, ok, err := s.dequeuePriority(ctx)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, board.String(), entry.Board)
+	require.Equal(t, position.String(), entry.Position)
 }
 
 // TestHandleSubmitJobResult_PriorityHighDiscSkipsPersistence verifies that a priority job for
-// a board with > MaxSavableDiscs does not attempt a DB write but does cache the result ephemerally.
+// a position with > MaxSavableDiscs does not attempt a DB write but does cache the result ephemerally.
 func TestHandleSubmitJobResult_PriorityHighDiscSkipsPersistence(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	// Use a board with many discs to exceed MaxSavableDiscs (30).
-	board := testBoard(t, 35)
-	require.Greater(t, board.CountDiscs(), book.MaxSavableDiscs)
+	// Use a position with many discs to exceed MaxSavableDiscs (30).
+	position := testPosition(t, 35)
+	require.Greater(t, position.CountDiscs(), book.MaxSavableDiscs)
 
-	require.Equal(t, 200, submitPriorityResult(t, s, board, TargetLevel(board.CountDiscs()), 2).Code)
+	require.Equal(t, 200, submitPriorityResult(t, s, position, TargetLevel(position.CountDiscs()), 2).Code)
 
-	// Board should not have been inserted into boards table.
-	_, err := s.repo.GetBoard(ctx, board.Board())
+	// Position should not have been inserted into boards table.
+	_, err := s.repo.GetPosition(ctx, position.Position())
 	require.Error(t, err)
 
 	// But the ephemeral cache should have it.
-	cached, ok, err := s.getAnalysisResult(ctx, board.String())
+	cached, ok, err := s.getAnalysisResult(ctx, position.String())
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, 2, cached.Score)
 }
 
-// submitPriorityResult claims board as a priority job and submits an evaluation at level for it,
+// submitPriorityResult claims position as a priority job and submits an evaluation at level for it,
 // returning the response recorder.
-func submitPriorityResult(t *testing.T, s *Server, board othello.NormalizedBoard, level, score int) *httptest.ResponseRecorder {
+func submitPriorityResult(t *testing.T, s *Server, position othello.NormalizedPosition, level, score int) *httptest.ResponseRecorder {
 	t.Helper()
 	ctx := context.Background()
 
-	require.NoError(t, s.setPriorityClaim(ctx, board.String()))
-	claimed, err := s.tryClaim(ctx, board.String(), "w1")
+	require.NoError(t, s.setPriorityClaim(ctx, position.String()))
+	claimed, err := s.tryClaim(ctx, position.String(), "w1")
 	require.NoError(t, err)
 	require.True(t, claimed)
 
-	depth, confidence := edax.SearchParams(board.CountDiscs(), level)
+	depth, confidence := edax.SearchParams(position.CountDiscs(), level)
 	return doRequest(t, s, "POST", "/api/jobs/result", jobResultRequest{
-		WorkerID: "w1", Board: board.String(), Level: level,
+		WorkerID: "w1", Position: position.String(), Level: level,
 		Depth: depth, Confidence: confidence, Score: score,
 	})
 }
 
-// TestHandleSubmitJobResult_PriorityLowDiscPersists verifies that a priority job for a board
+// TestHandleSubmitJobResult_PriorityLowDiscPersists verifies that a priority job for a position
 // with <= MaxSavableDiscs (which already has a row), searched at its target level, saves the
 // evaluation to the DB.
 func TestHandleSubmitJobResult_PriorityLowDiscPersists(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	board := testBoard(t, 14)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	position := testPosition(t, 14)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 
-	target := TargetLevel(board.CountDiscs())
-	require.Equal(t, 200, submitPriorityResult(t, s, board, target, 6).Code)
+	target := TargetLevel(position.CountDiscs())
+	require.Equal(t, 200, submitPriorityResult(t, s, position, target, 6).Code)
 
-	eval, err := s.repo.GetBoard(ctx, board.Board())
+	eval, err := s.repo.GetPosition(ctx, position.Position())
 	require.NoError(t, err)
 	require.Equal(t, db.Evaluation{Level: target, Score: 6}, eval)
 }
 
-// TestHandleSubmitJobResult_PriorityLowDiscNoRowAddsAndSaves verifies the AddBoards+retry path:
-// when a priority <=30-disc board searched at its target level has no existing row, one is created.
+// TestHandleSubmitJobResult_PriorityLowDiscNoRowAddsAndSaves verifies the AddPositions+retry path:
+// when a priority <=30-disc position searched at its target level has no existing row, one is created.
 func TestHandleSubmitJobResult_PriorityLowDiscNoRowAddsAndSaves(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	board := testBoard(t, 14)
-	// Do NOT call AddBoards; the board has no row.
+	position := testPosition(t, 14)
+	// Do NOT call AddPositions; the position has no row.
 
-	target := TargetLevel(board.CountDiscs())
-	require.Equal(t, 200, submitPriorityResult(t, s, board, target, -4).Code)
+	target := TargetLevel(position.CountDiscs())
+	require.Equal(t, 200, submitPriorityResult(t, s, position, target, -4).Code)
 
-	eval, err := s.repo.GetBoard(ctx, board.Board())
+	eval, err := s.repo.GetPosition(ctx, position.Position())
 	require.NoError(t, err)
 	require.Equal(t, db.Evaluation{Level: target, Score: -4}, eval)
 }
 
 // TestHandleSubmitJobResult_PriorityBelowTargetNotPersisted verifies the level floor: a priority
-// result shallower than the board's target level leaves the existing row unevaluated, so the
+// result shallower than the position's target level leaves the existing row unevaluated, so the
 // intermediate rungs of the frontend's level ladder never land in the book.
 func TestHandleSubmitJobResult_PriorityBelowTargetNotPersisted(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	board := testBoard(t, 14)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
-	require.Less(t, PriorityLevel, TargetLevel(board.CountDiscs()))
+	position := testPosition(t, 14)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+	require.Less(t, PriorityLevel, TargetLevel(position.CountDiscs()))
 
-	require.Equal(t, 200, submitPriorityResult(t, s, board, PriorityLevel, 6).Code)
+	require.Equal(t, 200, submitPriorityResult(t, s, position, PriorityLevel, 6).Code)
 
-	eval, err := s.repo.GetBoard(ctx, board.Board())
+	eval, err := s.repo.GetPosition(ctx, position.Position())
 	require.NoError(t, err)
 	require.Equal(t, db.Evaluation{}, eval, "row stays unevaluated")
 
 	// The result is still served back: it lives in the ephemeral analysis cache.
-	cached, ok, err := s.getAnalysisResult(ctx, board.String())
+	cached, ok, err := s.getAnalysisResult(ctx, position.String())
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, 6, cached.Score)
 }
 
 // TestHandleSubmitJobResult_PriorityBelowTargetSchedulesBoardForLearning verifies that a
-// below-target priority result on an unknown savable board creates a row with an empty evaluation,
-// so ListLearnable picks the board up later — without seeding the book with the shallow score.
+// below-target priority result on an unknown savable position creates a row with an empty evaluation,
+// so ListLearnable picks the position up later — without seeding the book with the shallow score.
 func TestHandleSubmitJobResult_PriorityBelowTargetSchedulesBoardForLearning(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	board := testBoard(t, 14)
-	// Do NOT call AddBoards; the board has no row.
+	position := testPosition(t, 14)
+	// Do NOT call AddPositions; the position has no row.
 
-	require.Equal(t, 200, submitPriorityResult(t, s, board, PriorityLevel, 6).Code)
+	require.Equal(t, 200, submitPriorityResult(t, s, position, PriorityLevel, 6).Code)
 
-	eval, err := s.repo.GetBoard(ctx, board.Board())
+	eval, err := s.repo.GetPosition(ctx, position.Position())
 	require.NoError(t, err)
 	require.Equal(t, db.Evaluation{}, eval, "row exists but stays unevaluated")
 }
 
 // TestHandleSubmitJobResult_PriorityBelowTargetDoesNotDowngradeExistingRow verifies the
-// insert-if-absent guarantee: a board with a real evaluation is untouched by a shallow result.
+// insert-if-absent guarantee: a position with a real evaluation is untouched by a shallow result.
 func TestHandleSubmitJobResult_PriorityBelowTargetDoesNotDowngradeExistingRow(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	board := testBoard(t, 14)
-	target := TargetLevel(board.CountDiscs())
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: target, Score: 5}))
+	position := testPosition(t, 14)
+	target := TargetLevel(position.CountDiscs())
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, position, db.Evaluation{Level: target, Score: 5}))
 
-	require.Equal(t, 200, submitPriorityResult(t, s, board, PriorityLevel, 6).Code)
+	require.Equal(t, 200, submitPriorityResult(t, s, position, PriorityLevel, 6).Code)
 
-	eval, err := s.repo.GetBoard(ctx, board.Board())
+	eval, err := s.repo.GetPosition(ctx, position.Position())
 	require.NoError(t, err)
 	require.Equal(t, db.Evaluation{Level: target, Score: 5}, eval)
 }
 
-// TestHandleSubmitJobResult_PriorityBelowTargetHighDiscAddsNoRow verifies that boards above
+// TestHandleSubmitJobResult_PriorityBelowTargetHighDiscAddsNoRow verifies that positions above
 // MaxSavableDiscs are not scheduled for learning either.
 func TestHandleSubmitJobResult_PriorityBelowTargetHighDiscAddsNoRow(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	board := testBoard(t, 35)
-	require.Greater(t, board.CountDiscs(), book.MaxSavableDiscs)
+	position := testPosition(t, 35)
+	require.Greater(t, position.CountDiscs(), book.MaxSavableDiscs)
 
-	require.Equal(t, 200, submitPriorityResult(t, s, board, PriorityLevel, 6).Code)
+	require.Equal(t, 200, submitPriorityResult(t, s, position, PriorityLevel, 6).Code)
 
-	_, err := s.repo.GetBoard(ctx, board.Board())
-	require.ErrorIs(t, err, db.ErrBoardNotFound)
+	_, err := s.repo.GetPosition(ctx, position.Position())
+	require.ErrorIs(t, err, db.ErrPositionNotFound)
 }
 
 // TestHandleSubmitJobResult_NonPriorityBoardNotFoundStill404 ensures the existing 404 path
 // for non-priority jobs is untouched by the priority changes.
 func TestHandleSubmitJobResult_NonPriorityBoardNotFoundStill404(t *testing.T) {
 	s := testServer(t)
-	board := testBoard(t, 12)
+	position := testPosition(t, 12)
 	// No priority claim, no DB row.
-	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: TargetLevel(12), Score: 0}
+	reqBody := jobResultRequest{WorkerID: "w1", Position: position.String(), Level: TargetLevel(12), Score: 0}
 	w := doRequest(t, s, "POST", "/api/jobs/result", reqBody)
 	require.Equal(t, 404, w.Code)
 }
@@ -680,11 +680,11 @@ func TestLookupEvaluation_EphemeralCacheFallback(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	board := testBoard(t, 20)
+	position := testPosition(t, 20)
 	eval := evaluationResponse{Level: PriorityLevel, Depth: PriorityLevel, Confidence: 100, Score: 8, Source: evaluationSourceEdax}
-	s.setAnalysisResult(ctx, board.String(), eval)
+	s.setAnalysisResult(ctx, position.String(), eval)
 
-	result, ok, err := s.lookupEvaluation(ctx, board.Board())
+	result, ok, err := s.lookupEvaluation(ctx, position.Position())
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, eval, result)

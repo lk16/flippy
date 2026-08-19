@@ -17,11 +17,12 @@ stored in Postgres, and browsed via a web frontend.
 - `cmd/loader` (`internal/loader`) — subcommands `seed` (precomputed
   12-disc set, embedded in source), `load` (PGN files), `load-oq`
   (Othello Quest move strings). Add-only: never updates or removes rows.
-- `internal/othello` — bitboard `Board`/`Game`, move generation,
-  `NormalizedBoard` (canonical across the 8 symmetries), wtb/PGN/Othello
-  Quest parsers. A `Board` is the mover-relative `(player, opponent)` pair
-  edax evaluates, with no color to move; disc colors exist only where a
-  game is displayed (`static/board.js`) or described (PGN metadata).
+- `internal/othello` — bitboard `Position`/`Game`, move generation,
+  `NormalizedPosition` (canonical across the 8 symmetries), wtb/PGN/Othello
+  Quest parsers. A `Position` is the mover-relative `(player, opponent)`
+  pair edax evaluates, with no color to move; disc colors exist only where
+  a game is displayed (`static/board.js`) or described (PGN metadata). The
+  HTTP API and the `boards` table still say "board" for a position.
   `static/board.js` reimplements the bitboard logic in JS (verified
   byte-for-byte against Go output) so the browser can simulate moves
   locally.

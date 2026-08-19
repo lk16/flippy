@@ -1,4 +1,4 @@
-// Package othellotest provides board-construction helpers shared by several packages' tests; a
+// Package othellotest provides position-construction helpers shared by several packages' tests; a
 // non-test file so it's importable across packages, but only _test.go files reference it.
 package othellotest
 
@@ -10,57 +10,57 @@ import (
 	"github.com/lk16/flippy/internal/othello"
 )
 
-// Board returns a NormalizedBoard reached by playing the first available legal
+// Position returns a NormalizedPosition reached by playing the first available legal
 // move (or pass) from the starting position until it has exactly discs discs.
-func Board(t *testing.T, discs int) othello.NormalizedBoard {
+func Position(t *testing.T, discs int) othello.NormalizedPosition {
 	t.Helper()
 
-	board := othello.NewBoardStart()
-	for board.CountDiscs() < discs {
-		if !board.HasMoves() {
-			next, err := board.DoMove(othello.PassMove)
+	position := othello.NewStartPosition()
+	for position.CountDiscs() < discs {
+		if !position.HasMoves() {
+			next, err := position.DoMove(othello.PassMove)
 			require.NoError(t, err)
-			board = next
+			position = next
 			continue
 		}
 
-		children := board.Children()
+		children := position.Children()
 		require.NotEmpty(t, children)
-		board = children[0]
+		position = children[0]
 	}
 
-	return board.Normalize()
+	return position.Normalize()
 }
 
-// DistinctBoards returns n distinct NormalizedBoards with exactly discs discs,
+// DistinctPositions returns n distinct NormalizedPositions with exactly discs discs,
 // found via breadth-first search from the starting position.
-func DistinctBoards(t *testing.T, discs, n int) []othello.NormalizedBoard {
+func DistinctPositions(t *testing.T, discs, n int) []othello.NormalizedPosition {
 	t.Helper()
 
-	seen := make(map[othello.Board]bool)
-	var result []othello.NormalizedBoard
+	seen := make(map[othello.Position]bool)
+	var result []othello.NormalizedPosition
 
-	frontier := []othello.Board{othello.NewBoardStart()}
+	frontier := []othello.Position{othello.NewStartPosition()}
 	for len(frontier) > 0 && len(result) < n {
-		var next []othello.Board
-		for _, board := range frontier {
-			if board.CountDiscs() == discs {
-				norm := board.Normalize()
-				if key := norm.Board(); !seen[key] {
+		var next []othello.Position
+		for _, position := range frontier {
+			if position.CountDiscs() == discs {
+				norm := position.Normalize()
+				if key := norm.Position(); !seen[key] {
 					seen[key] = true
 					result = append(result, norm)
 				}
 				continue
 			}
 
-			if !board.HasMoves() {
-				passed, err := board.DoMove(othello.PassMove)
+			if !position.HasMoves() {
+				passed, err := position.DoMove(othello.PassMove)
 				require.NoError(t, err)
 				next = append(next, passed)
 				continue
 			}
 
-			next = append(next, board.Children()...)
+			next = append(next, position.Children()...)
 		}
 		frontier = next
 	}

@@ -5,7 +5,7 @@
 // must. See pgnQueueLineEvaluations / _localEvalLineTag in board.js.
 const assert = require('node:assert');
 const { test } = require('./framework');
-const { buildGame, mockWorkerPool, flush, MAX_TARGET_LEVEL, OthelloBoard } = require('./harness');
+const { buildGame, mockWorkerPool, flush, MAX_TARGET_LEVEL, OthelloPosition } = require('./harness');
 const { FORCED_PASS_BOARDS } = require('./fixtures');
 
 // resolveAll resolves every pending call recorded so far with `score`, and returns how many it
@@ -97,7 +97,7 @@ test('pgnQueueLineEvaluations: a line board dropped as some other position\'s wo
   game.pgnStepPly(1);
 
   assert.ok(dropped.resolved, 'stepping to another ply cancelled it');
-  const board = OthelloBoard.fromString(boardStr);
+  const board = OthelloPosition.fromString(boardStr);
   const resumed = pool.calls.filter((c) => !c.resolved && c.player === board.playerBits && c.opponent === board.opponentBits);
   assert.equal(resumed.length, 1, 'and the line queued it again rather than leaving the graph point stuck');
   assert.equal(resumed[0].tag, game._localEvalLineTag());

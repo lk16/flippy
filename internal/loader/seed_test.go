@@ -37,31 +37,31 @@ func testRepository(t *testing.T) *db.Repository {
 	return db.NewRepository(tx)
 }
 
-func TestSeedBoards_AddsPrecomputedSet(t *testing.T) {
+func TestSeedPositions_AddsPrecomputedSet(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	require.NoError(t, SeedBoards(ctx, repo))
+	require.NoError(t, SeedPositions(ctx, repo))
 
-	sample := othello.PrecomputedBoards12()[0]
-	eval, err := repo.GetBoard(ctx, sample.Board())
+	sample := othello.PrecomputedPositions12()[0]
+	eval, err := repo.GetPosition(ctx, sample.Position())
 	require.NoError(t, err)
 	require.Equal(t, db.Evaluation{}, eval)
 }
 
-func TestSeedBoards_IdempotentDoesNotOverwriteLearnedEvaluation(t *testing.T) {
+func TestSeedPositions_IdempotentDoesNotOverwriteLearnedEvaluation(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	require.NoError(t, SeedBoards(ctx, repo))
+	require.NoError(t, SeedPositions(ctx, repo))
 
-	sample := othello.PrecomputedBoards12()[0]
+	sample := othello.PrecomputedPositions12()[0]
 	want := db.Evaluation{Level: 24, Score: 5}
 	require.NoError(t, repo.SaveEvaluation(ctx, sample, want))
 
-	require.NoError(t, SeedBoards(ctx, repo))
+	require.NoError(t, SeedPositions(ctx, repo))
 
-	got, err := repo.GetBoard(ctx, sample.Board())
+	got, err := repo.GetPosition(ctx, sample.Position())
 	require.NoError(t, err)
 	require.Equal(t, want, got)
 }

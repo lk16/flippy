@@ -5,28 +5,29 @@ import (
 	"github.com/lk16/flippy/internal/othello"
 )
 
-// ExtractBoards returns the deduplicated, savable NormalizedBoards from games: every played-line board
-// plus its one-ply children, for broader book coverage than just the moves actually played.
-func ExtractBoards(games []*othello.Game) []othello.NormalizedBoard {
-	seen := make(map[othello.Board]struct{})
-	var boards []othello.NormalizedBoard
+// ExtractPositions returns the deduplicated, savable NormalizedPositions from games: every
+// played-line position plus its one-ply children, for broader book coverage than just the moves
+// actually played.
+func ExtractPositions(games []*othello.Game) []othello.NormalizedPosition {
+	seen := make(map[othello.Position]struct{})
+	var positions []othello.NormalizedPosition
 
-	add := func(b othello.Board) {
+	add := func(b othello.Position) {
 		if !isSavable(b) {
 			return
 		}
 
 		normalized := b.Normalize()
-		if _, ok := seen[normalized.Board()]; ok {
+		if _, ok := seen[normalized.Position()]; ok {
 			return
 		}
 
-		seen[normalized.Board()] = struct{}{}
-		boards = append(boards, normalized)
+		seen[normalized.Position()] = struct{}{}
+		positions = append(positions, normalized)
 	}
 
 	for _, game := range games {
-		for _, b := range game.Boards() {
+		for _, b := range game.Positions() {
 			add(b)
 			for _, child := range b.Children() {
 				add(child)
@@ -34,10 +35,10 @@ func ExtractBoards(games []*othello.Game) []othello.NormalizedBoard {
 		}
 	}
 
-	return boards
+	return positions
 }
 
-func isSavable(b othello.Board) bool {
+func isSavable(b othello.Position) bool {
 	if !b.HasMoves() {
 		return false
 	}

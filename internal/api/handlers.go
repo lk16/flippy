@@ -49,7 +49,7 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, jobResponse{Board: job.Board.String(), Level: job.Level})
+	writeJSON(w, http.StatusOK, jobResponse{Position: job.Position.String(), Level: job.Level})
 }
 
 // maxLevel bounds a submitted search level: above anything flippy requests, but within the
@@ -77,13 +77,13 @@ func checkReportedSearchParams(req jobResultRequest, discCount int) {
 
 	depth, confidence := edax.SearchParams(discCount, req.Level)
 	if req.Depth != depth || req.Confidence != confidence {
-		log.Printf("board %s (%d discs) at level %d: worker reported %d@%d%%, edax's level table says %d@%d%%",
-			req.Board, discCount, req.Level, req.Depth, req.Confidence, depth, confidence)
+		log.Printf("position %s (%d discs) at level %d: worker reported %d@%d%%, edax's level table says %d@%d%%",
+			req.Position, discCount, req.Level, req.Depth, req.Confidence, depth, confidence)
 	}
 }
 
 // isBookQuality reports whether an evaluation is deep enough for the boards table: at least the
-// board's target level, or a search that ran the game out, which no deeper search can improve on.
+// position's target level, or a search that ran the game out, which no deeper search can improve on.
 // Enforced on every submission so interactive analysis's shallow rungs never enter the book.
 func isBookQuality(discCount, level int) bool {
 	return level >= TargetLevel(discCount) || edax.IsFinal(discCount, level)
@@ -102,13 +102,13 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	board, err := othello.ParseBoard(req.Board)
+	position, err := othello.ParsePosition(req.Position)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid board: %w", err))
 		return
 	}
 
-	normalized, err := othello.NewNormalizedBoard(board)
+	normalized, err := othello.NewNormalizedPosition(position)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("board must be normalized: %w", err))
 		return
@@ -141,22 +141,22 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case !isBookQuality(discCount, req.Level):
 		// Below book quality: accepted but never persisted; the ephemeral cache is the only record.
-		// A savable priority board still gets an empty-evaluation row so ListLearnable finds it
-		// later (AddBoards never downgrades an existing row).
+		// A savable priority position still gets an empty-evaluation row so ListLearnable finds it
+		// later (AddPositions never downgrades an existing row).
 		if isPriority && discCount <= book.MaxSavableDiscs {
-			if err := s.repo.AddBoards(r.Context(), []othello.NormalizedBoard{normalized}); err != nil {
-				log.Printf("failed to schedule priority board for learning: %v", err)
+			if err := s.repo.AddPositions(r.Context(), []othello.NormalizedPosition{normalized}); err != nil {
+				log.Printf("failed to schedule priority position for learning: %v", err)
 			}
 		}
 	case isPriority:
 		if discCount <= book.MaxSavableDiscs {
 			if saveErr := s.repo.SaveEvaluation(r.Context(), normalized, eval); saveErr != nil {
-				if errors.Is(saveErr, db.ErrBoardNotFound) {
-					// Board has no row yet; add one and retry.
-					if addErr := s.repo.AddBoards(r.Context(), []othello.NormalizedBoard{normalized}); addErr != nil {
-						log.Printf("failed to add priority board: %v", addErr)
+				if errors.Is(saveErr, db.ErrPositionNotFound) {
+					// Position has no row yet; add one and retry.
+					if addErr := s.repo.AddPositions(r.Context(), []othello.NormalizedPosition{normalized}); addErr != nil {
+						log.Printf("failed to add priority position: %v", addErr)
 					} else if saveErr2 := s.repo.SaveEvaluation(r.Context(), normalized, eval); saveErr2 != nil {
-						log.Printf("failed to save priority evaluation after AddBoards: %v", saveErr2)
+						log.Printf("failed to save priority evaluation after AddPositions: %v", saveErr2)
 					} else {
 						savedToDB = true
 					}
@@ -170,9 +170,9 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 		}
 		// Too many discs: the ephemeral cache is the only record.
 	default:
-		// ErrBoardNotFound is a real bug here: every ListLearnable board already has a row.
+		// ErrPositionNotFound is a real bug here: every ListLearnable position already has a row.
 		if err := s.repo.SaveEvaluation(r.Context(), normalized, eval); err != nil {
-			if errors.Is(err, db.ErrBoardNotFound) {
+			if errors.Is(err, db.ErrPositionNotFound) {
 				writeError(w, http.StatusNotFound, err)
 				return
 			}
@@ -205,7 +205,7 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// handleReleaseJob handles POST /api/jobs/release: releases a worker's claim on a board it didn't
+// handleReleaseJob handles POST /api/jobs/release: releases a worker's claim on a position it didn't
 // finish, so another worker can pick it up without waiting out claimTTL.
 func (s *Server) handleReleaseJob(w http.ResponseWriter, r *http.Request) {
 	var req releaseJobRequest
@@ -219,13 +219,13 @@ func (s *Server) handleReleaseJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	board, err := othello.ParseBoard(req.Board)
+	position, err := othello.ParsePosition(req.Position)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid board: %w", err))
 		return
 	}
 
-	normalized, err := othello.NewNormalizedBoard(board)
+	normalized, err := othello.NewNormalizedPosition(position)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("board must be normalized: %w", err))
 		return
@@ -239,16 +239,16 @@ func (s *Server) handleReleaseJob(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// lookupEvaluation returns board's evaluation from the DB, minimax cache, or ephemeral analysis
+// lookupEvaluation returns position's evaluation from the DB, minimax cache, or ephemeral analysis
 // cache; ok is false if none has a real (learned) result.
-func (s *Server) lookupEvaluation(ctx context.Context, board othello.Board) (evaluationResponse, bool, error) {
-	if !board.HasMoves() {
-		return s.lookupPassEvaluation(ctx, board)
+func (s *Server) lookupEvaluation(ctx context.Context, position othello.Position) (evaluationResponse, bool, error) {
+	if !position.HasMoves() {
+		return s.lookupPassEvaluation(ctx, position)
 	}
 
-	eval, err := s.repo.GetBoard(ctx, board)
+	eval, err := s.repo.GetPosition(ctx, position)
 	if err == nil && eval.IsLearned() {
-		depth, confidence := edax.SearchParams(board.CountDiscs(), eval.Level)
+		depth, confidence := edax.SearchParams(position.CountDiscs(), eval.Level)
 		return evaluationResponse{
 			Level:      eval.Level,
 			Depth:      depth,
@@ -257,32 +257,32 @@ func (s *Server) lookupEvaluation(ctx context.Context, board othello.Board) (eva
 			Source:     evaluationSourceEdax,
 		}, true, nil
 	}
-	if err != nil && !errors.Is(err, db.ErrBoardNotFound) {
+	if err != nil && !errors.Is(err, db.ErrPositionNotFound) {
 		return evaluationResponse{}, false, err
 	}
 
-	if score, ok := s.cache.Get(board); ok {
+	if score, ok := s.cache.Get(position); ok {
 		return evaluationResponse{Score: score, Source: evaluationSourceMinimax}, true, nil
 	}
 
 	// Covers priority-computed evaluations that never reach the DB (too many discs, below target).
-	if cached, ok, err := s.getAnalysisResult(ctx, board.Normalize().String()); err == nil && ok {
+	if cached, ok, err := s.getAnalysisResult(ctx, position.Normalize().String()); err == nil && ok {
 		return cached, true, nil
 	}
 
 	return evaluationResponse{}, false, nil
 }
 
-// lookupPassEvaluation handles a forced-pass board: negates the other player's evaluation, or returns
+// lookupPassEvaluation handles a forced-pass position: negates the other player's evaluation, or returns
 // the final score if the pass ends the game.
-func (s *Server) lookupPassEvaluation(ctx context.Context, board othello.Board) (evaluationResponse, bool, error) {
-	passed, err := board.DoMove(othello.PassMove)
+func (s *Server) lookupPassEvaluation(ctx context.Context, position othello.Position) (evaluationResponse, bool, error) {
+	passed, err := position.DoMove(othello.PassMove)
 	if err != nil {
 		return evaluationResponse{}, false, err
 	}
 
 	if !passed.HasMoves() {
-		return evaluationResponse{Score: board.FinalScore(), Source: evaluationSourceFinal}, true, nil
+		return evaluationResponse{Score: position.FinalScore(), Source: evaluationSourceFinal}, true, nil
 	}
 
 	eval, ok, err := s.lookupEvaluation(ctx, passed)
@@ -294,7 +294,7 @@ func (s *Server) lookupPassEvaluation(ctx context.Context, board othello.Board) 
 	return eval, true, nil
 }
 
-// handleGetBoard handles GET /api/boards?board=<board string>: looks up a board's evaluation.
+// handleGetBoard handles GET /api/boards?position=<position string>: looks up a position's evaluation.
 func (s *Server) handleGetBoard(w http.ResponseWriter, r *http.Request) {
 	boardParam := r.URL.Query().Get("board")
 	if boardParam == "" {
@@ -302,19 +302,19 @@ func (s *Server) handleGetBoard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	board, err := othello.ParseBoard(boardParam)
+	position, err := othello.ParsePosition(boardParam)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid board: %w", err))
 		return
 	}
 
-	eval, ok, err := s.lookupEvaluation(r.Context(), board)
+	eval, ok, err := s.lookupEvaluation(r.Context(), position)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, db.ErrBoardNotFound)
+		writeError(w, http.StatusNotFound, db.ErrPositionNotFound)
 		return
 	}
 
@@ -334,7 +334,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.heartbeat(r.Context(), req.WorkerID, req.Hostname, req.GitCommit, req.Board); err != nil {
+	if err := s.heartbeat(r.Context(), req.WorkerID, req.Hostname, req.GitCommit, req.Position); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -378,7 +378,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 }
 
 // statEntries merges per-(disc count, level) counts into sorted per-(disc count, depth, confidence)
-// entries: levels describing the same search are one entry, and unlearned boards (level 0) report
+// entries: levels describing the same search are one entry, and unlearned positions (level 0) report
 // depth 0, confidence 0 rather than what the level table would claim for them.
 func statEntries(stats []db.LevelStat) []statEntry {
 	counts := make(map[statEntry]int, len(stats))
@@ -412,7 +412,7 @@ func sortStatEntries(entries []statEntry) {
 }
 
 // handleLevelConfig handles GET /api/level-config: returns the constants the frontend needs to
-// determine how many level-increment rounds to request per board.
+// determine how many level-increment rounds to request per position.
 func (s *Server) handleLevelConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, levelConfigResponse{
 		PriorityLevel:   PriorityLevel,
@@ -425,7 +425,7 @@ func (s *Server) handleLevelConfig(w http.ResponseWriter, r *http.Request) {
 const pgnBodyLimit = 1 << 20
 
 // handlePGN handles POST /api/pgn: parses PGN text (or a compact OthelloQuest move string) and
-// returns the board sequence as strings. Only the first game in a multi-game PGN is used.
+// returns the position sequence as strings. Only the first game in a multi-game PGN is used.
 func (s *Server) handlePGN(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, pgnBodyLimit))
 	if err != nil {
@@ -464,26 +464,28 @@ func (s *Server) handlePGN(w http.ResponseWriter, r *http.Request) {
 		firstGame = games[0]
 	}
 
-	boards := firstGame.Boards()
-	boardStrings := make([]string, len(boards))
-	for i, b := range boards {
-		boardStrings[i] = b.String()
+	positions := firstGame.Positions()
+	positionStrings := make([]string, len(positions))
+	for i, b := range positions {
+		positionStrings[i] = b.String()
 	}
 
-	writeJSON(w, http.StatusOK, pgnResponse{Boards: boardStrings})
+	writeJSON(w, http.StatusOK, pgnResponse{Positions: positionStrings})
 }
 
-// jobResponse is the JSON shape of a Job returned by GET /api/jobs.
+// jobResponse is the JSON shape of a Job returned by GET /api/jobs. The HTTP API calls a position
+// a "board" -- in its routes, its query parameters and the json tags below -- and that is the only
+// place the older name survives.
 type jobResponse struct {
-	Board string `json:"board"`
-	Level int    `json:"level"`
+	Position string `json:"board"`
+	Level    int    `json:"level"`
 }
 
 // jobResultRequest is the JSON body POSTed to /api/jobs/result. Depth and Confidence are not
 // stored; they stay on the wire so checkReportedSearchParams can catch a mismatched edax build.
 type jobResultRequest struct {
 	WorkerID   string `json:"worker_id"`
-	Board      string `json:"board"`
+	Position   string `json:"board"`
 	Level      int    `json:"level"`
 	Depth      int    `json:"depth"`
 	Confidence int    `json:"confidence"`
@@ -493,16 +495,16 @@ type jobResultRequest struct {
 // releaseJobRequest is the JSON body POSTed to /api/jobs/release.
 type releaseJobRequest struct {
 	WorkerID string `json:"worker_id"`
-	Board    string `json:"board"`
+	Position string `json:"board"`
 }
 
-// heartbeatRequest is the JSON body POSTed to /api/workers/heartbeat. Board is the board the worker
+// heartbeatRequest is the JSON body POSTed to /api/workers/heartbeat. Position is the position the worker
 // currently holds a claim on, if any, so the server can refresh that claim's TTL.
 type heartbeatRequest struct {
 	WorkerID  string `json:"worker_id"`
 	Hostname  string `json:"hostname"`
 	GitCommit string `json:"git_commit"`
-	Board     string `json:"board,omitempty"`
+	Position  string `json:"board,omitempty"`
 }
 
 // evaluationSourceEdax marks an evaluationResponse as a directly-learned edax result.
@@ -511,11 +513,11 @@ const evaluationSourceEdax = "edax"
 // evaluationSourceMinimax marks an evaluationResponse as backfilled from the internal/book cache.
 const evaluationSourceMinimax = "minimax"
 
-// evaluationSourceFinal marks an evaluationResponse as a board's actual final score.
+// evaluationSourceFinal marks an evaluationResponse as a position's actual final score.
 const evaluationSourceFinal = "final"
 
 // evaluationResponse is the JSON shape of an evaluation, returned by GET /api/boards. Depth and
-// Confidence are derived via edax.SearchParams, not stored per board.
+// Confidence are derived via edax.SearchParams, not stored per position.
 type evaluationResponse struct {
 	Level      int    `json:"level"`
 	Depth      int    `json:"depth"`
@@ -524,7 +526,7 @@ type evaluationResponse struct {
 	Source     string `json:"source"`
 }
 
-// statEntry is one row of the GET /api/stats response: how many boards with DiscCount discs have
+// statEntry is one row of the GET /api/stats response: how many positions with DiscCount discs have
 // been searched to Depth at Confidence percent.
 type statEntry struct {
 	DiscCount  int `json:"disc_count"`
@@ -544,7 +546,7 @@ type workerResponse struct {
 
 // pgnResponse is the JSON body returned by POST /api/pgn.
 type pgnResponse struct {
-	Boards []string `json:"boards"`
+	Positions []string `json:"boards"`
 }
 
 // levelConfigResponse is the JSON body returned by GET /api/level-config. TargetLevels carries the

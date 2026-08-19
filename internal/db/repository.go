@@ -18,7 +18,7 @@ type querier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
-// Evaluation is the current edax evaluation state stored for a Board; the zero value means unlearned.
+// Evaluation is the current edax evaluation state stored for a position; the zero value means unlearned.
 // Depth and confidence are not stored: they follow from (disc count, level) via edax.SearchParams.
 type Evaluation struct {
 	Level int
@@ -30,8 +30,8 @@ func (e Evaluation) IsLearned() bool {
 	return e.Level > 0
 }
 
-// ErrBoardNotFound is returned when a board has no row in the boards table.
-var ErrBoardNotFound = errors.New("board not found")
+// ErrPositionNotFound is returned when a position has no row in the boards table.
+var ErrPositionNotFound = errors.New("position not found")
 
 // Repository provides access to the boards table.
 type Repository struct {
@@ -43,65 +43,66 @@ func NewRepository(db querier) *Repository {
 	return &Repository{db: db}
 }
 
-// AddBoards inserts boards that don't already have a row, leaving existing rows untouched. Use
-// AddBoardsInserted instead when the number of rows actually inserted is needed.
-func (r *Repository) AddBoards(ctx context.Context, boards []othello.NormalizedBoard) error {
-	_, err := r.AddBoardsInserted(ctx, boards)
+// AddPositions inserts positions that don't already have a row, leaving existing rows untouched.
+// Use AddPositionsInserted instead when the number of rows actually inserted is needed.
+func (r *Repository) AddPositions(ctx context.Context, positions []othello.NormalizedPosition) error {
+	_, err := r.AddPositionsInserted(ctx, positions)
 	return err
 }
 
-// AddBoardsInserted inserts boards that don't already have a row and returns the number actually
-// inserted (existing boards are skipped, not counted). Boards are sent via UNNEST rather than one
-// placeholder pair each, to stay under Postgres's parameter limit.
-func (r *Repository) AddBoardsInserted(ctx context.Context, boards []othello.NormalizedBoard) (int, error) {
-	if len(boards) == 0 {
+// AddPositionsInserted inserts positions that don't already have a row and returns the number
+// actually inserted (existing ones are skipped, not counted). Rows are sent via UNNEST rather than
+// one placeholder pair each, to stay under Postgres's parameter limit.
+func (r *Repository) AddPositionsInserted(ctx context.Context, positions []othello.NormalizedPosition) (int, error) {
+	if len(positions) == 0 {
 		return 0, nil
 	}
 
-	positions := make([][]byte, len(boards))
-	discCounts := make([]int16, len(boards))
-	for i, board := range boards {
-		positions[i] = board.Board().Bytes()
-		discCounts[i] = int16(board.CountDiscs())
+	encoded := make([][]byte, len(positions))
+	discCounts := make([]int16, len(positions))
+	for i, position := range positions {
+		encoded[i] = position.Position().Bytes()
+		discCounts[i] = int16(position.CountDiscs())
 	}
 
 	tag, err := r.db.Exec(ctx,
 		`INSERT INTO boards (position, disc_count)
 		 SELECT * FROM UNNEST($1::bytea[], $2::smallint[])
 		 ON CONFLICT (position) DO NOTHING`,
-		positions, discCounts,
+		encoded, discCounts,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("failed to add boards: %w", err)
+		return 0, fmt.Errorf("failed to add positions: %w", err)
 	}
 
 	return int(tag.RowsAffected()), nil
 }
 
-// GetBoard returns the stored evaluation for board's normalized form, or ErrBoardNotFound.
-func (r *Repository) GetBoard(ctx context.Context, board othello.Board) (Evaluation, error) {
-	normalized := board.Normalize()
+// GetPosition returns the stored evaluation for position's normalized form, or ErrPositionNotFound.
+func (r *Repository) GetPosition(ctx context.Context, position othello.Position) (Evaluation, error) {
+	normalized := position.Normalize()
 
 	var eval Evaluation
 	err := r.db.QueryRow(ctx,
 		`SELECT level, score FROM boards WHERE position = $1`,
-		normalized.Board().Bytes(),
+		normalized.Position().Bytes(),
 	).Scan(&eval.Level, &eval.Score)
 
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Evaluation{}, ErrBoardNotFound
+		return Evaluation{}, ErrPositionNotFound
 	}
 	if err != nil {
-		return Evaluation{}, fmt.Errorf("failed to get board: %w", err)
+		return Evaluation{}, fmt.Errorf("failed to get position: %w", err)
 	}
 
 	return eval, nil
 }
 
-// SaveEvaluation updates an existing board's evaluation, but only if its level improves on what's
-// stored; a non-improving result is a silent no-op. Never inserts a row: ErrBoardNotFound if none exists.
-func (r *Repository) SaveEvaluation(ctx context.Context, board othello.NormalizedBoard, eval Evaluation) error {
-	position := board.Board().Bytes()
+// SaveEvaluation updates an existing position's evaluation, but only if its level improves on
+// what's stored; a non-improving result is a silent no-op. Never inserts a row:
+// ErrPositionNotFound if none exists.
+func (r *Repository) SaveEvaluation(ctx context.Context, position othello.NormalizedPosition, eval Evaluation) error {
+	encoded := position.Position().Bytes()
 
 	// The outer EXISTS tells whether the row exists at all when the UPDATE's WHERE doesn't fire.
 	var exists bool
@@ -113,29 +114,29 @@ func (r *Repository) SaveEvaluation(ctx context.Context, board othello.Normalize
 			RETURNING position
 		 )
 		 SELECT EXISTS (SELECT 1 FROM boards WHERE position = $3)`,
-		eval.Level, eval.Score, position,
+		eval.Level, eval.Score, encoded,
 	).Scan(&exists)
 	if err != nil {
 		return fmt.Errorf("failed to save evaluation: %w", err)
 	}
 
 	if !exists {
-		return ErrBoardNotFound
+		return ErrPositionNotFound
 	}
 
 	return nil
 }
 
-// BoardEvaluation pairs a NormalizedBoard with its current evaluation.
-type BoardEvaluation struct {
-	Board      othello.NormalizedBoard
+// PositionEvaluation pairs a NormalizedPosition with its current evaluation.
+type PositionEvaluation struct {
+	Position   othello.NormalizedPosition
 	Evaluation Evaluation
 }
 
-// ListLearnable returns up to limit boards in [minDiscs, maxDiscs] below their target level
+// ListLearnable returns up to limit positions in [minDiscs, maxDiscs] below their target level
 // (leafLevel for leafDiscs, deeperLevel beyond); filtering in SQL keeps learned leafDiscs rows from
 // starving the rest. minDiscs may be raised above leafDiscs without changing which count is leaf.
-func (r *Repository) ListLearnable(ctx context.Context, minDiscs, maxDiscs, leafDiscs, leafLevel, deeperLevel, limit int) ([]BoardEvaluation, error) {
+func (r *Repository) ListLearnable(ctx context.Context, minDiscs, maxDiscs, leafDiscs, leafLevel, deeperLevel, limit int) ([]PositionEvaluation, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT position, level, score
 		 FROM boards
@@ -146,20 +147,20 @@ func (r *Repository) ListLearnable(ctx context.Context, minDiscs, maxDiscs, leaf
 		minDiscs, maxDiscs, leafDiscs, leafLevel, deeperLevel, limit,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list learnable boards: %w", err)
+		return nil, fmt.Errorf("failed to list learnable positions: %w", err)
 	}
 	defer rows.Close()
 
-	results, err := scanBoardEvaluations(rows)
+	results, err := scanPositionEvaluations(rows)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list learnable boards: %w", err)
+		return nil, fmt.Errorf("failed to list learnable positions: %w", err)
 	}
 
 	return results, nil
 }
 
-// EvaluatedBoards returns every learned (level > 0) board with exactly discCount discs.
-func (r *Repository) EvaluatedBoards(ctx context.Context, discCount int) ([]BoardEvaluation, error) {
+// EvaluatedPositions returns every learned (level > 0) position with exactly discCount discs.
+func (r *Repository) EvaluatedPositions(ctx context.Context, discCount int) ([]PositionEvaluation, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT position, level, score
 		 FROM boards
@@ -167,55 +168,55 @@ func (r *Repository) EvaluatedBoards(ctx context.Context, discCount int) ([]Boar
 		discCount,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list evaluated boards: %w", err)
+		return nil, fmt.Errorf("failed to list evaluated positions: %w", err)
 	}
 	defer rows.Close()
 
-	results, err := scanBoardEvaluations(rows)
+	results, err := scanPositionEvaluations(rows)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list evaluated boards: %w", err)
+		return nil, fmt.Errorf("failed to list evaluated positions: %w", err)
 	}
 
 	return results, nil
 }
 
-// scanBoardEvaluations scans rows of (position, level, score) into BoardEvaluations.
-func scanBoardEvaluations(rows pgx.Rows) ([]BoardEvaluation, error) {
-	var results []BoardEvaluation
+// scanPositionEvaluations scans rows of (position, level, score) into PositionEvaluations.
+func scanPositionEvaluations(rows pgx.Rows) ([]PositionEvaluation, error) {
+	var results []PositionEvaluation
 	for rows.Next() {
-		var position []byte
+		var encoded []byte
 		var eval Evaluation
-		if err := rows.Scan(&position, &eval.Level, &eval.Score); err != nil {
-			return nil, fmt.Errorf("failed to scan board: %w", err)
+		if err := rows.Scan(&encoded, &eval.Level, &eval.Score); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
-		board, err := othello.ParseBoardBytes(position)
+		position, err := othello.ParsePositionBytes(encoded)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse stored board: %w", err)
+			return nil, fmt.Errorf("failed to parse stored position: %w", err)
 		}
 
-		normalized, err := othello.NewNormalizedBoard(board)
+		normalized, err := othello.NewNormalizedPosition(position)
 		if err != nil {
-			return nil, fmt.Errorf("stored board is not normalized: %w", err)
+			return nil, fmt.Errorf("stored position is not normalized: %w", err)
 		}
 
-		results = append(results, BoardEvaluation{Board: normalized, Evaluation: eval})
+		results = append(results, PositionEvaluation{Position: normalized, Evaluation: eval})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed to read board rows: %w", err)
+		return nil, fmt.Errorf("failed to read rows: %w", err)
 	}
 
 	return results, nil
 }
 
-// LevelStat is the count of boards at a given (disc count, level) pair.
+// LevelStat is the count of positions at a given (disc count, level) pair.
 type LevelStat struct {
 	DiscCount int
 	Level     int
 	Count     int
 }
 
-// Stats returns board counts per (disc count, level) pair, omitting empty pairs.
+// Stats returns position counts per (disc count, level) pair, omitting empty pairs.
 func (r *Repository) Stats(ctx context.Context) ([]LevelStat, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT disc_count, level, count(*)

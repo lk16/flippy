@@ -16,7 +16,7 @@ const (
 	defaultNoJobSleep        = 10 * time.Second
 	defaultErrorSleep        = 10 * time.Second
 
-	// defaultStatsInterval is how often throughput (boards/sec, sec/board since start) is logged.
+	// defaultStatsInterval is how often throughput (positions/sec, sec/position since start) is logged.
 	defaultStatsInterval = 10 * time.Second
 
 	// releaseTimeout bounds a best-effort claim release on shutdown, run against a fresh context since
@@ -27,14 +27,14 @@ const (
 // apiClient is the subset of Client's behavior Worker depends on, so tests can inject a fake.
 type apiClient interface {
 	GetJob(ctx context.Context) (Job, bool, error)
-	SubmitJobResult(ctx context.Context, board string, level int, eval edax.Evaluation) error
-	ReleaseJob(ctx context.Context, board string) error
-	Heartbeat(ctx context.Context, board string) error
+	SubmitJobResult(ctx context.Context, position string, level int, eval edax.Evaluation) error
+	ReleaseJob(ctx context.Context, position string) error
+	Heartbeat(ctx context.Context, position string) error
 }
 
 // evaluator is the subset of *edax.Process's behavior Worker depends on, so tests can inject a fake.
 type evaluator interface {
-	Evaluate(board othello.Board, level int) (edax.Evaluation, error)
+	Evaluate(position othello.Position, level int) (edax.Evaluation, error)
 }
 
 // Worker repeatedly claims one job at a time from the API, evaluates it with edax, and submits the
@@ -48,7 +48,7 @@ type Worker struct {
 	errorSleep        time.Duration
 	statsInterval     time.Duration
 
-	// claimed is the board this worker currently holds a claim on ("" if none), so the heartbeat can
+	// claimed is the position this worker currently holds a claim on ("" if none), so the heartbeat can
 	// refresh it and shutdown can release it.
 	mu      sync.Mutex
 	claimed string
@@ -91,36 +91,36 @@ func (w *Worker) Run(ctx context.Context) {
 
 	// Release the claim still held after a shutdown mid-job, so another worker doesn't have to wait
 	// out claimTTL.
-	if board := w.claimedBoard(); board != "" {
-		w.releaseJob(board)
-		w.setClaimedBoard("")
+	if position := w.claimedPosition(); position != "" {
+		w.releaseJob(position)
+		w.setClaimedPosition("")
 	}
 }
 
-// setClaimedBoard records the board this worker currently holds a claim on ("" for none).
-func (w *Worker) setClaimedBoard(board string) {
+// setClaimedPosition records the position this worker currently holds a claim on ("" for none).
+func (w *Worker) setClaimedPosition(position string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.claimed = board
+	w.claimed = position
 }
 
-// claimedBoard returns the board this worker currently holds a claim on, or "".
-func (w *Worker) claimedBoard() string {
+// claimedPosition returns the position this worker currently holds a claim on, or "".
+func (w *Worker) claimedPosition() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.claimed
 }
 
-// releaseJob best-effort releases this worker's claim on board.
-func (w *Worker) releaseJob(board string) {
+// releaseJob best-effort releases this worker's claim on position.
+func (w *Worker) releaseJob(position string) {
 	ctx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
 	defer cancel()
-	if err := w.api.ReleaseJob(ctx, board); err != nil {
-		log.Printf("failed to release claim on %s: %v", board, err)
+	if err := w.api.ReleaseJob(ctx, position); err != nil {
+		log.Printf("failed to release claim on %s: %v", position, err)
 	}
 }
 
-// runStats logs cumulative throughput (boards/sec and sec/board since start) every statsInterval,
+// runStats logs cumulative throughput (positions/sec and sec/position since start) every statsInterval,
 // until ctx is canceled.
 func (w *Worker) runStats(ctx context.Context) {
 	start := time.Now()
@@ -138,27 +138,27 @@ func (w *Worker) runStats(ctx context.Context) {
 	}
 }
 
-// logStats logs boards processed and throughput since start, both boards/sec and sec/board formatted
+// logStats logs positions processed and throughput since start, both positions/sec and sec/position formatted
 // to 2 decimals.
 func (w *Worker) logStats(start time.Time) {
 	elapsed := time.Since(start).Seconds()
 	count := w.jobsCompleted.Load()
 
-	var boardsPerSec, secPerBoard float64
+	var positionsPerSec, secPerPosition float64
 	if elapsed > 0 {
-		boardsPerSec = float64(count) / elapsed
+		positionsPerSec = float64(count) / elapsed
 	}
 	if count > 0 {
-		secPerBoard = elapsed / float64(count)
+		secPerPosition = elapsed / float64(count)
 	}
 
-	log.Printf("%d boards done, %.2f boards/sec, %.2f sec/board", count, boardsPerSec, secPerBoard)
+	log.Printf("%d positions done, %.2f positions/sec, %.2f sec/position", count, positionsPerSec, secPerPosition)
 }
 
 // runHeartbeat sends a heartbeat immediately, then every heartbeatInterval, until ctx is canceled.
-// Each heartbeat reports the currently claimed board so the server can refresh its claim TTL.
+// Each heartbeat reports the currently claimed position so the server can refresh its claim TTL.
 func (w *Worker) runHeartbeat(ctx context.Context) {
-	if err := w.api.Heartbeat(ctx, w.claimedBoard()); err != nil {
+	if err := w.api.Heartbeat(ctx, w.claimedPosition()); err != nil {
 		log.Printf("failed to send heartbeat: %v", err)
 	}
 
@@ -170,7 +170,7 @@ func (w *Worker) runHeartbeat(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := w.api.Heartbeat(ctx, w.claimedBoard()); err != nil {
+			if err := w.api.Heartbeat(ctx, w.claimedPosition()); err != nil {
 				log.Printf("failed to send heartbeat: %v", err)
 			}
 		}
@@ -195,25 +195,25 @@ func (w *Worker) runJobs(ctx context.Context) {
 			continue
 		}
 
-		w.setClaimedBoard(job.Board)
+		w.setClaimedPosition(job.Position)
 		if stillClaimed := w.processJob(ctx, job); !stillClaimed {
-			w.setClaimedBoard("")
+			w.setClaimedPosition("")
 		}
 	}
 }
 
 // processJob evaluates and submits job, sleeping before returning on failure. It reports whether the
-// worker still holds the claim on job's board, which is only the case after a shutdown mid-job; the
+// worker still holds the claim on job's position, which is only the case after a shutdown mid-job; the
 // caller releases it then.
 func (w *Worker) processJob(ctx context.Context, job Job) (stillClaimed bool) {
-	board, err := othello.ParseBoard(job.Board)
+	position, err := othello.ParsePosition(job.Position)
 	if err != nil {
-		// The server always sends valid boards; this indicates a protocol mismatch, not a runtime fluke.
-		log.Printf("received unparseable board %q from server: %v", job.Board, err)
+		// The server always sends valid positions; this indicates a protocol mismatch, not a runtime fluke.
+		log.Printf("received unparseable position %q from server: %v", job.Position, err)
 		return false
 	}
 
-	eval, err := w.edax.Evaluate(board, job.Level)
+	eval, err := w.edax.Evaluate(position, job.Level)
 	if err != nil {
 		if ctx.Err() != nil {
 			// Shutdown closed the edax process mid-evaluation; the claim is still held and Run
@@ -225,7 +225,7 @@ func (w *Worker) processJob(ctx context.Context, job Job) (stillClaimed bool) {
 		return false
 	}
 
-	if err := w.api.SubmitJobResult(ctx, job.Board, job.Level, eval); err != nil {
+	if err := w.api.SubmitJobResult(ctx, job.Position, job.Level, eval); err != nil {
 		if ctx.Err() != nil {
 			return true
 		}

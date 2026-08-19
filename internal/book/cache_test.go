@@ -38,13 +38,13 @@ func testRepository(t *testing.T) *db.Repository {
 	return db.NewRepository(tx)
 }
 
-var testBoard = othellotest.Board
+var testPosition = othellotest.Position
 
 func TestCache_Get_MissesBeforeRebuild(t *testing.T) {
 	repo := testRepository(t)
 	c := NewCache(repo)
 
-	_, ok := c.Get(othello.NewBoardStart())
+	_, ok := c.Get(othello.NewStartPosition())
 	require.False(t, ok)
 }
 
@@ -60,25 +60,25 @@ func TestCache_Rebuild_BackfillsFromLearnedLeaves(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	// A board one ply short of LeafDiscs: all of its children are LeafDiscs-disc boards, the
+	// A position one ply short of LeafDiscs: all of its children are LeafDiscs-disc positions, the
 	// smallest case fully learnable without seeding the entire book.
-	board11 := testBoard(t, LeafDiscs-1)
-	children := board11.Board().Children()
+	position11 := testPosition(t, LeafDiscs-1)
+	children := position11.Position().Children()
 	require.NotEmpty(t, children)
 
-	normalizedChildren := make([]othello.NormalizedBoard, len(children))
+	normalizedChildren := make([]othello.NormalizedPosition, len(children))
 	for i, child := range children {
 		normalizedChildren[i] = child.Normalize()
 	}
-	require.NoError(t, repo.AddBoards(ctx, normalizedChildren))
+	require.NoError(t, repo.AddPositions(ctx, normalizedChildren))
 
-	childScores := make(map[othello.Board]int, len(normalizedChildren))
+	childScores := make(map[othello.Position]int, len(normalizedChildren))
 	for i, child := range normalizedChildren {
 		score := (i % 129) - 64
 		require.NoError(t, repo.SaveEvaluation(ctx, child, db.Evaluation{
 			Level: 20, Score: score,
 		}))
-		childScores[child.Board()] = score
+		childScores[child.Position()] = score
 	}
 
 	c := NewCache(repo)
@@ -92,7 +92,7 @@ func TestCache_Rebuild_BackfillsFromLearnedLeaves(t *testing.T) {
 		}
 	}
 
-	got, ok := c.Get(board11.Board())
+	got, ok := c.Get(position11.Position())
 	require.True(t, ok)
 	require.Equal(t, want, got)
 }
@@ -101,17 +101,17 @@ func TestCache_Rebuild_IncompleteLeavesLeaveBoardUncovered(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	board11 := testBoard(t, LeafDiscs-1)
-	children := board11.Board().Children()
+	position11 := testPosition(t, LeafDiscs-1)
+	children := position11.Position().Children()
 	require.Greater(t, len(children), 1)
 
-	normalizedChildren := make([]othello.NormalizedBoard, len(children))
+	normalizedChildren := make([]othello.NormalizedPosition, len(children))
 	for i, child := range children {
 		normalizedChildren[i] = child.Normalize()
 	}
-	require.NoError(t, repo.AddBoards(ctx, normalizedChildren))
+	require.NoError(t, repo.AddPositions(ctx, normalizedChildren))
 
-	// Learn only the first child: coverage of board11 is incomplete.
+	// Learn only the first child: coverage of position11 is incomplete.
 	require.NoError(t, repo.SaveEvaluation(ctx, normalizedChildren[0], db.Evaluation{
 		Level: 20, Score: 1,
 	}))
@@ -119,7 +119,7 @@ func TestCache_Rebuild_IncompleteLeavesLeaveBoardUncovered(t *testing.T) {
 	c := NewCache(repo)
 	require.NoError(t, c.Rebuild(ctx))
 
-	_, ok := c.Get(board11.Board())
+	_, ok := c.Get(position11.Position())
 	require.False(t, ok)
 }
 
@@ -127,24 +127,24 @@ func TestCache_Rebuild_ReflectsNewlyLearnedLeaves(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	board11 := testBoard(t, LeafDiscs-1)
-	children := board11.Board().Children()
+	position11 := testPosition(t, LeafDiscs-1)
+	children := position11.Position().Children()
 	require.Greater(t, len(children), 1)
 
-	normalizedChildren := make([]othello.NormalizedBoard, len(children))
+	normalizedChildren := make([]othello.NormalizedPosition, len(children))
 	for i, child := range children {
 		normalizedChildren[i] = child.Normalize()
 	}
-	require.NoError(t, repo.AddBoards(ctx, normalizedChildren))
+	require.NoError(t, repo.AddPositions(ctx, normalizedChildren))
 
 	c := NewCache(repo)
 
-	// Learn only the first child, rebuild: incomplete, board11 is a miss.
+	// Learn only the first child, rebuild: incomplete, position11 is a miss.
 	require.NoError(t, repo.SaveEvaluation(ctx, normalizedChildren[0], db.Evaluation{
 		Level: 20, Score: 1,
 	}))
 	require.NoError(t, c.Rebuild(ctx))
-	_, ok := c.Get(board11.Board())
+	_, ok := c.Get(position11.Position())
 	require.False(t, ok)
 
 	// Learn the rest, rebuild again on the same Cache: now a hit.
@@ -154,6 +154,6 @@ func TestCache_Rebuild_ReflectsNewlyLearnedLeaves(t *testing.T) {
 		}))
 	}
 	require.NoError(t, c.Rebuild(ctx))
-	_, ok = c.Get(board11.Board())
+	_, ok = c.Get(position11.Position())
 	require.True(t, ok)
 }

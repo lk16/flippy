@@ -30,7 +30,7 @@
 //   node wasm/edax-eval/bench/bench.js
 //
 // The corpus is a fixed set of (seed, discCount) pairs replayed deterministically via
-// static/board.js's OthelloBoard, independent of the Rust source, so the same positions are
+// static/board.js's OthelloPosition, independent of the Rust source, so the same positions are
 // evaluated before and after a candidate change. Only the fixed-corpus total wall-clock is
 // meaningful run-to-run -- individual positions vary 10-50x in cost.
 
@@ -38,7 +38,7 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 const { EdaxEval } = require('../js/edax-eval.js');
-const { OthelloBoard } = require('../../../static/board.js');
+const { OthelloPosition } = require('../../../static/board.js');
 
 const WASM_PATH = path.join(__dirname, '../target/wasm32-unknown-unknown/release/edax_eval.wasm');
 const WEIGHTS_PATH = path.join(__dirname, '../dist/weights.bin.gz');
@@ -81,7 +81,7 @@ function discCountOf(board) {
 // playToDiscCount replays a deterministic pseudo-random legal game (an LCG seeded by `seed`)
 // until a board with exactly `discCount` discs is reached, or null if the game ends first.
 function playToDiscCount(seed, discCount) {
-    let board = new OthelloBoard();
+    let board = new OthelloPosition();
     let state = seed;
     const rand = () => {
         state = (state * 1103515245 + 12345) & 0x7fffffff;
@@ -112,7 +112,7 @@ async function main() {
     const cases = [...MIDGAME_CASES, ...MIDGAME12_CASES, ...ENDGAME_CASES].map(({ seed, discCount, level }) => {
         const boardStr = playToDiscCount(seed, discCount);
         if (!boardStr) throw new Error(`seed=${seed} discCount=${discCount}: position not reached`);
-        return { seed, discCount, level, board: OthelloBoard.fromString(boardStr) };
+        return { seed, discCount, level, board: OthelloPosition.fromString(boardStr) };
     });
 
     let totalNanos = 0n;

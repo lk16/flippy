@@ -1,7 +1,7 @@
 package othello
 
-// Color identifies a side in an Othello game. A Board has no color to move (see Board), so this is
-// only used for the parts of a game that really are per-color: a PGN's players and winner.
+// Color identifies a side in an Othello game. A Position has no color to move (see Position), so
+// this is only used for the parts of a game that really are per-color: a PGN's players and winner.
 type Color int
 
 const (

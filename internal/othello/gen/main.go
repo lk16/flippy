@@ -1,4 +1,4 @@
-// Command gen generates the reachable targetDiscs-disc board list backing othello.PrecomputedBoards12.
+// Command gen generates the targetDiscs-disc position list backing othello.PrecomputedPositions12.
 package main
 
 import (
@@ -18,7 +18,7 @@ func main() {
 	}
 
 	found := make(map[string]struct{})
-	explore(othello.NewBoardStart(), make(map[othello.Board]bool), found)
+	explore(othello.NewStartPosition(), make(map[othello.Position]bool), found)
 
 	lines := make([]string, 0, len(found))
 	for line := range found {
@@ -26,7 +26,7 @@ func main() {
 	}
 	sort.Strings(lines)
 
-	out := make([]byte, 0, len(lines)*(othello.BoardStringLength+1))
+	out := make([]byte, 0, len(lines)*(othello.PositionStringLength+1))
 	for _, line := range lines {
 		out = append(out, line...)
 		out = append(out, '\n')
@@ -37,19 +37,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Fprintf(os.Stderr, "wrote %d boards to %s\n", len(lines), os.Args[1])
+	fmt.Fprintf(os.Stderr, "wrote %d positions to %s\n", len(lines), os.Args[1])
 }
 
-// explore walks every legal line from b, recording targetDiscs-disc boards; a no-legal-move board is
-// always passed through rather than recorded, since edax can't evaluate it.
-func explore(b othello.Board, visited map[othello.Board]bool, found map[string]struct{}) {
-	if visited[b] {
+// explore walks every legal line from p, recording targetDiscs-disc positions; a no-legal-move
+// position is always passed through rather than recorded, since edax can't evaluate it.
+func explore(p othello.Position, visited map[othello.Position]bool, found map[string]struct{}) {
+	if visited[p] {
 		return
 	}
-	visited[b] = true
+	visited[p] = true
 
-	if !b.HasMoves() {
-		next, err := b.DoMove(othello.PassMove)
+	if !p.HasMoves() {
+		next, err := p.DoMove(othello.PassMove)
 		if err != nil {
 			// Neither player has a move: the game ended before reaching targetDiscs discs.
 			return
@@ -58,12 +58,12 @@ func explore(b othello.Board, visited map[othello.Board]bool, found map[string]s
 		return
 	}
 
-	if b.CountDiscs() == targetDiscs {
-		found[b.Normalize().String()] = struct{}{}
+	if p.CountDiscs() == targetDiscs {
+		found[p.Normalize().String()] = struct{}{}
 		return
 	}
 
-	for _, child := range b.Children() {
+	for _, child := range p.Children() {
 		explore(child, visited, found)
 	}
 }

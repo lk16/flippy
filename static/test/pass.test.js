@@ -4,12 +4,12 @@
 //  - navigation re-renders the graph so its current-ply highlight tracks the move.
 const assert = require('node:assert');
 const { test } = require('./framework');
-const { buildGame, graphSegments, OthelloBoard } = require('./harness');
+const { buildGame, graphSegments, OthelloPosition } = require('./harness');
 const { FORCED_PASS_BOARDS, FORCED_PASS_PLIES, GAME_OVER_PLY } = require('./fixtures');
 
 // Sanity: the fixture's structural facts hold (pins the embedded strings to real backend output).
 test('fixture: forced-pass and game-over plies are what we expect', () => {
-  const boards = FORCED_PASS_BOARDS.map((s) => OthelloBoard.fromString(s));
+  const boards = FORCED_PASS_BOARDS.map((s) => OthelloPosition.fromString(s));
   boards.forEach((b, i) => assert.ok(b, `board ${i} parsed`));
   for (const p of FORCED_PASS_PLIES) {
     assert.equal(boards[p].hasValidMoves(), false, `ply ${p} has no moves`);
@@ -22,7 +22,7 @@ test('fixture: forced-pass and game-over plies are what we expect', () => {
 // Pins static/board.js's move generation and encoding to the backend's: every ply of the fixture
 // must come out of the previous one, string for string.
 test('fixture: replaying it in JS reproduces every backend board string', () => {
-  let board = OthelloBoard.fromString(FORCED_PASS_BOARDS[0]);
+  let board = OthelloPosition.fromString(FORCED_PASS_BOARDS[0]);
 
   for (let ply = 1; ply < FORCED_PASS_BOARDS.length; ply++) {
     let next;

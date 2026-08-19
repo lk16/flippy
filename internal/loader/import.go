@@ -8,14 +8,14 @@ import (
 	"github.com/lk16/flippy/internal/othello"
 )
 
-// ImportGames extracts NormalizedBoards from games and adds them to the DB, returning the number of
-// rows actually inserted (boards already present are not counted).
+// ImportGames extracts NormalizedPositions from games and adds them to the DB, returning the number
+// of rows actually inserted (positions already present are not counted).
 func ImportGames(ctx context.Context, repo *db.Repository, games []*othello.Game) (int, error) {
-	boards := ExtractBoards(games)
+	positions := ExtractPositions(games)
 
-	added, err := repo.AddBoardsInserted(ctx, boards)
+	added, err := repo.AddPositionsInserted(ctx, positions)
 	if err != nil {
-		return 0, fmt.Errorf("failed to add extracted boards: %w", err)
+		return 0, fmt.Errorf("failed to add extracted positions: %w", err)
 	}
 
 	return added, nil
@@ -42,7 +42,7 @@ func ImportPGNFiles(ctx context.Context, repo *db.Repository, filenames []string
 	return ImportGames(ctx, repo, games)
 }
 
-// ImportPaths imports boards from files and/or folders, searching folders recursively for *.wtb/*.pgn
+// ImportPaths imports positions from files and/or folders, searching folders recursively for *.wtb/*.pgn
 // files. progress, if non-nil, is called after each input file is parsed with (done, total).
 func ImportPaths(ctx context.Context, repo *db.Repository, paths []string, progress func(done, total int)) (int, error) {
 	wtbFiles, pgnFiles, err := ResolvePaths(paths)

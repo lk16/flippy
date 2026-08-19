@@ -62,9 +62,9 @@ func testClient(t *testing.T, workerID string) (*Client, *db.Repository) {
 	return NewClient(httpServer.URL, workerID, "test-host", "test-commit"), repo
 }
 
-// testBoard returns a NormalizedBoard reached by playing the first available
+// testPosition returns a NormalizedPosition reached by playing the first available
 // legal move (or pass) from start until it has exactly discs discs.
-var testBoard = othellotest.Board
+var testPosition = othellotest.Position
 
 func TestClient_GetJob_NoJobAvailable(t *testing.T) {
 	client, _ := testClient(t, "w1")
@@ -78,13 +78,13 @@ func TestClient_GetJob_ReturnsJob(t *testing.T) {
 	client, repo := testClient(t, "w1")
 	ctx := context.Background()
 
-	board := testBoard(t, 12)
-	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	position := testPosition(t, 12)
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 
 	job, ok, err := client.GetJob(ctx)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, board.String(), job.Board)
+	require.Equal(t, position.String(), job.Position)
 	require.Positive(t, job.Level)
 }
 
@@ -96,8 +96,8 @@ func TestClient_GetJob_TwoWorkersGetDistinctJobs(t *testing.T) {
 	client2 := NewClient(client1.baseURL, "w2", "test-host", "test-commit")
 	ctx := context.Background()
 
-	boards := testDistinctClientBoards(t, 12, 2)
-	require.NoError(t, repo.AddBoards(ctx, boards))
+	positions := testDistinctClientBoards(t, 12, 2)
+	require.NoError(t, repo.AddPositions(ctx, positions))
 
 	job1, ok, err := client1.GetJob(ctx)
 	require.NoError(t, err)
@@ -107,24 +107,24 @@ func TestClient_GetJob_TwoWorkersGetDistinctJobs(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	require.NotEqual(t, job1.Board, job2.Board)
+	require.NotEqual(t, job1.Position, job2.Position)
 }
 
 func TestClient_SubmitJobResult_Success(t *testing.T) {
 	client, repo := testClient(t, "w1")
 	ctx := context.Background()
 
-	board := testBoard(t, 12)
-	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	position := testPosition(t, 12)
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 
 	job, ok, err := client.GetJob(ctx)
 	require.NoError(t, err)
 	require.True(t, ok)
 
 	eval := edax.Evaluation{Score: 6}
-	require.NoError(t, client.SubmitJobResult(ctx, board.String(), job.Level, eval))
+	require.NoError(t, client.SubmitJobResult(ctx, position.String(), job.Level, eval))
 
-	stored, err := repo.GetBoard(ctx, board.Board())
+	stored, err := repo.GetPosition(ctx, position.Position())
 	require.NoError(t, err)
 	require.Equal(t, db.Evaluation{Level: job.Level, Score: 6}, stored)
 }
@@ -132,9 +132,9 @@ func TestClient_SubmitJobResult_Success(t *testing.T) {
 func TestClient_SubmitJobResult_BoardNotFound(t *testing.T) {
 	client, _ := testClient(t, "w1")
 
-	board := testBoard(t, 12)
+	position := testPosition(t, 12)
 	eval := edax.Evaluation{Score: 6}
-	err := client.SubmitJobResult(context.Background(), board.String(), api.TargetLevel(12), eval)
+	err := client.SubmitJobResult(context.Background(), position.String(), api.TargetLevel(12), eval)
 	require.Error(t, err)
 }
 
@@ -147,14 +147,14 @@ func TestClient_Heartbeat_WithClaimedBoard(t *testing.T) {
 	client, repo := testClient(t, "w1")
 	ctx := context.Background()
 
-	board := testBoard(t, 12)
-	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	position := testPosition(t, 12)
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 
 	job, ok, err := client.GetJob(ctx)
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	require.NoError(t, client.Heartbeat(ctx, job.Board))
+	require.NoError(t, client.Heartbeat(ctx, job.Position))
 }
 
 func TestClient_ReleaseJob_AllowsAnotherWorkerToClaimIt(t *testing.T) {
@@ -162,50 +162,50 @@ func TestClient_ReleaseJob_AllowsAnotherWorkerToClaimIt(t *testing.T) {
 	client2 := NewClient(client1.baseURL, "w2", "test-host", "test-commit")
 	ctx := context.Background()
 
-	board := testBoard(t, 12)
-	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	position := testPosition(t, 12)
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 
 	job, ok, err := client1.GetJob(ctx)
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	require.NoError(t, client1.ReleaseJob(ctx, job.Board))
+	require.NoError(t, client1.ReleaseJob(ctx, job.Position))
 
 	job2, ok, err := client2.GetJob(ctx)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, job.Board, job2.Board)
+	require.Equal(t, job.Position, job2.Position)
 }
 
-// testDistinctClientBoards returns n distinct NormalizedBoards with exactly
+// testDistinctClientBoards returns n distinct NormalizedPositions with exactly
 // discs discs, found via breadth-first search from the starting position.
-func testDistinctClientBoards(t *testing.T, discs, n int) []othello.NormalizedBoard {
+func testDistinctClientBoards(t *testing.T, discs, n int) []othello.NormalizedPosition {
 	t.Helper()
 
-	seen := make(map[othello.Board]bool)
-	var result []othello.NormalizedBoard
+	seen := make(map[othello.Position]bool)
+	var result []othello.NormalizedPosition
 
-	frontier := []othello.Board{othello.NewBoardStart()}
+	frontier := []othello.Position{othello.NewStartPosition()}
 	for len(frontier) > 0 && len(result) < n {
-		var next []othello.Board
-		for _, board := range frontier {
-			if board.CountDiscs() == discs {
-				norm := board.Normalize()
-				if key := norm.Board(); !seen[key] {
+		var next []othello.Position
+		for _, position := range frontier {
+			if position.CountDiscs() == discs {
+				norm := position.Normalize()
+				if key := norm.Position(); !seen[key] {
 					seen[key] = true
 					result = append(result, norm)
 				}
 				continue
 			}
 
-			if !board.HasMoves() {
-				passed, err := board.DoMove(othello.PassMove)
+			if !position.HasMoves() {
+				passed, err := position.DoMove(othello.PassMove)
 				require.NoError(t, err)
 				next = append(next, passed)
 				continue
 			}
 
-			next = append(next, board.Children()...)
+			next = append(next, position.Children()...)
 		}
 		frontier = next
 	}

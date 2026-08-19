@@ -45,13 +45,13 @@ func NewProcess(path string, tasks int) *Process {
 	return &Process{path: path, tasks: tasks}
 }
 
-// Evaluate sends board to edax for a search at level; board must have a legal move (edax crashes otherwise).
-func (p *Process) Evaluate(board othello.Board, level int) (Evaluation, error) {
+// Evaluate sends position to edax for a search at level; it must have a legal move (edax crashes otherwise).
+func (p *Process) Evaluate(position othello.Position, level int) (Evaluation, error) {
 	if level <= 0 {
 		return Evaluation{}, fmt.Errorf("invalid level: %d", level)
 	}
-	if !board.HasMoves() {
-		return Evaluation{}, errors.New("cannot evaluate a board with no legal moves")
+	if !position.HasMoves() {
+		return Evaluation{}, errors.New("cannot evaluate a position with no legal moves")
 	}
 
 	stdin, stdout, err := p.ensureStarted(level)
@@ -59,7 +59,7 @@ func (p *Process) Evaluate(board othello.Board, level int) (Evaluation, error) {
 		return Evaluation{}, fmt.Errorf("failed to start edax: %w", err)
 	}
 
-	if _, err := io.WriteString(stdin, problemLine(board)); err != nil {
+	if _, err := io.WriteString(stdin, problemLine(position)); err != nil {
 		return Evaluation{}, fmt.Errorf("failed to write problem to edax: %w", err)
 	}
 

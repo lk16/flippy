@@ -163,11 +163,11 @@ function rotateBits(x, rotation) {
     return x;
 }
 
-// OthelloBoard mirrors internal/othello.Board's playerBits/opponentBits, plus blackTurn, which
+// OthelloPosition mirrors internal/othello.Position's playerBits/opponentBits, plus blackTurn, which
 // says which real color those bitboards belong to. A position's evaluation doesn't depend on
-// blackTurn (see internal/othello.Board), so it is purely local: it never crosses the wire, and
+// blackTurn (see internal/othello.Position), so it is purely local: it never crosses the wire, and
 // toString/fromString leave it out.
-class OthelloBoard {
+class OthelloPosition {
     constructor() {
         this.playerBits = 0n;
         this.opponentBits = 0n;
@@ -183,7 +183,7 @@ class OthelloBoard {
     // constructor's starting-position setup (which callers below would only
     // overwrite anyway).
     static fromBits(playerBits, opponentBits, blackTurn) {
-        const board = Object.create(OthelloBoard.prototype);
+        const board = Object.create(OthelloPosition.prototype);
         board.playerBits = playerBits;
         board.opponentBits = opponentBits;
         board.blackTurn = blackTurn;
@@ -191,7 +191,7 @@ class OthelloBoard {
     }
 
     clone() {
-        return OthelloBoard.fromBits(this.playerBits, this.opponentBits, this.blackTurn);
+        return OthelloPosition.fromBits(this.playerBits, this.opponentBits, this.blackTurn);
     }
 
     getDisc(index) {
@@ -298,7 +298,7 @@ class OthelloBoard {
 
         const opponentBits = this.playerBits | flipped | (1n << BigInt(index));
         const playerBits = this.opponentBits & ~opponentBits;
-        return OthelloBoard.fromBits(playerBits, opponentBits, !this.blackTurn);
+        return OthelloPosition.fromBits(playerBits, opponentBits, !this.blackTurn);
     }
 
     getChildren() {
@@ -306,7 +306,7 @@ class OthelloBoard {
     }
 
     rotate(r) {
-        return OthelloBoard.fromBits(rotateBits(this.playerBits, r), rotateBits(this.opponentBits, r), this.blackTurn);
+        return OthelloPosition.fromBits(rotateBits(this.playerBits, r), rotateBits(this.opponentBits, r), this.blackTurn);
     }
 
     isLessThan(other) {
@@ -324,14 +324,14 @@ class OthelloBoard {
         return min;
     }
 
-    // toString matches Go's Board.String(): 16 hex digits player, 16 hex digits opponent.
+    // toString matches Go's Position.String(): 16 hex digits player, 16 hex digits opponent.
     toString() {
         return this.playerBits.toString(16).padStart(16, '0')
             + this.opponentBits.toString(16).padStart(16, '0');
     }
 
-    // fromString parses the format produced by toString() / Go's Board.String(). blackTurn isn't
-    // part of that format (see OthelloBoard), so callers that display the result pass whose turn it
+    // fromString parses the format produced by toString() / Go's Position.String(). blackTurn isn't
+    // part of that format (see OthelloPosition), so callers that display the result pass whose turn it
     // is. Returns null on any parse error.
     static fromString(s, blackTurn = true) {
         if (typeof s !== 'string' || s.length !== 32) return null;
@@ -344,7 +344,7 @@ class OthelloBoard {
             return null;
         }
 
-        return OthelloBoard.fromBits(playerBits, opponentBits, blackTurn);
+        return OthelloPosition.fromBits(playerBits, opponentBits, blackTurn);
     }
 }
 
@@ -363,7 +363,7 @@ class OthelloGame {
         // ── Game state ────────────────────────────────────────────────────────
         this.evaluations = new Map(); // normalized board string -> evaluation
         this.wsClient = new WebSocketClient((evals) => this.handleEvaluations(evals));
-        this.board = new OthelloBoard();
+        this.board = new OthelloPosition();
         this.boardHistory = [];
         this.evalMode = true;
         this.evalPollTimer = null;
@@ -371,7 +371,7 @@ class OthelloGame {
 
         // ── PGN state ─────────────────────────────────────────────────────────
         this.pgnState = null;           // null | 'input' | 'graph'
-        this.pgnBoards = [];            // OthelloBoard[] parsed from PGN sequence
+        this.pgnBoards = [];            // OthelloPosition[] parsed from PGN sequence
         this.pgnCurrentPly = 0;
         this.pgnChildrenByPly = [];     // pgnChildrenByPly[i] = normalized child strings for ply i
         this.pgnAllChildStrings = [];   // all unique normalized child strings across all plies
@@ -386,7 +386,7 @@ class OthelloGame {
         // user has clicked a move that leaves the PGN line; the top of the stack is the board
         // shown, pgnCurrentPly stays frozen at the divergence point, and the score graph keeps
         // reflecting the PGN line.
-        this.pgnAlternativeMoves = []; // OthelloBoard[]
+        this.pgnAlternativeMoves = []; // OthelloPosition[]
 
         // Board flip (F key), scoped to PGN review: a purely visual 180° rotation. rotate(3)
         // maps every square i to 63-i and leaves normalize() unchanged, so no evaluations or
@@ -586,7 +586,7 @@ class OthelloGame {
 
     newGame() {
         this.setPGNState(null);
-        this.board = new OthelloBoard();
+        this.board = new OthelloPosition();
         this.boardHistory = [];
         this.renderBoard(null, false);
     }
@@ -834,7 +834,7 @@ class OthelloGame {
             const existing = this.evaluations.get(boardStr);
             if (existing && (existing.source !== 'wasm' || (existing.level || 0) >= deepestLevel)) continue;
             const levelIndex = levels.findIndex((l) => l > (existing ? existing.level || 0 : 0));
-            const board = OthelloBoard.fromString(boardStr);
+            const board = OthelloPosition.fromString(boardStr);
             if (!board) continue;
             this._pendingLocalEvals.set(boardStr, tag);
             this._runLocalEvalLevels(boardStr, board, levels, levelIndex, { prefetch, tag });
@@ -1174,7 +1174,7 @@ class OthelloGame {
 
         // A PGN line starts with black to move and every entry -- including the passes the server
         // inserts -- hands the turn over, so ply parity says which color is to move.
-        this.pgnBoards = rawStrings.map((s, ply) => OthelloBoard.fromString(s, ply % 2 === 0)).filter(Boolean);
+        this.pgnBoards = rawStrings.map((s, ply) => OthelloPosition.fromString(s, ply % 2 === 0)).filter(Boolean);
         this.pgnCurrentPly = 0;
         this.pgnAlternativeMoves = [];
         this.flipped = false;
@@ -1708,5 +1708,5 @@ class OthelloGame {
 if (typeof module === 'undefined') {
     new OthelloGame();
 } else {
-    module.exports = { OthelloBoard, OthelloGame, popcount, rotateBits, LOCAL_EVAL_LEVELS, localEvalLevelsFor };
+    module.exports = { OthelloPosition, OthelloGame, popcount, rotateBits, LOCAL_EVAL_LEVELS, localEvalLevelsFor };
 }

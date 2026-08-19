@@ -49,22 +49,22 @@ func TestHandleGetJob_NoJobsAvailable(t *testing.T) {
 
 func TestHandleGetJob_ReturnsJob(t *testing.T) {
 	s := testServer(t)
-	board := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(context.Background(), []othello.NormalizedBoard{board}))
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(context.Background(), []othello.NormalizedPosition{position}))
 
 	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1", nil)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var resp jobResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	require.Equal(t, board.String(), resp.Board)
+	require.Equal(t, position.String(), resp.Position)
 	require.Equal(t, TargetLevel(12), resp.Level)
 }
 
 func TestHandleGetJob_RepeatedRequestsReturnDistinctJobs(t *testing.T) {
 	s := testServer(t)
-	boards := testDistinctBoards(t, 12, 2)
-	require.NoError(t, s.repo.AddBoards(context.Background(), boards))
+	positions := testDistinctPositions(t, 12, 2)
+	require.NoError(t, s.repo.AddPositions(context.Background(), positions))
 
 	w := doRequest(t, s, http.MethodGet, "/api/jobs?worker_id=w1", nil)
 	require.Equal(t, http.StatusOK, w.Code)
@@ -76,31 +76,31 @@ func TestHandleGetJob_RepeatedRequestsReturnDistinctJobs(t *testing.T) {
 	var second jobResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &second))
 
-	require.NotEqual(t, first.Board, second.Board)
+	require.NotEqual(t, first.Position, second.Position)
 }
 
 func TestHandleSubmitJobResult_Success(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
-	board := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 
-	claimed, err := s.tryClaim(ctx, board.String(), "w1")
+	claimed, err := s.tryClaim(ctx, position.String(), "w1")
 	require.NoError(t, err)
 	require.True(t, claimed)
 
 	reqBody := jobResultRequest{
-		WorkerID: "w1", Board: board.String(), Level: TargetLevel(12), Score: 4,
+		WorkerID: "w1", Position: position.String(), Level: TargetLevel(12), Score: 4,
 	}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 	require.Equal(t, http.StatusOK, w.Code)
 
-	eval, err := s.repo.GetBoard(ctx, board.Board())
+	eval, err := s.repo.GetPosition(ctx, position.Position())
 	require.NoError(t, err)
 	require.Equal(t, db.Evaluation{Level: TargetLevel(12), Score: 4}, eval)
 
-	// Claim must be released: another worker can now claim the same board.
-	claimed, err = s.tryClaim(ctx, board.String(), "w2")
+	// Claim must be released: another worker can now claim the same position.
+	claimed, err = s.tryClaim(ctx, position.String(), "w2")
 	require.NoError(t, err)
 	require.True(t, claimed)
 }
@@ -109,31 +109,31 @@ func TestHandleSubmitJobResult_RebuildsMinimaxCache(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	board11 := testBoard(t, book.LeafDiscs-1)
-	children := board11.Board().Children()
+	position11 := testPosition(t, book.LeafDiscs-1)
+	children := position11.Position().Children()
 	require.NotEmpty(t, children)
 
-	normalizedChildren := make([]othello.NormalizedBoard, len(children))
+	normalizedChildren := make([]othello.NormalizedPosition, len(children))
 	for i, child := range children {
 		normalizedChildren[i] = child.Normalize()
 	}
-	require.NoError(t, s.repo.AddBoards(ctx, normalizedChildren))
+	require.NoError(t, s.repo.AddPositions(ctx, normalizedChildren))
 
-	_, ok := s.cache.Get(board11.Board())
+	_, ok := s.cache.Get(position11.Position())
 	require.False(t, ok)
 
 	// Submitting each child's result via the HTTP endpoint (not calling
-	// Rebuild directly) must be what makes board11 resolve, once the last
+	// Rebuild directly) must be what makes position11 resolve, once the last
 	// leaf it depends on is learned.
 	for _, child := range normalizedChildren {
 		reqBody := jobResultRequest{
-			WorkerID: "w1", Board: child.String(), Level: TargetLevel(book.LeafDiscs), Score: 1,
+			WorkerID: "w1", Position: child.String(), Level: TargetLevel(book.LeafDiscs), Score: 1,
 		}
 		w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 		require.Equal(t, http.StatusOK, w.Code)
 	}
 
-	_, ok = s.cache.Get(board11.Board())
+	_, ok = s.cache.Get(position11.Position())
 	require.True(t, ok)
 }
 
@@ -147,21 +147,21 @@ func TestHandleSubmitJobResult_InvalidBody(t *testing.T) {
 
 func TestHandleSubmitJobResult_MissingWorkerID(t *testing.T) {
 	s := testServer(t)
-	board := testBoard(t, 12)
-	reqBody := jobResultRequest{Board: board.String(), Level: 24, Depth: 24, Confidence: 73, Score: 0}
+	position := testPosition(t, 12)
+	reqBody := jobResultRequest{Position: position.String(), Level: 24, Depth: 24, Confidence: 73, Score: 0}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestHandleSubmitJobResult_InvalidBoard(t *testing.T) {
 	s := testServer(t)
-	reqBody := jobResultRequest{WorkerID: "w1", Board: "garbage", Level: 24, Depth: 24, Confidence: 73, Score: 0}
+	reqBody := jobResultRequest{WorkerID: "w1", Position: "garbage", Level: 24, Depth: 24, Confidence: 73, Score: 0}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestHandleSubmitJobResult_OutOfRangeValues(t *testing.T) {
-	board := testBoard(t, 12)
+	position := testPosition(t, 12)
 
 	tests := []struct {
 		name string
@@ -169,16 +169,16 @@ func TestHandleSubmitJobResult_OutOfRangeValues(t *testing.T) {
 	}{
 		{
 			name: "score too high",
-			req:  jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: 24, Confidence: 73, Score: 100},
+			req:  jobResultRequest{WorkerID: "w1", Position: position.String(), Level: 24, Depth: 24, Confidence: 73, Score: 100},
 		},
 		{
 			name: "non-positive level",
-			req:  jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 0, Depth: 24, Confidence: 100, Score: 0},
+			req:  jobResultRequest{WorkerID: "w1", Position: position.String(), Level: 0, Depth: 24, Confidence: 100, Score: 0},
 		},
 		{
 			// Would overflow the smallint column and 500 without an upper bound.
 			name: "level above smallint-safe max",
-			req:  jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 100000, Depth: 24, Confidence: 100, Score: 0},
+			req:  jobResultRequest{WorkerID: "w1", Position: position.String(), Level: 100000, Depth: 24, Confidence: 100, Score: 0},
 		},
 	}
 
@@ -197,23 +197,23 @@ func TestHandleSubmitJobResult_OutOfRangeValues(t *testing.T) {
 func TestHandleSubmitJobResult_AcceptsMismatchedSearchParams(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
-	board := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 
-	// A level-40 search of a 12-disc board is not 30@98%.
-	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: TargetLevel(12), Depth: 30, Confidence: 98, Score: 4}
+	// A level-40 search of a 12-disc position is not 30@98%.
+	reqBody := jobResultRequest{WorkerID: "w1", Position: position.String(), Level: TargetLevel(12), Depth: 30, Confidence: 98, Score: 4}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 	require.Equal(t, http.StatusOK, w.Code)
 
-	stored, err := s.repo.GetBoard(ctx, board.Board())
+	stored, err := s.repo.GetPosition(ctx, position.Position())
 	require.NoError(t, err)
 	require.Equal(t, db.Evaluation{Level: TargetLevel(12), Score: 4}, stored)
 }
 
 func TestHandleSubmitJobResult_BoardNotFound(t *testing.T) {
 	s := testServer(t)
-	board := testBoard(t, 12)
-	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: TargetLevel(12), Score: 0}
+	position := testPosition(t, 12)
+	reqBody := jobResultRequest{WorkerID: "w1", Position: position.String(), Level: TargetLevel(12), Score: 0}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
@@ -224,30 +224,30 @@ func TestHandleSubmitJobResult_BoardNotFound(t *testing.T) {
 func TestHandleSubmitJobResult_NonPriorityBelowTargetNotPersisted(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
-	board := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 
-	claimed, err := s.tryClaim(ctx, board.String(), "w1")
+	claimed, err := s.tryClaim(ctx, position.String(), "w1")
 	require.NoError(t, err)
 	require.True(t, claimed)
 
 	require.Less(t, 24, TargetLevel(12))
-	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Score: 4}
+	reqBody := jobResultRequest{WorkerID: "w1", Position: position.String(), Level: 24, Score: 4}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 	require.Equal(t, http.StatusOK, w.Code)
 
-	eval, err := s.repo.GetBoard(ctx, board.Board())
+	eval, err := s.repo.GetPosition(ctx, position.Position())
 	require.NoError(t, err)
 	require.Equal(t, db.Evaluation{}, eval, "row stays unevaluated")
 
 	// The result is still served back from the ephemeral analysis cache.
-	cached, ok, err := s.getAnalysisResult(ctx, board.String())
+	cached, ok, err := s.getAnalysisResult(ctx, position.String())
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, 4, cached.Score)
 
 	// The claim was released.
-	claimed, err = s.tryClaim(ctx, board.String(), "w2")
+	claimed, err = s.tryClaim(ctx, position.String(), "w2")
 	require.NoError(t, err)
 	require.True(t, claimed)
 }
@@ -255,27 +255,27 @@ func TestHandleSubmitJobResult_NonPriorityBelowTargetNotPersisted(t *testing.T) 
 func TestHandleReleaseJob_AllowsAnotherWorkerToClaim(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
-	board := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 
-	claimed, err := s.tryClaim(ctx, board.String(), "w1")
+	claimed, err := s.tryClaim(ctx, position.String(), "w1")
 	require.NoError(t, err)
 	require.True(t, claimed)
 
-	reqBody := releaseJobRequest{WorkerID: "w1", Board: board.String()}
+	reqBody := releaseJobRequest{WorkerID: "w1", Position: position.String()}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/release", reqBody)
 	require.Equal(t, http.StatusOK, w.Code)
 
-	claimed, err = s.tryClaim(ctx, board.String(), "w2")
+	claimed, err = s.tryClaim(ctx, position.String(), "w2")
 	require.NoError(t, err)
 	require.True(t, claimed)
 }
 
 func TestHandleReleaseJob_NoActiveClaimIsNoop(t *testing.T) {
 	s := testServer(t)
-	board := testBoard(t, 12)
+	position := testPosition(t, 12)
 
-	reqBody := releaseJobRequest{WorkerID: "w1", Board: board.String()}
+	reqBody := releaseJobRequest{WorkerID: "w1", Position: position.String()}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/release", reqBody)
 	require.Equal(t, http.StatusOK, w.Code)
 }
@@ -283,22 +283,22 @@ func TestHandleReleaseJob_NoActiveClaimIsNoop(t *testing.T) {
 func TestHandleReleaseJob_DoesNotRevokeAnotherWorkersClaim(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
-	board := testBoard(t, 12)
+	position := testPosition(t, 12)
 
 	// Simulates w1's claim TTL having expired and w2 winning the re-claim before w1's late release.
-	claimed, err := s.tryClaim(ctx, board.String(), "w1")
+	claimed, err := s.tryClaim(ctx, position.String(), "w1")
 	require.NoError(t, err)
 	require.True(t, claimed)
-	require.NoError(t, s.releaseClaim(ctx, board.String(), "w1"))
-	claimed, err = s.tryClaim(ctx, board.String(), "w2")
+	require.NoError(t, s.releaseClaim(ctx, position.String(), "w1"))
+	claimed, err = s.tryClaim(ctx, position.String(), "w2")
 	require.NoError(t, err)
 	require.True(t, claimed)
 
-	reqBody := releaseJobRequest{WorkerID: "w1", Board: board.String()}
+	reqBody := releaseJobRequest{WorkerID: "w1", Position: position.String()}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/release", reqBody)
 	require.Equal(t, http.StatusOK, w.Code)
 
-	claimed, err = s.tryClaim(ctx, board.String(), "w3")
+	claimed, err = s.tryClaim(ctx, position.String(), "w3")
 	require.NoError(t, err)
 	require.False(t, claimed, "w2's claim must survive w1's late release")
 }
@@ -313,127 +313,127 @@ func TestHandleReleaseJob_InvalidBody(t *testing.T) {
 
 func TestHandleReleaseJob_MissingWorkerID(t *testing.T) {
 	s := testServer(t)
-	board := testBoard(t, 12)
-	reqBody := releaseJobRequest{Board: board.String()}
+	position := testPosition(t, 12)
+	reqBody := releaseJobRequest{Position: position.String()}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/release", reqBody)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestHandleReleaseJob_InvalidBoard(t *testing.T) {
 	s := testServer(t)
-	reqBody := releaseJobRequest{WorkerID: "w1", Board: "garbage"}
+	reqBody := releaseJobRequest{WorkerID: "w1", Position: "garbage"}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/release", reqBody)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestHandleGetBoard_MissingParam(t *testing.T) {
+func TestHandleGetPosition_MissingParam(t *testing.T) {
 	s := testServer(t)
 	w := doRequest(t, s, http.MethodGet, "/api/boards", nil)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestHandleGetBoard_InvalidBoard(t *testing.T) {
+func TestHandleGetPosition_InvalidBoard(t *testing.T) {
 	s := testServer(t)
 	w := doRequest(t, s, http.MethodGet, "/api/boards?board=garbage", nil)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestHandleGetBoard_NotFound(t *testing.T) {
+func TestHandleGetPosition_NotFound(t *testing.T) {
 	s := testServer(t)
-	board := testBoard(t, 12)
-	target := "/api/boards?board=" + url.QueryEscape(board.String())
+	position := testPosition(t, 12)
+	target := "/api/boards?board=" + url.QueryEscape(position.String())
 	w := doRequest(t, s, http.MethodGet, target, nil)
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
-// A board with a row but no evaluation yet must read as "not found", not as a real score of 0.
-func TestHandleGetBoard_NotLearnedYet(t *testing.T) {
+// A position with a row but no evaluation yet must read as "not found", not as a real score of 0.
+func TestHandleGetPosition_NotLearnedYet(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
-	board := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 
-	target := "/api/boards?board=" + url.QueryEscape(board.Board().String())
+	target := "/api/boards?board=" + url.QueryEscape(position.Position().String())
 	w := doRequest(t, s, http.MethodGet, target, nil)
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
-func TestHandleGetBoard_Success(t *testing.T) {
+func TestHandleGetPosition_Success(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
-	board := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Score: 2}))
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, position, db.Evaluation{Level: 20, Score: 2}))
 
-	target := "/api/boards?board=" + url.QueryEscape(board.Board().String())
+	target := "/api/boards?board=" + url.QueryEscape(position.Position().String())
 	w := doRequest(t, s, http.MethodGet, target, nil)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var resp evaluationResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	// Depth and confidence are not stored: a level-20 search of a 12-disc board is 20@73%.
+	// Depth and confidence are not stored: a level-20 search of a 12-disc position is 20@73%.
 	require.Equal(t, evaluationResponse{Level: 20, Depth: 20, Confidence: 73, Score: 2, Source: evaluationSourceEdax}, resp)
 }
 
-func TestHandleGetBoard_FallsBackToMinimaxCache(t *testing.T) {
+func TestHandleGetPosition_FallsBackToMinimaxCache(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	board11 := testBoard(t, book.LeafDiscs-1)
-	children := board11.Board().Children()
+	position11 := testPosition(t, book.LeafDiscs-1)
+	children := position11.Position().Children()
 	require.NotEmpty(t, children)
 
-	normalizedChildren := make([]othello.NormalizedBoard, len(children))
+	normalizedChildren := make([]othello.NormalizedPosition, len(children))
 	for i, child := range children {
 		normalizedChildren[i] = child.Normalize()
 	}
-	require.NoError(t, s.repo.AddBoards(ctx, normalizedChildren))
+	require.NoError(t, s.repo.AddPositions(ctx, normalizedChildren))
 	for _, child := range normalizedChildren {
 		require.NoError(t, s.repo.SaveEvaluation(ctx, child, db.Evaluation{Level: 20, Score: 1}))
 	}
 	require.NoError(t, s.cache.Rebuild(ctx))
 
-	target := "/api/boards?board=" + url.QueryEscape(board11.Board().String())
+	target := "/api/boards?board=" + url.QueryEscape(position11.Position().String())
 	w := doRequest(t, s, http.MethodGet, target, nil)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var resp evaluationResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Equal(t, evaluationSourceMinimax, resp.Source)
-	score, ok := s.cache.Get(board11.Board())
+	score, ok := s.cache.Get(position11.Position())
 	require.True(t, ok)
 	require.Equal(t, score, resp.Score)
 }
 
-// A forced-pass board is never stored directly; its evaluation is the post-pass board's stored
+// A forced-pass position is never stored directly; its evaluation is the post-pass position's stored
 // evaluation, negated.
-func TestHandleGetBoard_ResolvesForcedPass(t *testing.T) {
+func TestHandleGetPosition_ResolvesForcedPass(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	board := testPassRequiredBoard(t)
-	passed, err := board.DoMove(othello.PassMove)
+	position := testPassRequiredPosition(t)
+	passed, err := position.DoMove(othello.PassMove)
 	require.NoError(t, err)
 	normalizedPassed := passed.Normalize()
 
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{normalizedPassed}))
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{normalizedPassed}))
 	require.NoError(t, s.repo.SaveEvaluation(ctx, normalizedPassed, db.Evaluation{Level: 20, Score: 5}))
 
-	target := "/api/boards?board=" + url.QueryEscape(board.String())
+	target := "/api/boards?board=" + url.QueryEscape(position.String())
 	w := doRequest(t, s, http.MethodGet, target, nil)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var resp evaluationResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	// The search params come from the board that was actually searched, i.e. the one after the pass.
+	// The search params come from the position that was actually searched, i.e. the one after the pass.
 	depth, confidence := edax.SearchParams(normalizedPassed.CountDiscs(), 20)
 	require.Equal(t,
 		evaluationResponse{Level: 20, Depth: depth, Confidence: confidence, Score: -5, Source: evaluationSourceEdax},
 		resp)
 }
 
-// A game-over board returns its actual final score instead of "not found".
-func TestHandleGetBoard_GameOver(t *testing.T) {
+// A game-over position returns its actual final score instead of "not found".
+func TestHandleGetPosition_GameOver(t *testing.T) {
 	s := testServer(t)
 
 	var black, white uint64
@@ -443,20 +443,20 @@ func TestHandleGetBoard_GameOver(t *testing.T) {
 	for i := uint(40); i < 64; i++ {
 		white |= 1 << i
 	}
-	board, err := othello.NewBoard(black, white)
+	position, err := othello.NewPosition(black, white)
 	require.NoError(t, err)
-	require.False(t, board.HasMoves())
-	passed, err := board.DoMove(othello.PassMove)
+	require.False(t, position.HasMoves())
+	passed, err := position.DoMove(othello.PassMove)
 	require.NoError(t, err)
 	require.False(t, passed.HasMoves())
 
-	target := "/api/boards?board=" + url.QueryEscape(board.String())
+	target := "/api/boards?board=" + url.QueryEscape(position.String())
 	w := doRequest(t, s, http.MethodGet, target, nil)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var resp evaluationResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	require.Equal(t, evaluationResponse{Score: board.FinalScore(), Source: evaluationSourceFinal}, resp)
+	require.Equal(t, evaluationResponse{Score: position.FinalScore(), Source: evaluationSourceFinal}, resp)
 }
 
 func TestHandleHeartbeat_MissingWorkerID(t *testing.T) {
@@ -483,8 +483,8 @@ func TestHandleStats_Empty(t *testing.T) {
 func TestHandleStats_ReturnsCounts(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
-	board := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 
 	w := doRequest(t, s, http.MethodGet, "/api/stats", nil)
 	require.Equal(t, http.StatusOK, w.Code)
@@ -495,17 +495,17 @@ func TestHandleStats_ReturnsCounts(t *testing.T) {
 }
 
 // TestHandleStats_ServesFromBookStatsHash proves the endpoint reads the rebuilt hash rather than the
-// DB: a board added after the rebuild is not reported.
+// DB: a position added after the rebuild is not reported.
 func TestHandleStats_ServesFromBookStatsHash(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	board12 := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board12}))
+	position12 := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position12}))
 	require.NoError(t, s.rebuildBookStats(ctx))
 
-	board13 := testBoard(t, 13)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board13}))
+	position13 := testPosition(t, 13)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position13}))
 
 	w := doRequest(t, s, http.MethodGet, "/api/stats", nil)
 	require.Equal(t, http.StatusOK, w.Code)
@@ -515,14 +515,14 @@ func TestHandleStats_ServesFromBookStatsHash(t *testing.T) {
 	require.Equal(t, []statEntry{{DiscCount: 12, Count: 1}}, entries)
 }
 
-// TestHandleStats_ReportsDerivedSearchParams checks that a learned board is reported by the search
+// TestHandleStats_ReportsDerivedSearchParams checks that a learned position is reported by the search
 // it got rather than by the level that was asked for.
 func TestHandleStats_ReportsDerivedSearchParams(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
-	board := testBoard(t, 12)
-	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, board, db.Evaluation{Level: 20, Score: 2}))
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, position, db.Evaluation{Level: 20, Score: 2}))
 
 	w := doRequest(t, s, http.MethodGet, "/api/stats", nil)
 	require.Equal(t, http.StatusOK, w.Code)
@@ -534,7 +534,7 @@ func TestHandleStats_ReportsDerivedSearchParams(t *testing.T) {
 
 // TestStatEntries_MergesLevelsThatMeanTheSameSearch covers the merge and the ordering: at 44 discs
 // every level from 10 up solves the game outright (20@100%), so those levels are one entry, sorted
-// after the shallower searches and after the unlearned boards.
+// after the shallower searches and after the unlearned positions.
 func TestStatEntries_MergesLevelsThatMeanTheSameSearch(t *testing.T) {
 	entries := statEntries([]db.LevelStat{
 		{DiscCount: 44, Level: 10, Count: 3},

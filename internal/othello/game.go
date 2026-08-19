@@ -2,22 +2,22 @@ package othello
 
 import "fmt"
 
-// Game is a sequence of boards from a start position; boards always has one more entry than moves.
+// Game is a sequence of positions from a start position; positions always has one more entry than moves.
 type Game struct {
-	moves    []int
-	boards   []Board
-	filename string
-	metadata *GameMetadata
+	moves     []int
+	positions []Position
+	filename  string
+	metadata  *GameMetadata
 }
 
 // NewGame returns a new game starting from the standard Othello position.
 func NewGame() *Game {
-	return NewGameWithStart(NewBoardStart())
+	return NewGameWithStart(NewStartPosition())
 }
 
 // NewGameWithStart returns a new game starting from start.
-func NewGameWithStart(start Board) *Game {
-	return &Game{boards: []Board{start}}
+func NewGameWithStart(start Position) *Game {
+	return &Game{positions: []Position{start}}
 }
 
 // NewGameFromMoves returns a new game starting from the standard position with moves played in order.
@@ -38,19 +38,19 @@ func (g *Game) Moves() []int {
 	return append([]int(nil), g.moves...)
 }
 
-// Board returns the board after all moves played so far.
-func (g *Game) Board() Board {
-	return g.boards[len(g.boards)-1]
+// Position returns the position after all moves played so far.
+func (g *Game) Position() Position {
+	return g.positions[len(g.positions)-1]
 }
 
-// BoardAt returns the board after the first moveIndex moves.
-func (g *Game) BoardAt(moveIndex int) Board {
-	return g.boards[moveIndex]
+// PositionAt returns the position after the first moveIndex moves.
+func (g *Game) PositionAt(moveIndex int) Position {
+	return g.positions[moveIndex]
 }
 
-// Boards returns the full sequence of boards from start to the current board, inclusive.
-func (g *Game) Boards() []Board {
-	return append([]Board(nil), g.boards...)
+// Positions returns the full sequence of positions from start to the current one, inclusive.
+func (g *Game) Positions() []Position {
+	return append([]Position(nil), g.positions...)
 }
 
 // Filename returns the path of the file the game was loaded from, or "" if none.
@@ -68,19 +68,19 @@ func (g *Game) Metadata() *GameMetadata {
 	return &metadata
 }
 
-// PushMove plays move, automatically appending a pass if the resulting board has no legal move.
+// PushMove plays move, automatically appending a pass if the resulting position has no legal move.
 func (g *Game) PushMove(move int) error {
 	if n := len(g.moves); n > 0 && g.moves[n-1] == PassMove && move == PassMove {
 		return nil
 	}
 
-	next, err := g.Board().DoMove(move)
+	next, err := g.Position().DoMove(move)
 	if err != nil {
 		return fmt.Errorf("invalid move: %d", move)
 	}
 
 	g.moves = append(g.moves, move)
-	g.boards = append(g.boards, next)
+	g.positions = append(g.positions, next)
 
 	if move == PassMove || next.HasMoves() {
 		return nil
@@ -90,7 +90,7 @@ func (g *Game) PushMove(move int) error {
 	passed, _ := next.DoMove(PassMove)
 	if passed.HasMoves() {
 		g.moves = append(g.moves, PassMove)
-		g.boards = append(g.boards, passed)
+		g.positions = append(g.positions, passed)
 	}
 
 	return nil
@@ -108,5 +108,5 @@ func (g *Game) PopMove() {
 	}
 
 	g.moves = g.moves[:len(g.moves)-n]
-	g.boards = g.boards[:len(g.boards)-n]
+	g.positions = g.positions[:len(g.positions)-n]
 }

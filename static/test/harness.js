@@ -3,7 +3,7 @@
 // CommonJS `module` (i.e. in the browser); under Node it instead exports its classes. We install
 // a handful of no-op DOM stubs as globals so the class's render methods can run without a real
 // document/canvas — the tests never assert on rendered pixels, only on the pure data
-// (pgnGetGraphData, pgnIsForcedPass, pgnStepPly navigation, OthelloBoard).
+// (pgnGetGraphData, pgnIsForcedPass, pgnStepPly navigation, OthelloPosition).
 
 // ── Minimal DOM stubs ────────────────────────────────────────────────────────
 function stubElement() {
@@ -157,7 +157,7 @@ function installCellDOM() {
 }
 
 // ── Load the real classes ────────────────────────────────────────────────────
-const { OthelloBoard, OthelloGame, LOCAL_EVAL_LEVELS, localEvalLevelsFor } = require('../board.js');
+const { OthelloPosition, OthelloGame, LOCAL_EVAL_LEVELS, localEvalLevelsFor } = require('../board.js');
 
 // Mirrors GET /api/level-config (internal/api/handlers.go handleLevelConfig).
 const DEFAULT_LEVEL_CONFIG = {
@@ -183,7 +183,7 @@ function buildGame(boardStrings, { complete = true } = {}) {
   const game = Object.create(OthelloGame.prototype);
   game.pgnState = 'graph';
   // Mirror analyzePGN(): a PGN line starts with black to move and every ply hands the turn over.
-  game.pgnBoards = boardStrings.map((s, ply) => OthelloBoard.fromString(s, ply % 2 === 0));
+  game.pgnBoards = boardStrings.map((s, ply) => OthelloPosition.fromString(s, ply % 2 === 0));
   game.evaluations = new Map();
   game.pendingLevelRequests = new Map();
   game.pgnCurrentPly = 0;
@@ -239,7 +239,7 @@ function graphSegments(data) {
 
 // buildNormalGame constructs an OthelloGame in normal (non-PGN) play mode, bypassing the
 // DOM-touching constructor the same way buildGame does. board defaults to the starting position.
-function buildNormalGame(board = new OthelloBoard()) {
+function buildNormalGame(board = new OthelloPosition()) {
   const game = Object.create(OthelloGame.prototype);
   game.pgnState = null;
   game.evaluations = new Map();
@@ -290,7 +290,7 @@ function flush() {
 }
 
 module.exports = {
-  OthelloBoard,
+  OthelloPosition,
   OthelloGame,
   mockWorkerPool,
   flush,

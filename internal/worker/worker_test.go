@@ -20,9 +20,9 @@ type fakeAPIClient struct {
 	mu sync.Mutex
 
 	getJob          func(ctx context.Context) (Job, bool, error)
-	submitJobResult func(ctx context.Context, board string, level int, eval edax.Evaluation) error
-	releaseJob      func(ctx context.Context, board string) error
-	heartbeat       func(ctx context.Context, board string) error
+	submitJobResult func(ctx context.Context, position string, level int, eval edax.Evaluation) error
+	releaseJob      func(ctx context.Context, position string) error
+	heartbeat       func(ctx context.Context, position string) error
 
 	getJobCalls     int
 	submitCalls     []jobResultRequest
@@ -38,28 +38,28 @@ func (f *fakeAPIClient) GetJob(ctx context.Context) (Job, bool, error) {
 	return f.getJob(ctx)
 }
 
-func (f *fakeAPIClient) SubmitJobResult(ctx context.Context, board string, level int, eval edax.Evaluation) error {
+func (f *fakeAPIClient) SubmitJobResult(ctx context.Context, position string, level int, eval edax.Evaluation) error {
 	f.mu.Lock()
 	f.submitCalls = append(f.submitCalls, jobResultRequest{
-		Board: board, Level: level, Depth: eval.Depth, Confidence: eval.Confidence, Score: eval.Score,
+		Position: position, Level: level, Depth: eval.Depth, Confidence: eval.Confidence, Score: eval.Score,
 	})
 	f.mu.Unlock()
-	return f.submitJobResult(ctx, board, level, eval)
+	return f.submitJobResult(ctx, position, level, eval)
 }
 
-func (f *fakeAPIClient) ReleaseJob(ctx context.Context, board string) error {
+func (f *fakeAPIClient) ReleaseJob(ctx context.Context, position string) error {
 	f.mu.Lock()
-	f.releaseCalls = append(f.releaseCalls, board)
+	f.releaseCalls = append(f.releaseCalls, position)
 	f.mu.Unlock()
-	return f.releaseJob(ctx, board)
+	return f.releaseJob(ctx, position)
 }
 
-func (f *fakeAPIClient) Heartbeat(ctx context.Context, board string) error {
+func (f *fakeAPIClient) Heartbeat(ctx context.Context, position string) error {
 	f.mu.Lock()
 	f.heartbeatCalls++
-	f.heartbeatBoards = append(f.heartbeatBoards, board)
+	f.heartbeatBoards = append(f.heartbeatBoards, position)
 	f.mu.Unlock()
-	return f.heartbeat(ctx, board)
+	return f.heartbeat(ctx, position)
 }
 
 func (f *fakeAPIClient) submitCallCount() int {
@@ -88,11 +88,11 @@ func (f *fakeAPIClient) releasedBoards() []string {
 
 // fakeEvaluator is a test double for evaluator.
 type fakeEvaluator struct {
-	evaluate func(board othello.Board, level int) (edax.Evaluation, error)
+	evaluate func(position othello.Position, level int) (edax.Evaluation, error)
 }
 
-func (f *fakeEvaluator) Evaluate(board othello.Board, level int) (edax.Evaluation, error) {
-	return f.evaluate(board, level)
+func (f *fakeEvaluator) Evaluate(position othello.Position, level int) (edax.Evaluation, error) {
+	return f.evaluate(position, level)
 }
 
 // testWorker returns a Worker with fast intervals for deterministic tests.
@@ -137,39 +137,39 @@ func TestSleep_WaitsFullDuration(t *testing.T) {
 // --- processJob ---
 
 func TestWorker_ProcessJob_EvaluatesAndSubmitsResult(t *testing.T) {
-	board := othello.NewBoardStart()
+	position := othello.NewStartPosition()
 
 	api := &fakeAPIClient{
 		submitJobResult: func(context.Context, string, int, edax.Evaluation) error { return nil },
 	}
 	eval := &fakeEvaluator{
-		evaluate: func(b othello.Board, level int) (edax.Evaluation, error) {
-			require.Equal(t, board, b)
+		evaluate: func(b othello.Position, level int) (edax.Evaluation, error) {
+			require.Equal(t, position, b)
 			require.Equal(t, 24, level)
 			return edax.Evaluation{Depth: 24, Confidence: 100, Score: 6}, nil
 		},
 	}
 	w := testWorker(api, eval)
 
-	stillClaimed := w.processJob(context.Background(), Job{Board: board.String(), Level: 24})
+	stillClaimed := w.processJob(context.Background(), Job{Position: position.String(), Level: 24})
 
 	require.False(t, stillClaimed)
 	require.Equal(t, []jobResultRequest{
-		{Board: board.String(), Level: 24, Depth: 24, Confidence: 100, Score: 6},
+		{Position: position.String(), Level: 24, Depth: 24, Confidence: 100, Score: 6},
 	}, api.submitCalls)
 }
 
 func TestWorker_ProcessJob_UnparseableBoardIsSkipped(t *testing.T) {
 	api := &fakeAPIClient{}
 	eval := &fakeEvaluator{
-		evaluate: func(othello.Board, int) (edax.Evaluation, error) {
-			t.Fatal("Evaluate must not be called for an unparseable board")
+		evaluate: func(othello.Position, int) (edax.Evaluation, error) {
+			t.Fatal("Evaluate must not be called for an unparseable position")
 			return edax.Evaluation{}, nil
 		},
 	}
 	w := testWorker(api, eval)
 
-	stillClaimed := w.processJob(context.Background(), Job{Board: "not-a-board", Level: 24})
+	stillClaimed := w.processJob(context.Background(), Job{Position: "not-a-position", Level: 24})
 
 	require.False(t, stillClaimed)
 	require.Equal(t, 0, api.submitCallCount())
@@ -178,11 +178,11 @@ func TestWorker_ProcessJob_UnparseableBoardIsSkipped(t *testing.T) {
 func TestWorker_ProcessJob_EvaluateError(t *testing.T) {
 	api := &fakeAPIClient{}
 	eval := &fakeEvaluator{
-		evaluate: func(othello.Board, int) (edax.Evaluation, error) { return edax.Evaluation{}, errors.New("boom") },
+		evaluate: func(othello.Position, int) (edax.Evaluation, error) { return edax.Evaluation{}, errors.New("boom") },
 	}
 	w := testWorker(api, eval)
 
-	stillClaimed := w.processJob(context.Background(), Job{Board: othello.NewBoardStart().String(), Level: 24})
+	stillClaimed := w.processJob(context.Background(), Job{Position: othello.NewStartPosition().String(), Level: 24})
 
 	require.False(t, stillClaimed)
 	require.Equal(t, 0, api.submitCallCount())
@@ -192,18 +192,18 @@ func TestWorker_ProcessJob_EvaluateErrorDuringShutdownKeepsClaim(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	board := othello.NewBoardStart().String()
+	position := othello.NewStartPosition().String()
 	api := &fakeAPIClient{}
 	eval := &fakeEvaluator{
 		// Simulates the edax process having been killed by a concurrent
 		// shutdown while Evaluate was blocked on it.
-		evaluate: func(othello.Board, int) (edax.Evaluation, error) {
+		evaluate: func(othello.Position, int) (edax.Evaluation, error) {
 			return edax.Evaluation{}, errors.New("process killed")
 		},
 	}
 	w := testWorker(api, eval)
 
-	stillClaimed := w.processJob(ctx, Job{Board: board, Level: 24})
+	stillClaimed := w.processJob(ctx, Job{Position: position, Level: 24})
 
 	// The claim is still held; Run releases it after the loops stop.
 	require.True(t, stillClaimed)
@@ -215,11 +215,11 @@ func TestWorker_ProcessJob_SubmitError(t *testing.T) {
 		submitJobResult: func(context.Context, string, int, edax.Evaluation) error { return errors.New("boom") },
 	}
 	eval := &fakeEvaluator{
-		evaluate: func(othello.Board, int) (edax.Evaluation, error) { return edax.Evaluation{}, nil },
+		evaluate: func(othello.Position, int) (edax.Evaluation, error) { return edax.Evaluation{}, nil },
 	}
 	w := testWorker(api, eval)
 
-	stillClaimed := w.processJob(context.Background(), Job{Board: othello.NewBoardStart().String(), Level: 24})
+	stillClaimed := w.processJob(context.Background(), Job{Position: othello.NewStartPosition().String(), Level: 24})
 
 	require.False(t, stillClaimed)
 	// SubmitJobResult was attempted (and recorded) even though it failed.
@@ -229,7 +229,7 @@ func TestWorker_ProcessJob_SubmitError(t *testing.T) {
 // --- runJobs ---
 
 func TestWorker_RunJobs_ClaimsEvaluatesAndSubmits(t *testing.T) {
-	board := othello.NewBoardStart()
+	position := othello.NewStartPosition()
 	var served bool
 
 	api := &fakeAPIClient{
@@ -238,12 +238,12 @@ func TestWorker_RunJobs_ClaimsEvaluatesAndSubmits(t *testing.T) {
 				return Job{}, false, nil
 			}
 			served = true
-			return Job{Board: board.String(), Level: 24}, true, nil
+			return Job{Position: position.String(), Level: 24}, true, nil
 		},
 		submitJobResult: func(context.Context, string, int, edax.Evaluation) error { return nil },
 	}
 	eval := &fakeEvaluator{
-		evaluate: func(othello.Board, int) (edax.Evaluation, error) {
+		evaluate: func(othello.Position, int) (edax.Evaluation, error) {
 			return edax.Evaluation{Depth: 24, Confidence: 100, Score: 6}, nil
 		},
 	}
@@ -347,12 +347,12 @@ func TestWorker_Run_SendsHeartbeats(t *testing.T) {
 }
 
 func TestWorker_Run_HeartbeatReportsClaimedBoard(t *testing.T) {
-	board := othello.NewBoardStart().String()
+	position := othello.NewStartPosition().String()
 
-	// evaluate blocks until the heartbeat has reported the claimed board.
+	// evaluate blocks until the heartbeat has reported the claimed position.
 	reported := make(chan struct{})
 	eval := &fakeEvaluator{
-		evaluate: func(othello.Board, int) (edax.Evaluation, error) {
+		evaluate: func(othello.Position, int) (edax.Evaluation, error) {
 			<-reported
 			return edax.Evaluation{Depth: 24, Confidence: 100, Score: 6}, nil
 		},
@@ -361,11 +361,11 @@ func TestWorker_Run_HeartbeatReportsClaimedBoard(t *testing.T) {
 	var once sync.Once
 	api := &fakeAPIClient{
 		getJob: func(context.Context) (Job, bool, error) {
-			return Job{Board: board, Level: 16}, true, nil
+			return Job{Position: position, Level: 16}, true, nil
 		},
 		submitJobResult: func(context.Context, string, int, edax.Evaluation) error { return nil },
 		heartbeat: func(_ context.Context, b string) error {
-			if b == board {
+			if b == position {
 				once.Do(func() { close(reported) })
 			}
 			return nil
@@ -380,19 +380,19 @@ func TestWorker_Run_HeartbeatReportsClaimedBoard(t *testing.T) {
 	select {
 	case <-reported:
 	case <-time.After(time.Second):
-		t.Fatal("heartbeat never reported the claimed board")
+		t.Fatal("heartbeat never reported the claimed position")
 	}
 }
 
 func TestWorker_Run_ReleasesClaimOnShutdownMidEvaluation(t *testing.T) {
-	board := othello.NewBoardStart().String()
+	position := othello.NewStartPosition().String()
 
 	// evaluate blocks until the test cancels ctx, simulating a worker mid-search.
 	evaluating := make(chan struct{})
 	unblock := make(chan struct{})
 	var once sync.Once
 	eval := &fakeEvaluator{
-		evaluate: func(othello.Board, int) (edax.Evaluation, error) {
+		evaluate: func(othello.Position, int) (edax.Evaluation, error) {
 			once.Do(func() { close(evaluating) })
 			<-unblock
 			return edax.Evaluation{}, errors.New("process killed")
@@ -401,7 +401,7 @@ func TestWorker_Run_ReleasesClaimOnShutdownMidEvaluation(t *testing.T) {
 
 	api := &fakeAPIClient{
 		getJob: func(context.Context) (Job, bool, error) {
-			return Job{Board: board, Level: 16}, true, nil
+			return Job{Position: position, Level: 16}, true, nil
 		},
 		heartbeat:  func(context.Context, string) error { return nil },
 		releaseJob: func(context.Context, string) error { return nil },
@@ -425,6 +425,6 @@ func TestWorker_Run_ReleasesClaimOnShutdownMidEvaluation(t *testing.T) {
 		t.Fatal("Run did not stop after context cancellation")
 	}
 
-	require.Equal(t, []string{board}, api.releasedBoards())
-	require.Empty(t, w.claimedBoard())
+	require.Equal(t, []string{position}, api.releasedBoards())
+	require.Empty(t, w.claimedPosition())
 }
