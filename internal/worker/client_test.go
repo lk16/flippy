@@ -120,24 +120,24 @@ func TestClient_SubmitJobResult_Success(t *testing.T) {
 	board := testBoard(t, 12)
 	require.NoError(t, repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
 
-	_, ok, err := client.GetJob(ctx)
+	job, ok, err := client.GetJob(ctx)
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	eval := edax.Evaluation{Depth: 24, Confidence: 73, Score: 6}
-	require.NoError(t, client.SubmitJobResult(ctx, board.String(), 24, eval))
+	eval := edax.Evaluation{Score: 6}
+	require.NoError(t, client.SubmitJobResult(ctx, board.String(), job.Level, eval))
 
 	stored, err := repo.GetBoard(ctx, board.Board())
 	require.NoError(t, err)
-	require.Equal(t, db.Evaluation{Level: 24, Score: 6}, stored)
+	require.Equal(t, db.Evaluation{Level: job.Level, Score: 6}, stored)
 }
 
 func TestClient_SubmitJobResult_BoardNotFound(t *testing.T) {
 	client, _ := testClient(t, "w1")
 
 	board := testBoard(t, 12)
-	eval := edax.Evaluation{Depth: 24, Confidence: 73, Score: 6}
-	err := client.SubmitJobResult(context.Background(), board.String(), 24, eval)
+	eval := edax.Evaluation{Score: 6}
+	err := client.SubmitJobResult(context.Background(), board.String(), api.TargetLevel(12), eval)
 	require.Error(t, err)
 }
 

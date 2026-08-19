@@ -94,8 +94,9 @@ func checkReportedSearchParams(req jobResultRequest, discCount int) {
 // ListLearnable then has to redo anyway. A search that already ran the game out counts as book
 // quality whatever its level: no deeper search can change its score (edax.IsFinal).
 //
-// Only the priority path needs the check: ListLearnable jobs are always handed out at
-// TargetLevel(discCount) (see claimJob), so they clear the floor by construction.
+// Enforced on every submission: ListLearnable jobs are handed out at TargetLevel(discCount) (see
+// claimJob) and clear the floor by construction, but nothing stops a client from POSTing shallower
+// results directly.
 func isBookQuality(discCount, level int) bool {
 	return level >= TargetLevel(discCount) || edax.IsFinal(discCount, level)
 }
@@ -150,8 +151,13 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 
 	savedToDB := false
 
-	if isPriority {
-		if discCount <= book.MaxSavableDiscs && isBookQuality(discCount, req.Level) {
+	switch {
+	case !isBookQuality(discCount, req.Level):
+		// Below book quality: accepted but never persisted, priority or not. The ephemeral cache is
+		// the only record; the frontend keeps asking one level deeper until a result that does
+		// qualify comes back.
+	case isPriority:
+		if discCount <= book.MaxSavableDiscs {
 			if saveErr := s.repo.SaveEvaluation(r.Context(), normalized, eval); saveErr != nil {
 				if errors.Is(saveErr, db.ErrBoardNotFound) {
 					// Board has no row yet; add one and retry.
@@ -170,10 +176,8 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 				savedToDB = true
 			}
 		}
-		// Ineligible (too many discs, or shallower than the book's target level): the ephemeral
-		// cache is the only record, and the frontend keeps asking one level deeper until a result
-		// that does qualify comes back.
-	} else {
+		// Too many discs: the ephemeral cache is the only record.
+	default:
 		// Non-priority path: SaveEvaluation must succeed; ErrBoardNotFound is a real bug here since every
 		// ListLearnable-originated board is guaranteed to already have a row.
 		if err := s.repo.SaveEvaluation(r.Context(), normalized, eval); err != nil {

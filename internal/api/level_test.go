@@ -38,7 +38,7 @@ func TestTargetLevelTiers_MatchTargetLevel(t *testing.T) {
 	}
 }
 
-// TestIsBookQuality covers the level floor handleSubmitJobResult applies to priority results:
+// TestIsBookQuality covers the level floor handleSubmitJobResult applies to every submission:
 // only a search at least as deep as the board's target level -- or one that already ran the game
 // out -- may reach the DB.
 func TestIsBookQuality(t *testing.T) {

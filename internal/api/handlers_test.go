@@ -90,14 +90,14 @@ func TestHandleSubmitJobResult_Success(t *testing.T) {
 	require.True(t, claimed)
 
 	reqBody := jobResultRequest{
-		WorkerID: "w1", Board: board.String(), Level: 24, Depth: 24, Confidence: 73, Score: 4,
+		WorkerID: "w1", Board: board.String(), Level: TargetLevel(12), Score: 4,
 	}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	eval, err := s.repo.GetBoard(ctx, board.Board())
 	require.NoError(t, err)
-	require.Equal(t, db.Evaluation{Level: 24, Score: 4}, eval)
+	require.Equal(t, db.Evaluation{Level: TargetLevel(12), Score: 4}, eval)
 
 	// Claim must be released: another worker can now claim the same board.
 	claimed, err = s.tryClaim(ctx, board.String(), "w2")
@@ -127,7 +127,7 @@ func TestHandleSubmitJobResult_RebuildsMinimaxCache(t *testing.T) {
 	// leaf it depends on is learned.
 	for _, child := range normalizedChildren {
 		reqBody := jobResultRequest{
-			WorkerID: "w1", Board: child.String(), Level: 24, Depth: 24, Confidence: 73, Score: 1,
+			WorkerID: "w1", Board: child.String(), Level: TargetLevel(book.LeafDiscs), Score: 1,
 		}
 		w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -200,22 +200,56 @@ func TestHandleSubmitJobResult_AcceptsMismatchedSearchParams(t *testing.T) {
 	board := testBoard(t, 12)
 	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
 
-	// A level-24 search of a 12-disc board is 24@73%, not 30@98%.
-	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: 30, Confidence: 98, Score: 4}
+	// A level-40 search of a 12-disc board is not 30@98%.
+	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: TargetLevel(12), Depth: 30, Confidence: 98, Score: 4}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	stored, err := s.repo.GetBoard(ctx, board.Board())
 	require.NoError(t, err)
-	require.Equal(t, db.Evaluation{Level: 24, Score: 4}, stored)
+	require.Equal(t, db.Evaluation{Level: TargetLevel(12), Score: 4}, stored)
 }
 
 func TestHandleSubmitJobResult_BoardNotFound(t *testing.T) {
 	s := testServer(t)
 	board := testBoard(t, 12)
-	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: 24, Confidence: 73, Score: 0}
+	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: TargetLevel(12), Score: 0}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// TestHandleSubmitJobResult_NonPriorityBelowTargetNotPersisted covers the API-wide book-quality
+// floor: a below-target result is accepted (cached ephemerally, claim released) but never saved,
+// even on the non-priority path.
+func TestHandleSubmitJobResult_NonPriorityBelowTargetNotPersisted(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+	board := testBoard(t, 12)
+	require.NoError(t, s.repo.AddBoards(ctx, []othello.NormalizedBoard{board}))
+
+	claimed, err := s.tryClaim(ctx, board.String(), "w1")
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	require.Less(t, 24, TargetLevel(12))
+	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Score: 4}
+	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	eval, err := s.repo.GetBoard(ctx, board.Board())
+	require.NoError(t, err)
+	require.Equal(t, db.Evaluation{}, eval, "row stays unevaluated")
+
+	// The result is still served back from the ephemeral analysis cache.
+	cached, ok, err := s.getAnalysisResult(ctx, board.String())
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, 4, cached.Score)
+
+	// The claim was released.
+	claimed, err = s.tryClaim(ctx, board.String(), "w2")
+	require.NoError(t, err)
+	require.True(t, claimed)
 }
 
 func TestHandleReleaseJob_AllowsAnotherWorkerToClaim(t *testing.T) {

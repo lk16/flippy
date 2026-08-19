@@ -221,7 +221,7 @@ func TestHandleSubmitJobResult_NonPriorityBoardNotFoundStill404(t *testing.T) {
 	s := testServer(t)
 	board := testBoard(t, 12)
 	// No priority claim, no DB row.
-	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: 24, Depth: 24, Confidence: 73, Score: 0}
+	reqBody := jobResultRequest{WorkerID: "w1", Board: board.String(), Level: TargetLevel(12), Score: 0}
 	w := doRequest(t, s, "POST", "/api/jobs/result", reqBody)
 	require.Equal(t, 404, w.Code)
 }
