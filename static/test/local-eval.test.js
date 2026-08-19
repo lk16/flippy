@@ -6,35 +6,10 @@
 // EdaxEvalWorkerPool's side of that contract is tested in wasm/edax-eval/js/pool.test.js.
 const assert = require('node:assert');
 const { test } = require('./framework');
-const { buildGame, buildNormalGame, OthelloBoard, LOCAL_EVAL_LEVELS, localEvalLevelsFor } = require('./harness');
+const {
+  buildGame, buildNormalGame, OthelloBoard, LOCAL_EVAL_LEVELS, localEvalLevelsFor, mockWorkerPool, flush,
+} = require('./harness');
 const { FORCED_PASS_BOARDS } = require('./fixtures');
-
-function flush() {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-// mockWorkerPool records every evaluate() call and lets the test resolve them one at a time,
-// mirroring EdaxEvalWorkerPool's real signature (player, opponent, level, options) ->
-// Promise<score>. cancelQueued() drops every not-yet-resolved call whose tag matches, the same
-// way the real pool drops tasks that haven't started yet.
-function mockWorkerPool() {
-  const calls = [];
-  return {
-    calls,
-    evaluate(player, opponent, level, { priority = 0, tag = null } = {}) {
-      return new Promise((resolve, reject) => {
-        calls.push({ player, opponent, level, priority, tag, resolved: false, resolve, reject });
-      });
-    },
-    cancelQueued(shouldDrop) {
-      for (const call of calls) {
-        if (call.resolved || !shouldDrop(call.tag)) continue;
-        call.resolved = true;
-        call.reject(new Error('edax-eval: evaluation cancelled'));
-      }
-    },
-  };
-}
 
 test('LOCAL_EVAL_LEVELS is the documented incremental depth sequence', () => {
   assert.deepEqual(LOCAL_EVAL_LEVELS, [4, 6, 8, 10, 12, 14, 16]);
@@ -259,7 +234,7 @@ test('queueLocalEvaluations: skips boards that already have an evaluation or are
 
   const [a, b] = game.pgnAllChildStrings;
   game.evaluations.set(a, { board: a, score: 1, source: 'edax', level: 10 });
-  game._pendingLocalEvals.add(b);
+  game._pendingLocalEvals.set(b, game._localEvalGeneration);
 
   game.queueLocalEvaluations([a, b]);
 

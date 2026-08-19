@@ -10,6 +10,7 @@ require('./diverge.test');
 require('./flip.test');
 require('./level.test');
 require('./local-eval.test');
+require('./pgn-local-eval.test');
 require('./normal-mode.test');
 require('./stats.test');
 

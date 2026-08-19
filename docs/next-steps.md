@@ -175,16 +175,17 @@ need a deeper search than they did before.
 
 ## Frontend
 
-- **PGN review doesn't use the local wasm evaluator.** Normal play falls
-  back to `queueLocalEvaluations` for every child the server hasn't
-  answered for, so a score appears under each move right away; PGN review
-  still shows blanks until the server answers. That wait covers the whole
-  line: unlike normal play, `pgnSendRequests` skips `splitOffBook` and
-  sends boards past `MaxSavableDiscs` (30) to the server too, which does
-  evaluate them — into the ephemeral cache, never the DB.
-  Wiring it up is not just a call to `queueLocalEvaluations`: the same
-  evaluations feed the score graph, `pgnUnresolved`/`isAtTarget` and the
-  level-up chain, all of which treat an evaluation as the server's answer.
+- **PGN review's server-side level ladder mostly produces results nobody
+  keeps.** `pgnSendRequests` asks at `PriorityLevel` and
+  `pgnRequestLevelUps` climbs +2 per round, so a board is searched a dozen
+  times on its way to `TargetLevel` — and only that last search earns a
+  DB row (`isBookQuality`). The ladder existed to get *something* on
+  screen fast, which `pgnQueueLineEvaluations`' local wasm searches now do
+  without a worker; asking the server for the target level directly would
+  drop the discarded rounds. Note `pgnSendRequests` also skips
+  `splitOffBook`, so boards past `MaxSavableDiscs` (30) are sent to the
+  server too, which evaluates them into the ephemeral cache and never the
+  DB — worker time no book ever keeps.
 
 ## Build artifacts
 
