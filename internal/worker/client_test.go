@@ -2,9 +2,11 @@ package worker
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
@@ -68,6 +70,38 @@ const testWorkerToken = "test-worker-token"
 // testPosition returns a NormalizedPosition reached by playing the first available
 // legal move (or pass) from start until it has exactly discs discs.
 var testPosition = othellotest.Position
+
+func TestNewClient_HTTPClientHasTimeout(t *testing.T) {
+	client := NewClient("http://localhost", "w1", "test-host", "test-commit", testWorkerToken)
+
+	// Zero would mean the timeout-less http.DefaultClient is back.
+	require.Positive(t, client.httpClient.Timeout)
+}
+
+// TestClient_StalledServerFailsRatherThanBlocks covers a server that accepts the connection and
+// then never answers: the call must fail on its own, since the contexts the worker passes in live
+// as long as the worker does and won't cut it short.
+func TestClient_StalledServerFailsRatherThanBlocks(t *testing.T) {
+	// Released by cleanup: the server doesn't cancel a stalled handler's request context on its
+	// own once the client hangs up, so blocking on that would leave Close waiting forever.
+	stalled := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		<-stalled
+	}))
+	t.Cleanup(func() {
+		close(stalled)
+		server.Close()
+	})
+
+	client := NewClient(server.URL, "w1", "test-host", "test-commit", testWorkerToken)
+	client.httpClient.Timeout = 50 * time.Millisecond
+
+	_, _, err := client.GetJob(context.Background())
+	require.Error(t, err)
+
+	// The POST path uses the same client, and has a request body to send.
+	require.Error(t, client.Heartbeat(context.Background(), ""))
+}
 
 func TestClient_GetJob_NoJobAvailable(t *testing.T) {
 	client, _ := testClient(t, "w1")

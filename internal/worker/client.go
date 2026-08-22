@@ -9,9 +9,16 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/lk16/flippy/internal/edax"
 )
+
+// requestTimeout bounds every API request. The contexts the worker passes in are tied to its
+// lifetime rather than to a single call, so without this a server that accepts a connection and
+// then stalls would hang the job or heartbeat loop until shutdown. All request and response bodies
+// here are small, so one timeout covering the whole exchange is enough.
+const requestTimeout = 30 * time.Second
 
 // Job is a position to evaluate, and the level to search it at.
 type Job struct {
@@ -38,7 +45,7 @@ func NewClient(baseURL, workerID, hostname, gitCommit, token string) *Client {
 		hostname:   hostname,
 		gitCommit:  gitCommit,
 		token:      token,
-		httpClient: http.DefaultClient,
+		httpClient: &http.Client{Timeout: requestTimeout},
 	}
 }
 
