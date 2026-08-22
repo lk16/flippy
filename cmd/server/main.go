@@ -103,19 +103,10 @@ func main() {
 
 	cache := book.NewCache(repo)
 
-	// Build the cache in the background so the listener (and /healthz) is up during the initial
-	// build; /readyz reports 503 until the first build succeeds.
-	go func() {
-		if err := cache.Rebuild(ctx); err != nil {
-			if ctx.Err() != nil {
-				return // Shutdown interrupted the build; not an error.
-			}
-			log.Fatalf("failed to build minimax cache: %v", err)
-		}
-		log.Printf("minimax cache built: %d boards", cache.Len())
-	}()
-
 	apiServer := api.NewServer(repo, redisClient, cache, workerToken)
+	// The invalidation loop also runs the initial cache build, in the background so the listener
+	// (and /healthz) is up during it; /readyz reports 503 until the first build succeeds.
+	go apiServer.RunCacheInvalidation(ctx)
 	go apiServer.RunBookStatsRefresh(ctx)
 
 	webServer, err := web.NewServer()

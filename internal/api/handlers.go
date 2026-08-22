@@ -191,9 +191,12 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if savedToDB {
-		// Only a leaf-disc-count save can change the minimax backfill.
+		// Only a leaf-disc-count save can change the minimax backfill. Bump the shared book
+		// version so every replica rebuilds (see RunCacheInvalidation) instead of rebuilding
+		// inline, which stalled all workers for the duration of a full leaf scan. On error the
+		// worker gets a 500; the position stays learnable, so the bump is eventually retried.
 		if discCount == book.LeafDiscs {
-			if err := s.cache.Rebuild(r.Context()); err != nil {
+			if err := s.bumpBookVersion(r.Context()); err != nil {
 				writeError(w, http.StatusInternalServerError, err)
 				return
 			}
