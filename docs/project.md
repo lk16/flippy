@@ -8,7 +8,13 @@ stored in Postgres, and browsed via a web frontend.
 - `cmd/server` (`internal/api`, `internal/web`) — REST API + websocket +
   HTML admin pages (game/analysis, stats, clients). Serves evaluations from
   the DB, with an in-memory minimax cache (`internal/book`) that backfills
-  every <12-disc position from the 12-disc evaluations.
+  every <12-disc position from the 12-disc evaluations; a leaf-disc save
+  bumps the Redis `book:version` counter and every replica polls it and
+  rebuilds. Endpoints workers
+  mutate book state through require the `FLIPPY_WORKER_TOKEN` bearer
+  token; browsing endpoints and the pages are open. `/healthz` answers as
+  soon as the listener is up; `/readyz` only once the cache has built and
+  Postgres/Redis ping; `/version` reports the build commit.
 - `cmd/worker` (`internal/worker`, `internal/edax`) — claims one job at a
   time from the server, evaluates it with one long-running edax
   subprocess, submits the result, heartbeats (each heartbeat refreshes the
@@ -36,11 +42,15 @@ stored in Postgres, and browsed via a web frontend.
   `internal/edax.SearchParams`); migrations via golang-migrate
   (`migrations/`), one-shot operator SQL in `scripts/`
 - Redis — job claims, worker heartbeats, priority queue, ephemeral
-  analysis results, and the `book_stats` hash (rebuilt from the DB every
-  60s; serves `GET /api/stats` and derives the job floor)
+  analysis results, and the `book_stats` hash (serves `GET /api/stats`
+  and derives the job floor; updated incrementally on every save, with a
+  slow full resync from the DB to correct drift)
 - edax — external binary; `EDAX_PATH` in `.env` (see `.env.sample`)
 - Frontend — Go `html/template` + vanilla JS/CSS in `static/`, no build step
 - Scripts: `local.sh` (dev stack: compose Postgres/Redis, migrate, seed,
   server), `test.sh` (full test suite), `archive_book.sh` (gzipped pg_dump
   of the book to `backups/`), `sandbox.sh` (Claude in an sbx sandbox)
-- CI: `.github/workflows/ci.yml` (fmt, golangci-lint, tests)
+- CI: `.github/workflows/ci.yml` (fmt, golangci-lint, tests);
+  `publish.yml` pushes multi-arch (amd64/arm64) server, worker, and
+  migrations images to ghcr.io on pushes to `main` and tags, tagged by
+  commit sha — deployments pin a sha, there is no `latest`

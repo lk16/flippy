@@ -50,8 +50,12 @@ func testServer(t *testing.T) *Server {
 	})
 
 	repo := db.NewRepository(tx)
-	return NewServer(repo, redisClient, book.NewCache(repo))
+	return NewServer(repo, redisClient, book.NewCache(repo), testWorkerToken)
 }
+
+// testWorkerToken is the worker token every testServer is configured with; doRequest sends it on
+// every request.
+const testWorkerToken = "test-worker-token"
 
 // testPosition returns a NormalizedPosition reached by playing the first available
 // legal move (or pass) from start until it has exactly discs discs.

@@ -173,6 +173,30 @@ func TestRepository_SaveEvaluation_Updates(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+func TestRepository_SaveEvaluationOutcome(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+	position := testPosition(t, 12)
+
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+
+	outcome, err := repo.SaveEvaluationOutcome(ctx, position, Evaluation{Level: 20, Score: 4})
+	require.NoError(t, err)
+	require.Equal(t, SaveOutcome{Updated: true, OldLevel: 0}, outcome)
+
+	outcome, err = repo.SaveEvaluationOutcome(ctx, position, Evaluation{Level: 24, Score: 2})
+	require.NoError(t, err)
+	require.Equal(t, SaveOutcome{Updated: true, OldLevel: 20}, outcome)
+
+	// Non-improving level: row untouched, reported as such.
+	outcome, err = repo.SaveEvaluationOutcome(ctx, position, Evaluation{Level: 24, Score: 6})
+	require.NoError(t, err)
+	require.Equal(t, SaveOutcome{Updated: false, OldLevel: 24}, outcome)
+
+	_, err = repo.SaveEvaluationOutcome(ctx, testPosition(t, 13), Evaluation{Level: 20})
+	require.ErrorIs(t, err, ErrPositionNotFound)
+}
+
 // TestRepository_SaveEvaluation_LowerLevelIsNoOp checks that a shallower search never overwrites a
 // deeper one, whatever score it found.
 func TestRepository_SaveEvaluation_LowerLevelIsNoOp(t *testing.T) {

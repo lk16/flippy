@@ -5,13 +5,12 @@ import (
 	"flag"
 	"log"
 	"os"
-	"os/exec"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/lk16/flippy/internal/edax"
 	"github.com/lk16/flippy/internal/env"
+	"github.com/lk16/flippy/internal/version"
 	"github.com/lk16/flippy/internal/worker"
 )
 
@@ -23,20 +22,15 @@ func requiredEnv(name string) string {
 	return value
 }
 
-// gitCommit best-effort determines the build commit, falling back to "unknown" without a .git directory.
-func gitCommit() string {
-	out, err := exec.Command("git", "rev-parse", "HEAD").Output()
-	if err != nil {
-		return "unknown"
-	}
-	return strings.TrimSpace(string(out))
-}
-
 func main() {
 	edaxTasks := flag.Int("edax-tasks", 0,
 		"cap edax's parallel search threads per process (its -n-tasks flag); 0 leaves it unset, so "+
 			"edax defaults to one thread per CPU. Set this to run multiple workers on one machine "+
 			"without them oversubscribing its CPUs.")
+	edaxHashTableSize := flag.Int("edax-hash-table-size", 0,
+		"edax's hash table size in bits (its -hash-table-size flag, e.g. 20 = 2^20 entries); 0 "+
+			"leaves edax's default. Lower this to run several workers on one memory-constrained "+
+			"machine.")
 	flag.Parse()
 
 	if err := env.Load(); err != nil {
@@ -44,6 +38,7 @@ func main() {
 	}
 
 	serverURL := requiredEnv("FLIPPY_SERVER_URL")
+	workerToken := requiredEnv("FLIPPY_WORKER_TOKEN")
 
 	edaxPath, err := edax.PathFromEnv()
 	if err != nil {
@@ -61,8 +56,8 @@ func main() {
 		hostname = "unknown"
 	}
 
-	edaxProcess := edax.NewProcess(edaxPath, *edaxTasks)
-	client := worker.NewClient(serverURL, workerID, hostname, gitCommit())
+	edaxProcess := edax.NewProcess(edaxPath, *edaxTasks, *edaxHashTableSize)
+	client := worker.NewClient(serverURL, workerID, hostname, version.Get(), workerToken)
 	w := worker.New(client, edaxProcess)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -74,9 +69,14 @@ func main() {
 		_ = edaxProcess.Close()
 	}()
 
-	w.Run(ctx)
+	runErr := w.Run(ctx)
 
 	if err := edaxProcess.Close(); err != nil {
 		log.Printf("error closing edax process: %v", err)
+	}
+
+	// Exit non-zero on an unrecoverable edax failure, so an orchestrator restarts the pod.
+	if runErr != nil {
+		log.Fatalf("worker failed: %v", runErr)
 	}
 }

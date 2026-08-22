@@ -30,6 +30,7 @@ func doRequest(t *testing.T, s *Server, method, target string, body any) *httpte
 	}
 
 	req := httptest.NewRequest(method, target, reader)
+	req.Header.Set("Authorization", "Bearer "+testWorkerToken)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 	return w
@@ -122,9 +123,8 @@ func TestHandleSubmitJobResult_RebuildsMinimaxCache(t *testing.T) {
 	_, ok := s.cache.Get(position11.Position())
 	require.False(t, ok)
 
-	// Submitting each child's result via the HTTP endpoint (not calling
-	// Rebuild directly) must be what makes position11 resolve, once the last
-	// leaf it depends on is learned.
+	// Submitting each child's result via the HTTP endpoint must bump the shared book version;
+	// the poll step then rebuilds this replica's cache, making position11 resolve.
 	for _, child := range normalizedChildren {
 		reqBody := jobResultRequest{
 			WorkerID: "w1", Position: child.String(), Level: TargetLevel(book.LeafDiscs), Score: 1,
@@ -133,6 +133,12 @@ func TestHandleSubmitJobResult_RebuildsMinimaxCache(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 	}
 
+	version, err := s.redis.Get(ctx, bookVersionKey).Int64()
+	require.NoError(t, err)
+	require.EqualValues(t, len(normalizedChildren), version)
+
+	require.EqualValues(t, version, s.rebuildIfVersionChanged(ctx, -1))
+
 	_, ok = s.cache.Get(position11.Position())
 	require.True(t, ok)
 }
@@ -140,6 +146,7 @@ func TestHandleSubmitJobResult_RebuildsMinimaxCache(t *testing.T) {
 func TestHandleSubmitJobResult_InvalidBody(t *testing.T) {
 	s := testServer(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/jobs/result", bytes.NewReader([]byte("not json")))
+	req.Header.Set("Authorization", "Bearer "+testWorkerToken)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 	require.Equal(t, http.StatusBadRequest, w.Code)
@@ -306,6 +313,7 @@ func TestHandleReleaseJob_DoesNotRevokeAnotherWorkersClaim(t *testing.T) {
 func TestHandleReleaseJob_InvalidBody(t *testing.T) {
 	s := testServer(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/jobs/release", bytes.NewReader([]byte("not json")))
+	req.Header.Set("Authorization", "Bearer "+testWorkerToken)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 	require.Equal(t, http.StatusBadRequest, w.Code)

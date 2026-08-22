@@ -3,7 +3,9 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -151,9 +153,10 @@ func TestWorker_ProcessJob_EvaluatesAndSubmitsResult(t *testing.T) {
 	}
 	w := testWorker(api, eval)
 
-	stillClaimed := w.processJob(context.Background(), Job{Position: position.String(), Level: 24})
+	stillClaimed, fatalErr := w.processJob(context.Background(), Job{Position: position.String(), Level: 24})
 
 	require.False(t, stillClaimed)
+	require.NoError(t, fatalErr)
 	require.Equal(t, []jobResultRequest{
 		{Position: position.String(), Level: 24, Depth: 24, Confidence: 100, Score: 6},
 	}, api.submitCalls)
@@ -169,9 +172,10 @@ func TestWorker_ProcessJob_UnparseableBoardIsSkipped(t *testing.T) {
 	}
 	w := testWorker(api, eval)
 
-	stillClaimed := w.processJob(context.Background(), Job{Position: "not-a-position", Level: 24})
+	stillClaimed, fatalErr := w.processJob(context.Background(), Job{Position: "not-a-position", Level: 24})
 
 	require.False(t, stillClaimed)
+	require.NoError(t, fatalErr)
 	require.Equal(t, 0, api.submitCallCount())
 }
 
@@ -182,9 +186,10 @@ func TestWorker_ProcessJob_EvaluateError(t *testing.T) {
 	}
 	w := testWorker(api, eval)
 
-	stillClaimed := w.processJob(context.Background(), Job{Position: othello.NewStartPosition().String(), Level: 24})
+	stillClaimed, fatalErr := w.processJob(context.Background(), Job{Position: othello.NewStartPosition().String(), Level: 24})
 
 	require.False(t, stillClaimed)
+	require.NoError(t, fatalErr)
 	require.Equal(t, 0, api.submitCallCount())
 }
 
@@ -203,10 +208,11 @@ func TestWorker_ProcessJob_EvaluateErrorDuringShutdownKeepsClaim(t *testing.T) {
 	}
 	w := testWorker(api, eval)
 
-	stillClaimed := w.processJob(ctx, Job{Position: position, Level: 24})
+	stillClaimed, fatalErr := w.processJob(ctx, Job{Position: position, Level: 24})
 
 	// The claim is still held; Run releases it after the loops stop.
 	require.True(t, stillClaimed)
+	require.NoError(t, fatalErr)
 	require.Equal(t, 0, api.submitCallCount())
 }
 
@@ -219,9 +225,10 @@ func TestWorker_ProcessJob_SubmitError(t *testing.T) {
 	}
 	w := testWorker(api, eval)
 
-	stillClaimed := w.processJob(context.Background(), Job{Position: othello.NewStartPosition().String(), Level: 24})
+	stillClaimed, fatalErr := w.processJob(context.Background(), Job{Position: othello.NewStartPosition().String(), Level: 24})
 
 	require.False(t, stillClaimed)
+	require.NoError(t, fatalErr)
 	// SubmitJobResult was attempted (and recorded) even though it failed.
 	require.Equal(t, 1, api.submitCallCount())
 }
@@ -251,7 +258,7 @@ func TestWorker_RunJobs_ClaimsEvaluatesAndSubmits(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go w.runJobs(ctx)
+	go func() { _ = w.runJobs(ctx) }()
 
 	require.Eventually(t, func() bool {
 		return api.submitCallCount() >= 1
@@ -267,7 +274,7 @@ func TestWorker_RunJobs_SleepsWhenNoJobAvailable(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go w.runJobs(ctx)
+	go func() { _ = w.runJobs(ctx) }()
 
 	require.Eventually(t, func() bool {
 		return api.getJobCallCount() >= 1
@@ -286,7 +293,7 @@ func TestWorker_RunJobs_BacksOffAndRetriesOnError(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go w.runJobs(ctx)
+	go func() { _ = w.runJobs(ctx) }()
 
 	require.Eventually(t, func() bool {
 		return api.getJobCallCount() >= 2
@@ -299,7 +306,7 @@ func TestWorker_RunJobs_ReturnsOnContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	w.runJobs(ctx) // must return without calling GetJob (nil function would panic)
+	require.NoError(t, w.runJobs(ctx)) // must return without calling GetJob (nil function would panic)
 }
 
 // --- Run (integration) ---
@@ -315,7 +322,7 @@ func TestWorker_Run_StopsOnContextCancellation(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		w.Run(ctx)
+		_ = w.Run(ctx)
 		close(done)
 	}()
 
@@ -339,7 +346,7 @@ func TestWorker_Run_SendsHeartbeats(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go w.Run(ctx)
+	go func() { _ = w.Run(ctx) }()
 
 	require.Eventually(t, func() bool {
 		return api.heartbeatCallCount() >= 3
@@ -375,7 +382,7 @@ func TestWorker_Run_HeartbeatReportsClaimedBoard(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go w.Run(ctx)
+	go func() { _ = w.Run(ctx) }()
 
 	select {
 	case <-reported:
@@ -411,7 +418,7 @@ func TestWorker_Run_ReleasesClaimOnShutdownMidEvaluation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		w.Run(ctx)
+		_ = w.Run(ctx)
 		close(done)
 	}()
 
@@ -427,4 +434,63 @@ func TestWorker_Run_ReleasesClaimOnShutdownMidEvaluation(t *testing.T) {
 
 	require.Equal(t, []string{position}, api.releasedBoards())
 	require.Empty(t, w.claimedPosition())
+}
+
+func TestWorker_Run_ExitsOnEdaxStartFailure(t *testing.T) {
+	api := &fakeAPIClient{
+		getJob: func(context.Context) (Job, bool, error) {
+			return Job{Position: othello.NewStartPosition().String(), Level: 16}, true, nil
+		},
+		heartbeat: func(context.Context, string) error { return nil },
+	}
+	eval := &fakeEvaluator{
+		evaluate: func(othello.Position, int) (edax.Evaluation, error) {
+			return edax.Evaluation{}, fmt.Errorf("failed to start edax: %w", edax.ErrStartFailed)
+		},
+	}
+	w := testWorker(api, eval)
+
+	err := w.Run(context.Background())
+	require.ErrorIs(t, err, edax.ErrStartFailed)
+}
+
+func TestWorker_Run_ExitsAfterConsecutiveEvaluateFailures(t *testing.T) {
+	api := &fakeAPIClient{
+		getJob: func(context.Context) (Job, bool, error) {
+			return Job{Position: othello.NewStartPosition().String(), Level: 16}, true, nil
+		},
+		heartbeat: func(context.Context, string) error { return nil },
+	}
+
+	var evalCalls atomic.Int64
+	eval := &fakeEvaluator{
+		evaluate: func(othello.Position, int) (edax.Evaluation, error) {
+			evalCalls.Add(1)
+			return edax.Evaluation{}, errors.New("boom")
+		},
+	}
+	w := testWorker(api, eval)
+
+	err := w.Run(context.Background())
+	require.Error(t, err)
+	require.NotErrorIs(t, err, edax.ErrStartFailed)
+	require.EqualValues(t, maxConsecutiveEvalFailures, evalCalls.Load())
+}
+
+func TestWorker_ProcessJob_SuccessResetsFailureStreak(t *testing.T) {
+	api := &fakeAPIClient{
+		submitJobResult: func(context.Context, string, int, edax.Evaluation) error { return nil },
+	}
+	eval := &fakeEvaluator{
+		evaluate: func(othello.Position, int) (edax.Evaluation, error) {
+			return edax.Evaluation{Depth: 16, Confidence: 100, Score: 0}, nil
+		},
+	}
+	w := testWorker(api, eval)
+	w.consecutiveEvalFailures = maxConsecutiveEvalFailures - 1
+
+	_, fatalErr := w.processJob(context.Background(), Job{Position: othello.NewStartPosition().String(), Level: 16})
+
+	require.NoError(t, fatalErr)
+	require.Zero(t, w.consecutiveEvalFailures)
 }

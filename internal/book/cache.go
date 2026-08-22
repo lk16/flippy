@@ -22,6 +22,7 @@ type Cache struct {
 
 	mu     sync.RWMutex
 	values map[othello.Position]int
+	built  bool
 }
 
 // NewCache returns an empty Cache backed by repo; every Get misses until Rebuild is called.
@@ -45,9 +46,18 @@ func (c *Cache) Rebuild(ctx context.Context) error {
 
 	c.mu.Lock()
 	c.values = values
+	c.built = true
 	c.mu.Unlock()
 
 	return nil
+}
+
+// Built reports whether at least one Rebuild has succeeded, i.e. Get serves real data.
+func (c *Cache) Built() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.built
 }
 
 // Get returns position's minimax score, from the perspective of the player to move, if the cache

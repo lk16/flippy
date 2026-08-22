@@ -48,6 +48,15 @@ func TestCache_Get_MissesBeforeRebuild(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestCache_Built(t *testing.T) {
+	repo := testRepository(t)
+	c := NewCache(repo)
+
+	require.False(t, c.Built())
+	require.NoError(t, c.Rebuild(context.Background()))
+	require.True(t, c.Built())
+}
+
 func TestCache_Rebuild_EmptyDB(t *testing.T) {
 	repo := testRepository(t)
 	c := NewCache(repo)

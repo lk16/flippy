@@ -54,13 +54,16 @@ func testClient(t *testing.T, workerID string) (*Client, *db.Repository) {
 	})
 
 	repo := db.NewRepository(tx)
-	server := api.NewServer(repo, redisClient, book.NewCache(repo))
+	server := api.NewServer(repo, redisClient, book.NewCache(repo), testWorkerToken)
 
 	httpServer := httptest.NewServer(server.Handler())
 	t.Cleanup(httpServer.Close)
 
-	return NewClient(httpServer.URL, workerID, "test-host", "test-commit"), repo
+	return NewClient(httpServer.URL, workerID, "test-host", "test-commit", testWorkerToken), repo
 }
+
+// testWorkerToken is the worker token the in-process test server and its clients share.
+const testWorkerToken = "test-worker-token"
 
 // testPosition returns a NormalizedPosition reached by playing the first available
 // legal move (or pass) from start until it has exactly discs discs.
@@ -93,7 +96,7 @@ func TestClient_GetJob_TwoWorkersGetDistinctJobs(t *testing.T) {
 	// Same server/DB as client1, different worker identity: testClient
 	// gives each caller its own isolated Postgres transaction, which two
 	// separate calls would put on different, mutually-invisible snapshots.
-	client2 := NewClient(client1.baseURL, "w2", "test-host", "test-commit")
+	client2 := NewClient(client1.baseURL, "w2", "test-host", "test-commit", testWorkerToken)
 	ctx := context.Background()
 
 	positions := testDistinctClientBoards(t, 12, 2)
@@ -159,7 +162,7 @@ func TestClient_Heartbeat_WithClaimedBoard(t *testing.T) {
 
 func TestClient_ReleaseJob_AllowsAnotherWorkerToClaimIt(t *testing.T) {
 	client1, repo := testClient(t, "w1")
-	client2 := NewClient(client1.baseURL, "w2", "test-host", "test-commit")
+	client2 := NewClient(client1.baseURL, "w2", "test-host", "test-commit", testWorkerToken)
 	ctx := context.Background()
 
 	position := testPosition(t, 12)

@@ -17,6 +17,7 @@ import (
 	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
 	"github.com/lk16/flippy/internal/env"
+	"github.com/lk16/flippy/internal/version"
 	"github.com/lk16/flippy/internal/web"
 )
 
@@ -76,6 +77,7 @@ func main() {
 
 	postgresURL := requiredEnv("FLIPPY_POSTGRES_URL")
 	redisURL := requiredEnv("FLIPPY_REDIS_URL")
+	workerToken := requiredEnv("FLIPPY_WORKER_TOKEN")
 
 	addr := os.Getenv("FLIPPY_SERVER_ADDR")
 	if addr == "" {
@@ -100,12 +102,11 @@ func main() {
 	repo := db.NewRepository(pool)
 
 	cache := book.NewCache(repo)
-	if err := cache.Rebuild(ctx); err != nil {
-		log.Fatalf("failed to build minimax cache: %v", err)
-	}
-	log.Printf("minimax cache built: %d boards", cache.Len())
 
-	apiServer := api.NewServer(repo, redisClient, cache)
+	apiServer := api.NewServer(repo, redisClient, cache, workerToken)
+	// The invalidation loop also runs the initial cache build, in the background so the listener
+	// (and /healthz) is up during it; /readyz reports 503 until the first build succeeds.
+	go apiServer.RunCacheInvalidation(ctx)
 	go apiServer.RunBookStatsRefresh(ctx)
 
 	webServer, err := web.NewServer()
@@ -116,6 +117,9 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/api/", apiServer.Handler())
 	mux.Handle("/ws", apiServer.Handler())
+	mux.Handle("/healthz", apiServer.Handler())
+	mux.Handle("/readyz", apiServer.Handler())
+	mux.Handle("/version", apiServer.Handler())
 	mux.Handle("/", webServer.Handler())
 
 	httpServer := &http.Server{Addr: addr, Handler: logRequests(mux)}
@@ -131,7 +135,7 @@ func main() {
 		}
 	}()
 
-	log.Printf("flippy server listening on %s", addr)
+	log.Printf("flippy server %s listening on %s", version.Get(), addr)
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("server error: %v", err)
 	}

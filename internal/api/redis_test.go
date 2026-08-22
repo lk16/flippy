@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
@@ -130,6 +131,49 @@ func TestServer_RebuildBookStats_EmptyDBClearsHash(t *testing.T) {
 	_, ok, err := s.getBookStats(ctx)
 	require.NoError(t, err)
 	require.False(t, ok)
+}
+
+func TestServer_BookStats_IncrementalSave(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+	require.NoError(t, s.rebuildBookStats(ctx))
+
+	// A submitted target-level result moves the position's counter to the new cell without a
+	// rebuild; the decremented-to-zero unlearned cell is filtered out of reads.
+	level := TargetLevel(12)
+	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", jobResultRequest{
+		WorkerID: "w1", Position: position.String(), Level: level, Score: 2,
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	depth, confidence := edax.SearchParams(12, level)
+	entries, ok, err := s.getBookStats(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, []statEntry{
+		{DiscCount: 12, Depth: depth, Confidence: confidence, Count: 1},
+	}, entries)
+}
+
+func TestServer_BookStats_NoPartialHashCreated(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+
+	// No hash exists yet; an incremental update must not create a nearly-empty one.
+	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", jobResultRequest{
+		WorkerID: "w1", Position: position.String(), Level: TargetLevel(12), Score: 2,
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	exists, err := s.redis.Exists(ctx, bookStatsKey).Result()
+	require.NoError(t, err)
+	require.Zero(t, exists)
 }
 
 func TestServer_GetBookStats_MissingHash(t *testing.T) {
@@ -432,10 +476,11 @@ func TestDequeuePriority_DropsEntriesFromDeadConnections(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	connID := s.registerConn()
+	connID, err := s.registerConn(ctx)
+	require.NoError(t, err)
 	position := testPosition(t, 14)
 	require.NoError(t, s.enqueuePriority(ctx, position.String(), PriorityLevel, connID))
-	s.unregisterConn(connID)
+	s.unregisterConn(ctx, connID)
 
 	_, ok, err := s.dequeuePriority(ctx)
 	require.NoError(t, err)
@@ -453,14 +498,16 @@ func TestDequeuePriority_KeepsEntriesFromLiveConnections(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	deadConn := s.registerConn()
-	liveConn := s.registerConn()
+	deadConn, err := s.registerConn(ctx)
+	require.NoError(t, err)
+	liveConn, err := s.registerConn(ctx)
+	require.NoError(t, err)
 
 	deadBoard := testPosition(t, 14)
 	liveBoard := testPosition(t, 15)
 	require.NoError(t, s.enqueuePriority(ctx, deadBoard.String(), PriorityLevel, deadConn))
 	require.NoError(t, s.enqueuePriority(ctx, liveBoard.String(), PriorityLevel, liveConn))
-	s.unregisterConn(deadConn)
+	s.unregisterConn(ctx, deadConn)
 
 	entry, ok, err := s.dequeuePriority(ctx)
 	require.NoError(t, err)
@@ -478,13 +525,15 @@ func TestDequeuePriority_DedupeIsByBoardOnly(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	connA := s.registerConn()
-	connB := s.registerConn()
+	connA, err := s.registerConn(ctx)
+	require.NoError(t, err)
+	connB, err := s.registerConn(ctx)
+	require.NoError(t, err)
 	position := testPosition(t, 14)
 
 	require.NoError(t, s.enqueuePriority(ctx, position.String(), PriorityLevel, connA))
 	require.NoError(t, s.enqueuePriority(ctx, position.String(), PriorityLevel, connB)) // deduped: still tagged connA
-	s.unregisterConn(connA)
+	s.unregisterConn(ctx, connA)
 
 	_, ok, err := s.dequeuePriority(ctx)
 	require.NoError(t, err)
@@ -688,4 +737,46 @@ func TestLookupEvaluation_EphemeralCacheFallback(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, eval, result)
+}
+
+func TestConnLiveness_RedisBacked(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	connID, err := s.registerConn(ctx)
+	require.NoError(t, err)
+	require.True(t, s.connLive(ctx, connID))
+
+	// The key carries a TTL, so a crashed replica's connections expire on their own.
+	ttl, err := s.redis.TTL(ctx, connKey(connID)).Result()
+	require.NoError(t, err)
+	require.Greater(t, ttl, time.Duration(0))
+
+	s.unregisterConn(ctx, connID)
+	require.False(t, s.connLive(ctx, connID))
+}
+
+func TestRefreshBookStatsIfElected(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+
+	// First election wins the lock and rebuilds the hash.
+	s.refreshBookStatsIfElected(ctx)
+	_, ok, err := s.getBookStats(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	owner, err := s.redis.Get(ctx, bookStatsLockKey).Result()
+	require.NoError(t, err)
+	require.Equal(t, s.replicaID, owner)
+
+	// While the lock is held, a tick on any replica refreshes nothing.
+	require.NoError(t, s.redis.Del(ctx, bookStatsKey).Err())
+	s.refreshBookStatsIfElected(ctx)
+	_, ok, err = s.getBookStats(ctx)
+	require.NoError(t, err)
+	require.False(t, ok)
 }

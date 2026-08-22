@@ -38,10 +38,9 @@ services:
     network_mode: host
     environment:
       FLIPPY_SERVER_URL: ${FLIPPY_SERVER_URL:-http://localhost:7777}
-      EDAX_PATH: /edax/bin/lEdax-x64
+      # Must match the token the server was started with (see local.sh's default).
+      FLIPPY_WORKER_TOKEN: ${FLIPPY_WORKER_TOKEN:-local-dev-token}
       EDAX_TASKS: ${EDAX_TASKS:-1}
-    volumes:
-      - ${EDAX_HOST_DIR}:/edax:ro
     deploy:
       replicas: 0
 
