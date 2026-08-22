@@ -144,21 +144,26 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 		// A savable priority position still gets an empty-evaluation row so ListLearnable finds it
 		// later (AddPositions never downgrades an existing row).
 		if isPriority && discCount <= book.MaxSavableDiscs {
-			if err := s.repo.AddPositions(r.Context(), []othello.NormalizedPosition{normalized}); err != nil {
+			if inserted, err := s.repo.AddPositionsInserted(r.Context(), []othello.NormalizedPosition{normalized}); err != nil {
 				log.Printf("failed to schedule priority position for learning: %v", err)
+			} else {
+				s.bookStatsRecordInsert(r.Context(), discCount, inserted)
 			}
 		}
 	case isPriority:
 		if discCount <= book.MaxSavableDiscs {
-			if saveErr := s.repo.SaveEvaluation(r.Context(), normalized, eval); saveErr != nil {
+			if outcome, saveErr := s.repo.SaveEvaluationOutcome(r.Context(), normalized, eval); saveErr != nil {
 				if errors.Is(saveErr, db.ErrPositionNotFound) {
 					// Position has no row yet; add one and retry.
-					if addErr := s.repo.AddPositions(r.Context(), []othello.NormalizedPosition{normalized}); addErr != nil {
+					if inserted, addErr := s.repo.AddPositionsInserted(r.Context(), []othello.NormalizedPosition{normalized}); addErr != nil {
 						log.Printf("failed to add priority position: %v", addErr)
-					} else if saveErr2 := s.repo.SaveEvaluation(r.Context(), normalized, eval); saveErr2 != nil {
+					} else if outcome2, saveErr2 := s.repo.SaveEvaluationOutcome(r.Context(), normalized, eval); saveErr2 != nil {
+						s.bookStatsRecordInsert(r.Context(), discCount, inserted)
 						log.Printf("failed to save priority evaluation after AddPositions: %v", saveErr2)
 					} else {
 						savedToDB = true
+						s.bookStatsRecordInsert(r.Context(), discCount, inserted)
+						s.bookStatsRecordSave(r.Context(), discCount, outcome2, req.Level)
 					}
 				} else {
 					writeError(w, http.StatusInternalServerError, saveErr)
@@ -166,12 +171,14 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 				}
 			} else {
 				savedToDB = true
+				s.bookStatsRecordSave(r.Context(), discCount, outcome, req.Level)
 			}
 		}
 		// Too many discs: the ephemeral cache is the only record.
 	default:
 		// ErrPositionNotFound is a real bug here: every ListLearnable position already has a row.
-		if err := s.repo.SaveEvaluation(r.Context(), normalized, eval); err != nil {
+		outcome, err := s.repo.SaveEvaluationOutcome(r.Context(), normalized, eval)
+		if err != nil {
 			if errors.Is(err, db.ErrPositionNotFound) {
 				writeError(w, http.StatusNotFound, err)
 				return
@@ -180,6 +187,7 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		savedToDB = true
+		s.bookStatsRecordSave(r.Context(), discCount, outcome, req.Level)
 	}
 
 	if savedToDB {

@@ -40,8 +40,9 @@ stored in Postgres, and browsed via a web frontend.
   `internal/edax.SearchParams`); migrations via golang-migrate
   (`migrations/`), one-shot operator SQL in `scripts/`
 - Redis — job claims, worker heartbeats, priority queue, ephemeral
-  analysis results, and the `book_stats` hash (rebuilt from the DB every
-  60s; serves `GET /api/stats` and derives the job floor)
+  analysis results, and the `book_stats` hash (serves `GET /api/stats`
+  and derives the job floor; updated incrementally on every save, with a
+  slow full resync from the DB to correct drift)
 - edax — external binary; `EDAX_PATH` in `.env` (see `.env.sample`)
 - Frontend — Go `html/template` + vanilla JS/CSS in `static/`, no build step
 - Scripts: `local.sh` (dev stack: compose Postgres/Redis, migrate, seed,

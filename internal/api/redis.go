@@ -12,6 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/lk16/flippy/internal/book"
+	"github.com/lk16/flippy/internal/db"
 	"github.com/lk16/flippy/internal/edax"
 )
 
@@ -34,13 +35,15 @@ func NewRedisClient(ctx context.Context, url string) (*redis.Client, error) {
 // claimTTL is how long a job claim or worker hash survives without a refresh.
 const claimTTL = 5 * time.Minute
 
-// bookStatsKey is the Redis hash of position counts per "<depth>:<confidence>:<discs>" field,
-// rebuilt periodically because the underlying GROUP BY is slow at millions of rows.
+// bookStatsKey is the Redis hash of position counts per "<depth>:<confidence>:<discs>" field.
+// Saves handled by the server adjust it incrementally (see bookStatsRecordSave); the periodic full
+// rebuild only corrects drift, because the underlying GROUP BY is slow at millions of rows.
 const bookStatsKey = "book_stats"
 
-// bookStatsRefreshInterval is how often the book_stats hash is rebuilt; both consumers tolerate
-// the staleness.
-const bookStatsRefreshInterval = 60 * time.Second
+// bookStatsRefreshInterval is how often the book_stats hash is fully resynced from the DB,
+// correcting drift from loader writes (which bypass the server), Redis restarts, and increments
+// racing the swap. In between, the incremental counters keep the hash current.
+const bookStatsRefreshInterval = 15 * time.Minute
 
 // Redis field names within a worker's hash (see workerKey).
 const (
@@ -160,6 +163,61 @@ func (s *Server) rebuildBookStats(ctx context.Context) error {
 	return nil
 }
 
+// bookStatsField returns the book_stats hash field for discCount-disc positions evaluated at
+// level; level 0 (unlearned) reports depth 0, confidence 0, matching statEntries.
+func bookStatsField(discCount, level int) string {
+	depth, confidence := 0, 0
+	if level > 0 {
+		depth, confidence = edax.SearchParams(discCount, level)
+	}
+	return fmt.Sprintf("%d:%d:%d", depth, confidence, discCount)
+}
+
+// bookStatsDeltaScript applies HINCRBY deltas ((field, delta) pairs in ARGV) to the book_stats
+// hash, but only when it already exists: creating it here would present a nearly-empty hash as
+// authoritative until the next full resync.
+var bookStatsDeltaScript = redis.NewScript(`
+if redis.call('EXISTS', KEYS[1]) == 0 then
+	return 0
+end
+for i = 1, #ARGV, 2 do
+	redis.call('HINCRBY', KEYS[1], ARGV[i], ARGV[i + 1])
+end
+return 1`)
+
+// applyBookStatsDeltas adjusts book_stats counters by (field, delta) pairs in one atomic script
+// call. Best-effort: on error the hash merely drifts until the next full resync, so log rather
+// than fail the caller's request.
+func (s *Server) applyBookStatsDeltas(ctx context.Context, fieldDeltas ...any) {
+	if err := bookStatsDeltaScript.Run(ctx, s.redis, []string{bookStatsKey}, fieldDeltas...).Err(); err != nil {
+		log.Printf("failed to update book stats incrementally: %v", err)
+	}
+}
+
+// bookStatsRecordInsert counts freshly inserted unlearned rows with discCount discs.
+func (s *Server) bookStatsRecordInsert(ctx context.Context, discCount, inserted int) {
+	if inserted == 0 {
+		return
+	}
+	s.applyBookStatsDeltas(ctx, bookStatsField(discCount, 0), inserted)
+}
+
+// bookStatsRecordSave moves one discCount-disc position from outcome.OldLevel's stats cell to
+// newLevel's, when the save updated the row and the levels map to different cells.
+func (s *Server) bookStatsRecordSave(ctx context.Context, discCount int, outcome db.SaveOutcome, newLevel int) {
+	if !outcome.Updated {
+		return
+	}
+
+	oldField := bookStatsField(discCount, outcome.OldLevel)
+	newField := bookStatsField(discCount, newLevel)
+	if oldField == newField {
+		return
+	}
+
+	s.applyBookStatsDeltas(ctx, oldField, -1, newField, 1)
+}
+
 // getBookStats reads the book_stats hash, sorted like statEntries; ok is false when the hash is
 // missing (Redis flushed, first boot race) and the caller should fall back to the DB.
 func (s *Server) getBookStats(ctx context.Context) (entries []statEntry, ok bool, err error) {
@@ -179,6 +237,10 @@ func (s *Server) getBookStats(ctx context.Context) (entries []statEntry, ok bool
 		}
 		count, err := strconv.Atoi(value)
 		if err != nil {
+			continue
+		}
+		if count <= 0 {
+			// A cell decremented to zero lingers in the hash until the next full resync.
 			continue
 		}
 		e.Count = count

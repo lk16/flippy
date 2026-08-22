@@ -107,33 +107,51 @@ func (r *Repository) GetPosition(ctx context.Context, position othello.Position)
 	return eval, nil
 }
 
+// SaveOutcome reports what SaveEvaluationOutcome did: whether the row was updated, and the level
+// it held beforehand (0 for unlearned).
+type SaveOutcome struct {
+	Updated  bool
+	OldLevel int
+}
+
 // SaveEvaluation updates an existing position's evaluation, but only if its level improves on
 // what's stored; a non-improving result is a silent no-op. Never inserts a row:
-// ErrPositionNotFound if none exists.
+// ErrPositionNotFound if none exists. Use SaveEvaluationOutcome instead when the effect matters.
 func (r *Repository) SaveEvaluation(ctx context.Context, position othello.NormalizedPosition, eval Evaluation) error {
+	_, err := r.SaveEvaluationOutcome(ctx, position, eval)
+	return err
+}
+
+// SaveEvaluationOutcome is SaveEvaluation, also reporting whether the row was updated and the
+// level it held before, so callers can maintain per-level counters incrementally.
+func (r *Repository) SaveEvaluationOutcome(
+	ctx context.Context, position othello.NormalizedPosition, eval Evaluation,
+) (SaveOutcome, error) {
 	encoded := position.Position().Bytes()
 
-	// The outer EXISTS tells whether the row exists at all when the UPDATE's WHERE doesn't fire.
-	var exists bool
+	// The old CTE reads the statement's snapshot, i.e. the pre-update level; zero rows from it
+	// means the position has no row at all.
+	var outcome SaveOutcome
 	err := r.db.QueryRow(ctx,
-		`WITH updated AS (
+		`WITH old AS (
+			SELECT level FROM boards WHERE position = $3
+		 ), updated AS (
 			UPDATE boards
 			SET level = $1, score = $2
 			WHERE position = $3 AND $1::smallint > level
 			RETURNING position
 		 )
-		 SELECT EXISTS (SELECT 1 FROM boards WHERE position = $3)`,
+		 SELECT old.level, EXISTS (SELECT 1 FROM updated) FROM old`,
 		eval.Level, eval.Score, encoded,
-	).Scan(&exists)
+	).Scan(&outcome.OldLevel, &outcome.Updated)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return SaveOutcome{}, ErrPositionNotFound
+	}
 	if err != nil {
-		return fmt.Errorf("failed to save evaluation: %w", err)
+		return SaveOutcome{}, fmt.Errorf("failed to save evaluation: %w", err)
 	}
 
-	if !exists {
-		return ErrPositionNotFound
-	}
-
-	return nil
+	return outcome, nil
 }
 
 // PositionEvaluation pairs a NormalizedPosition with its current evaluation.

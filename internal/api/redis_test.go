@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
@@ -130,6 +131,49 @@ func TestServer_RebuildBookStats_EmptyDBClearsHash(t *testing.T) {
 	_, ok, err := s.getBookStats(ctx)
 	require.NoError(t, err)
 	require.False(t, ok)
+}
+
+func TestServer_BookStats_IncrementalSave(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+	require.NoError(t, s.rebuildBookStats(ctx))
+
+	// A submitted target-level result moves the position's counter to the new cell without a
+	// rebuild; the decremented-to-zero unlearned cell is filtered out of reads.
+	level := TargetLevel(12)
+	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", jobResultRequest{
+		WorkerID: "w1", Position: position.String(), Level: level, Score: 2,
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	depth, confidence := edax.SearchParams(12, level)
+	entries, ok, err := s.getBookStats(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, []statEntry{
+		{DiscCount: 12, Depth: depth, Confidence: confidence, Count: 1},
+	}, entries)
+}
+
+func TestServer_BookStats_NoPartialHashCreated(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+
+	// No hash exists yet; an incremental update must not create a nearly-empty one.
+	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", jobResultRequest{
+		WorkerID: "w1", Position: position.String(), Level: TargetLevel(12), Score: 2,
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	exists, err := s.redis.Exists(ctx, bookStatsKey).Result()
+	require.NoError(t, err)
+	require.Zero(t, exists)
 }
 
 func TestServer_GetBookStats_MissingHash(t *testing.T) {
