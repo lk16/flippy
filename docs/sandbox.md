@@ -18,9 +18,18 @@ won't point at the host's tools or module cache. Set these before any Go or
 dev-tool commands:
 
     export PATH="$PATH:$(echo /home/*/.local/bin | tr ' ' ':')"  # migrate, gotestsum, golangci-lint
-    export GOMODCACHE="$(echo /home/*/.local/go/pkg/mod)"        # host module cache
+    # The host module cache is mounted read-only, and go needs to write into
+    # GOMODCACHE (stat cache, lock files) — pointing GOMODCACHE at it fails with
+    # "read-only file system". Instead use a writable cache and serve the host's
+    # downloaded modules through GOPROXY's file:// form:
+    export GOMODCACHE="$HOME/go/pkg/mod"
+    export GOPROXY="file://$(echo /home/*/.local/go/pkg/mod/cache/download)"
+    export GOSUMDB=off   # sum.golang.org is blocked; hashes still checked against go.sum
     # Note: multiple /home/*/ dirs exist here (agent + luuk); the tr joins the
     # glob matches with ':' so PATH isn't corrupted by a space-separated entry.
+    # Only module versions the host has actually downloaded are servable: adding a
+    # NEW dependency usually dies on a missing .mod/.zip somewhere in the graph
+    # (fetch it on the host first, or pick an approach without new deps).
 
 Same deal for Rust/cargo (used by wasm/edax-eval, the only Rust crate in this
 repo): set these before any cargo/rustup commands:
@@ -69,6 +78,16 @@ Other quirks:
 
 - redis-cli and psql aren't installed; use docker exec to reach the containers
 - gofmt -l ./... fails (path resolution); use gofmt -l ./cmd ./internal
+- docker can pull Docker Hub images (docker.io is allowed), but network
+  *inside* `docker build` containers hits the default-deny policy: apt against
+  deb.debian.org, go mod download, and curl to github.com all 403. Full image
+  builds therefore fail here even when the Dockerfile is correct — verify the
+  pieces outside docker (gcc/qemu-user for C, GOOS/GOARCH cross-builds for Go)
+  and let CI do the real build.
+- apt over https://archive.ubuntu.com works (see above), so host-side
+  cross-verification tooling is installable: gcc-aarch64-linux-gnu +
+  libc6-dev-arm64-cross + qemu-user compile and run arm64 binaries
+  (`qemu-aarch64 -L /usr/aarch64-linux-gnu <binary>`).
 
 If you find something missing from this file, you may edit it
 (docs/sandbox.md). Rules: separate commit, and end your summary with
