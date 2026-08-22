@@ -10,7 +10,9 @@ stored in Postgres, and browsed via a web frontend.
   the DB, with an in-memory minimax cache (`internal/book`) that backfills
   every <12-disc position from the 12-disc evaluations. Endpoints workers
   mutate book state through require the `FLIPPY_WORKER_TOKEN` bearer
-  token; browsing endpoints and the pages are open.
+  token; browsing endpoints and the pages are open. `/healthz` answers as
+  soon as the listener is up; `/readyz` only once the cache has built and
+  Postgres/Redis ping; `/version` reports the build commit.
 - `cmd/worker` (`internal/worker`, `internal/edax`) — claims one job at a
   time from the server, evaluates it with one long-running edax
   subprocess, submits the result, heartbeats (each heartbeat refreshes the

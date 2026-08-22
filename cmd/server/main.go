@@ -102,10 +102,18 @@ func main() {
 	repo := db.NewRepository(pool)
 
 	cache := book.NewCache(repo)
-	if err := cache.Rebuild(ctx); err != nil {
-		log.Fatalf("failed to build minimax cache: %v", err)
-	}
-	log.Printf("minimax cache built: %d boards", cache.Len())
+
+	// Build the cache in the background so the listener (and /healthz) is up during the initial
+	// build; /readyz reports 503 until the first build succeeds.
+	go func() {
+		if err := cache.Rebuild(ctx); err != nil {
+			if ctx.Err() != nil {
+				return // Shutdown interrupted the build; not an error.
+			}
+			log.Fatalf("failed to build minimax cache: %v", err)
+		}
+		log.Printf("minimax cache built: %d boards", cache.Len())
+	}()
 
 	apiServer := api.NewServer(repo, redisClient, cache, workerToken)
 	go apiServer.RunBookStatsRefresh(ctx)
@@ -118,6 +126,9 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/api/", apiServer.Handler())
 	mux.Handle("/ws", apiServer.Handler())
+	mux.Handle("/healthz", apiServer.Handler())
+	mux.Handle("/readyz", apiServer.Handler())
+	mux.Handle("/version", apiServer.Handler())
 	mux.Handle("/", webServer.Handler())
 
 	httpServer := &http.Server{Addr: addr, Handler: logRequests(mux)}

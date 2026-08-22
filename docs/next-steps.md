@@ -14,7 +14,6 @@ is required — pick items up when a real need appears.
 - **Admin-page auth**: the worker API now requires the
   `FLIPPY_WORKER_TOKEN` bearer token, but the HTML admin pages and
   read-only API are open. Old had Basic Auth on the admin pages.
-- **`GET /version`**: no version/build-info endpoint.
 - **Stricter evaluation validation**: submitted results check
   level/score bounds, but nothing rejects a too-shallow one — it is the
   DB write that is gated on the board's target level (`isBookQuality`),

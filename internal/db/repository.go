@@ -43,6 +43,15 @@ func NewRepository(db querier) *Repository {
 	return &Repository{db: db}
 }
 
+// Ping verifies the database is reachable with a trivial query.
+func (r *Repository) Ping(ctx context.Context) error {
+	var one int
+	if err := r.db.QueryRow(ctx, "SELECT 1").Scan(&one); err != nil {
+		return fmt.Errorf("failed to ping database: %w", err)
+	}
+	return nil
+}
+
 // AddPositions inserts positions that don't already have a row, leaving existing rows untouched.
 // Use AddPositionsInserted instead when the number of rows actually inserted is needed.
 func (r *Repository) AddPositions(ctx context.Context, positions []othello.NormalizedPosition) error {

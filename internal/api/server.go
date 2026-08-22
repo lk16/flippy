@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 
@@ -28,6 +29,11 @@ type Server struct {
 	connsMu    sync.Mutex
 	liveConns  map[string]struct{}
 	lastConnID int64
+
+	// Cached dependency-ping outcome for /readyz (see pingDependencies).
+	readyMu        sync.Mutex
+	readyCheckedAt time.Time
+	readyErr       error
 }
 
 // NewServer returns a Server backed by repo, redisClient, and cache. workerToken guards the
@@ -55,6 +61,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/level-config", s.handleLevelConfig)
 	mux.HandleFunc("POST /api/pgn", s.handlePGN)
 	mux.HandleFunc("GET /ws", s.handleWebSocket)
+	mux.HandleFunc("GET /healthz", s.handleHealthz)
+	mux.HandleFunc("GET /readyz", s.handleReadyz)
+	mux.HandleFunc("GET /version", s.handleVersion)
 
 	return mux
 }
