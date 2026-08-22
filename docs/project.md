@@ -8,7 +8,9 @@ stored in Postgres, and browsed via a web frontend.
 - `cmd/server` (`internal/api`, `internal/web`) — REST API + websocket +
   HTML admin pages (game/analysis, stats, clients). Serves evaluations from
   the DB, with an in-memory minimax cache (`internal/book`) that backfills
-  every <12-disc position from the 12-disc evaluations.
+  every <12-disc position from the 12-disc evaluations. Endpoints workers
+  mutate book state through require the `FLIPPY_WORKER_TOKEN` bearer
+  token; browsing endpoints and the pages are open.
 - `cmd/worker` (`internal/worker`, `internal/edax`) — claims one job at a
   time from the server, evaluates it with one long-running edax
   subprocess, submits the result, heartbeats (each heartbeat refreshes the

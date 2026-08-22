@@ -22,6 +22,9 @@ fi
 COMPOSE_FILE="docker-compose.yml"
 export FLIPPY_POSTGRES_URL="postgres://flippy:flippy@localhost:12321/flippy?sslmode=disable"
 export FLIPPY_REDIS_URL="redis://localhost:12323/0"
+# The server refuses to start without a worker token; default one for the
+# local stack, where the API is only reachable on localhost anyway.
+export FLIPPY_WORKER_TOKEN="${FLIPPY_WORKER_TOKEN:-local-dev-token}"
 
 # A real binary, not `go run`, so that killing SERVER_PID below reliably
 # reaches the actual server process and its own graceful-shutdown handling

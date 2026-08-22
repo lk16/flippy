@@ -30,6 +30,7 @@ func doRequest(t *testing.T, s *Server, method, target string, body any) *httpte
 	}
 
 	req := httptest.NewRequest(method, target, reader)
+	req.Header.Set("Authorization", "Bearer "+testWorkerToken)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 	return w
@@ -140,6 +141,7 @@ func TestHandleSubmitJobResult_RebuildsMinimaxCache(t *testing.T) {
 func TestHandleSubmitJobResult_InvalidBody(t *testing.T) {
 	s := testServer(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/jobs/result", bytes.NewReader([]byte("not json")))
+	req.Header.Set("Authorization", "Bearer "+testWorkerToken)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 	require.Equal(t, http.StatusBadRequest, w.Code)
@@ -306,6 +308,7 @@ func TestHandleReleaseJob_DoesNotRevokeAnotherWorkersClaim(t *testing.T) {
 func TestHandleReleaseJob_InvalidBody(t *testing.T) {
 	s := testServer(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/jobs/release", bytes.NewReader([]byte("not json")))
+	req.Header.Set("Authorization", "Bearer "+testWorkerToken)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 	require.Equal(t, http.StatusBadRequest, w.Code)

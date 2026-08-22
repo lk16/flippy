@@ -11,8 +11,9 @@ is required — pick items up when a real need appears.
 
 ## Features
 
-- **Auth**: no request auth at all. Old had X-Token/Basic Auth middleware
-  on the API and separate Basic Auth on the HTML admin pages.
+- **Admin-page auth**: the worker API now requires the
+  `FLIPPY_WORKER_TOKEN` bearer token, but the HTML admin pages and
+  read-only API are open. Old had Basic Auth on the admin pages.
 - **`GET /version`**: no version/build-info endpoint.
 - **Stricter evaluation validation**: submitted results check
   level/score bounds, but nothing rejects a too-shallow one — it is the

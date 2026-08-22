@@ -25,16 +25,19 @@ type Client struct {
 	workerID   string
 	hostname   string
 	gitCommit  string
+	token      string
 	httpClient *http.Client
 }
 
-// NewClient returns a Client for the API server at baseURL, identifying as workerID.
-func NewClient(baseURL, workerID, hostname, gitCommit string) *Client {
+// NewClient returns a Client for the API server at baseURL, identifying as workerID and
+// authenticating every request with token.
+func NewClient(baseURL, workerID, hostname, gitCommit, token string) *Client {
 	return &Client{
 		baseURL:    baseURL,
 		workerID:   workerID,
 		hostname:   hostname,
 		gitCommit:  gitCommit,
+		token:      token,
 		httpClient: http.DefaultClient,
 	}
 }
@@ -54,6 +57,7 @@ func (c *Client) GetJob(ctx context.Context) (job Job, ok bool, err error) {
 	if err != nil {
 		return Job{}, false, fmt.Errorf("failed to build request: %w", err)
 	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -140,6 +144,7 @@ func (c *Client) post(ctx context.Context, path string, body any) error {
 		return fmt.Errorf("failed to build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

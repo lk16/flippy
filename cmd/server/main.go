@@ -77,6 +77,7 @@ func main() {
 
 	postgresURL := requiredEnv("FLIPPY_POSTGRES_URL")
 	redisURL := requiredEnv("FLIPPY_REDIS_URL")
+	workerToken := requiredEnv("FLIPPY_WORKER_TOKEN")
 
 	addr := os.Getenv("FLIPPY_SERVER_ADDR")
 	if addr == "" {
@@ -106,7 +107,7 @@ func main() {
 	}
 	log.Printf("minimax cache built: %d boards", cache.Len())
 
-	apiServer := api.NewServer(repo, redisClient, cache)
+	apiServer := api.NewServer(repo, redisClient, cache, workerToken)
 	go apiServer.RunBookStatsRefresh(ctx)
 
 	webServer, err := web.NewServer()

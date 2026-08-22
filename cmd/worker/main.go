@@ -34,6 +34,7 @@ func main() {
 	}
 
 	serverURL := requiredEnv("FLIPPY_SERVER_URL")
+	workerToken := requiredEnv("FLIPPY_WORKER_TOKEN")
 
 	edaxPath, err := edax.PathFromEnv()
 	if err != nil {
@@ -52,7 +53,7 @@ func main() {
 	}
 
 	edaxProcess := edax.NewProcess(edaxPath, *edaxTasks)
-	client := worker.NewClient(serverURL, workerID, hostname, version.Get())
+	client := worker.NewClient(serverURL, workerID, hostname, version.Get(), workerToken)
 	w := worker.New(client, edaxProcess)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
