@@ -45,8 +45,10 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd cmd
 COPY internal internal
-ARG TARGETOS TARGETARCH
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /worker ./cmd/worker
+ARG TARGETOS TARGETARCH COMMIT=unknown
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
+    -ldflags "-X github.com/lk16/flippy/internal/version.Commit=$COMMIT" \
+    -o /worker ./cmd/worker
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \

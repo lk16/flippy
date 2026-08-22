@@ -5,13 +5,12 @@ import (
 	"flag"
 	"log"
 	"os"
-	"os/exec"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/lk16/flippy/internal/edax"
 	"github.com/lk16/flippy/internal/env"
+	"github.com/lk16/flippy/internal/version"
 	"github.com/lk16/flippy/internal/worker"
 )
 
@@ -21,15 +20,6 @@ func requiredEnv(name string) string {
 		log.Fatalf("%s environment variable is not set", name)
 	}
 	return value
-}
-
-// gitCommit best-effort determines the build commit, falling back to "unknown" without a .git directory.
-func gitCommit() string {
-	out, err := exec.Command("git", "rev-parse", "HEAD").Output()
-	if err != nil {
-		return "unknown"
-	}
-	return strings.TrimSpace(string(out))
 }
 
 func main() {
@@ -62,7 +52,7 @@ func main() {
 	}
 
 	edaxProcess := edax.NewProcess(edaxPath, *edaxTasks)
-	client := worker.NewClient(serverURL, workerID, hostname, gitCommit())
+	client := worker.NewClient(serverURL, workerID, hostname, version.Get())
 	w := worker.New(client, edaxProcess)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

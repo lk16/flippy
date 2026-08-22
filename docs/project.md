@@ -43,4 +43,7 @@ stored in Postgres, and browsed via a web frontend.
 - Scripts: `local.sh` (dev stack: compose Postgres/Redis, migrate, seed,
   server), `test.sh` (full test suite), `archive_book.sh` (gzipped pg_dump
   of the book to `backups/`), `sandbox.sh` (Claude in an sbx sandbox)
-- CI: `.github/workflows/ci.yml` (fmt, golangci-lint, tests)
+- CI: `.github/workflows/ci.yml` (fmt, golangci-lint, tests);
+  `publish.yml` pushes multi-arch (amd64/arm64) server, worker, and
+  migrations images to ghcr.io on pushes to `main` and tags, tagged by
+  commit sha — deployments pin a sha, there is no `latest`

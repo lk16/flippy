@@ -17,6 +17,7 @@ import (
 	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
 	"github.com/lk16/flippy/internal/env"
+	"github.com/lk16/flippy/internal/version"
 	"github.com/lk16/flippy/internal/web"
 )
 
@@ -131,7 +132,7 @@ func main() {
 		}
 	}()
 
-	log.Printf("flippy server listening on %s", addr)
+	log.Printf("flippy server %s listening on %s", version.Get(), addr)
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("server error: %v", err)
 	}
