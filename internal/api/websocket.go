@@ -2,10 +2,13 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
-	"strconv"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -46,29 +49,74 @@ type wsEvaluationResponse struct {
 	Evaluations []wsEvaluation `json:"evaluations"`
 }
 
+// connTTL is how long a websocket connection's liveness key survives without a refresh, so a
+// crashed replica's connections expire on their own instead of counting as live forever.
+const connTTL = 90 * time.Second
+
+// connRefreshInterval is how often an open connection's liveness key TTL is pushed out.
+const connRefreshInterval = 30 * time.Second
+
+// connKey is the Redis key marking websocket connection id as open. Liveness lives in Redis so any
+// replica can answer whether a requester is still connected (see dequeuePriority), not only the
+// one holding the socket.
+func connKey(id string) string {
+	return "conn:" + id
+}
+
+// newConnID returns a random connection identifier; random so IDs minted by different replicas
+// can't collide.
+func newConnID() (string, error) {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("failed to generate connection id: %w", err)
+	}
+	return hex.EncodeToString(buf), nil
+}
+
 // registerConn allocates a connection ID and marks it live.
-func (s *Server) registerConn() string {
-	s.connsMu.Lock()
-	defer s.connsMu.Unlock()
-	s.lastConnID++
-	id := strconv.FormatInt(s.lastConnID, 10)
-	s.liveConns[id] = struct{}{}
-	return id
+func (s *Server) registerConn(ctx context.Context) (string, error) {
+	id, err := newConnID()
+	if err != nil {
+		return "", err
+	}
+	if err := s.redis.Set(ctx, connKey(id), "1", connTTL).Err(); err != nil {
+		return "", fmt.Errorf("failed to register connection: %w", err)
+	}
+	return id, nil
 }
 
-// unregisterConn marks a connection ID as no longer live.
-func (s *Server) unregisterConn(id string) {
-	s.connsMu.Lock()
-	defer s.connsMu.Unlock()
-	delete(s.liveConns, id)
+// unregisterConn marks a connection ID as no longer live; on error the key's TTL cleans it up.
+func (s *Server) unregisterConn(ctx context.Context, id string) {
+	if err := s.redis.Del(ctx, connKey(id)).Err(); err != nil {
+		log.Printf("failed to unregister connection %s: %v", id, err)
+	}
 }
 
-// connLive reports whether a connection ID is still live.
-func (s *Server) connLive(id string) bool {
-	s.connsMu.Lock()
-	defer s.connsMu.Unlock()
-	_, ok := s.liveConns[id]
-	return ok
+// refreshConn keeps id's liveness key alive until ctx is canceled.
+func (s *Server) refreshConn(ctx context.Context, id string) {
+	ticker := time.NewTicker(connRefreshInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := s.redis.Expire(ctx, connKey(id), connTTL).Err(); err != nil {
+				log.Printf("failed to refresh connection %s: %v", id, err)
+			}
+		}
+	}
+}
+
+// connLive reports whether a connection ID is still live on any replica. A Redis error counts as
+// live, so a hiccup never drops queued work whose requester is in fact still waiting.
+func (s *Server) connLive(ctx context.Context, id string) bool {
+	n, err := s.redis.Exists(ctx, connKey(id)).Result()
+	if err != nil {
+		return true
+	}
+	return n == 1
 }
 
 // handleWebSocket handles GET /ws: a persistent connection for batched evaluation lookups.
@@ -79,10 +127,23 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = conn.CloseNow() }()
 
-	connID := s.registerConn()
-	defer s.unregisterConn(connID)
-
 	ctx := r.Context()
+
+	connID, err := s.registerConn(ctx)
+	if err != nil {
+		// Without a liveness key, tag no connection: analyze requests queue untagged rather than
+		// being dropped as dead at dequeue.
+		log.Printf("failed to register websocket connection: %v", err)
+		connID = ""
+	} else {
+		defer func() {
+			// r.Context() is canceled by the time this runs.
+			deadlineCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			s.unregisterConn(deadlineCtx, connID)
+		}()
+		go s.refreshConn(ctx, connID)
+	}
 
 	for {
 		var incoming wsIncoming

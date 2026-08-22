@@ -476,10 +476,11 @@ func TestDequeuePriority_DropsEntriesFromDeadConnections(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	connID := s.registerConn()
+	connID, err := s.registerConn(ctx)
+	require.NoError(t, err)
 	position := testPosition(t, 14)
 	require.NoError(t, s.enqueuePriority(ctx, position.String(), PriorityLevel, connID))
-	s.unregisterConn(connID)
+	s.unregisterConn(ctx, connID)
 
 	_, ok, err := s.dequeuePriority(ctx)
 	require.NoError(t, err)
@@ -497,14 +498,16 @@ func TestDequeuePriority_KeepsEntriesFromLiveConnections(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	deadConn := s.registerConn()
-	liveConn := s.registerConn()
+	deadConn, err := s.registerConn(ctx)
+	require.NoError(t, err)
+	liveConn, err := s.registerConn(ctx)
+	require.NoError(t, err)
 
 	deadBoard := testPosition(t, 14)
 	liveBoard := testPosition(t, 15)
 	require.NoError(t, s.enqueuePriority(ctx, deadBoard.String(), PriorityLevel, deadConn))
 	require.NoError(t, s.enqueuePriority(ctx, liveBoard.String(), PriorityLevel, liveConn))
-	s.unregisterConn(deadConn)
+	s.unregisterConn(ctx, deadConn)
 
 	entry, ok, err := s.dequeuePriority(ctx)
 	require.NoError(t, err)
@@ -522,13 +525,15 @@ func TestDequeuePriority_DedupeIsByBoardOnly(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	connA := s.registerConn()
-	connB := s.registerConn()
+	connA, err := s.registerConn(ctx)
+	require.NoError(t, err)
+	connB, err := s.registerConn(ctx)
+	require.NoError(t, err)
 	position := testPosition(t, 14)
 
 	require.NoError(t, s.enqueuePriority(ctx, position.String(), PriorityLevel, connA))
 	require.NoError(t, s.enqueuePriority(ctx, position.String(), PriorityLevel, connB)) // deduped: still tagged connA
-	s.unregisterConn(connA)
+	s.unregisterConn(ctx, connA)
 
 	_, ok, err := s.dequeuePriority(ctx)
 	require.NoError(t, err)
@@ -732,4 +737,21 @@ func TestLookupEvaluation_EphemeralCacheFallback(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, eval, result)
+}
+
+func TestConnLiveness_RedisBacked(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	connID, err := s.registerConn(ctx)
+	require.NoError(t, err)
+	require.True(t, s.connLive(ctx, connID))
+
+	// The key carries a TTL, so a crashed replica's connections expire on their own.
+	ttl, err := s.redis.TTL(ctx, connKey(connID)).Result()
+	require.NoError(t, err)
+	require.Greater(t, ttl, time.Duration(0))
+
+	s.unregisterConn(ctx, connID)
+	require.False(t, s.connLive(ctx, connID))
 }

@@ -451,7 +451,7 @@ func (s *Server) dequeuePriority(ctx context.Context) (priorityEntry, bool, erro
 
 		_ = s.redis.SRem(ctx, priorityPendingKey, entry.Position).Err()
 
-		if entry.ConnID != "" && !s.connLive(entry.ConnID) {
+		if entry.ConnID != "" && !s.connLive(ctx, entry.ConnID) {
 			continue
 		}
 

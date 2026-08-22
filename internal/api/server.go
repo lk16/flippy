@@ -24,12 +24,6 @@ type Server struct {
 	cache       *book.Cache
 	workerToken string
 
-	// liveConns tracks the websocket connections currently open, so dequeuePriority can drop
-	// analysis work whose requester is gone. In-memory is fine: this is a single-process deployment.
-	connsMu    sync.Mutex
-	liveConns  map[string]struct{}
-	lastConnID int64
-
 	// Cached dependency-ping outcome for /readyz (see pingDependencies).
 	readyMu        sync.Mutex
 	readyCheckedAt time.Time
@@ -39,10 +33,7 @@ type Server struct {
 // NewServer returns a Server backed by repo, redisClient, and cache. workerToken guards the
 // endpoints that mutate the book (see requireWorkerToken).
 func NewServer(repo *db.Repository, redisClient *redis.Client, cache *book.Cache, workerToken string) *Server {
-	return &Server{
-		repo: repo, redis: redisClient, cache: cache, workerToken: workerToken,
-		liveConns: make(map[string]struct{}),
-	}
+	return &Server{repo: repo, redis: redisClient, cache: cache, workerToken: workerToken}
 }
 
 // Handler returns the HTTP handler serving the JSON REST API and the "/ws" websocket endpoint.
