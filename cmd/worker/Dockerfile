@@ -17,12 +17,15 @@ RUN git clone --no-checkout "$EDAX_REPO" /edax-src \
 # ARCH=arm is the right makefile target for arm64: it adds no -march flags, and
 # NEON (which edax's ARM code uses) is baseline on aarch64. ARCH=x64 is the
 # portable amd64 build, matching the lEdax-x64 binary used in development.
+# bin/ is not tracked in the edax repo and the makefile does not create it, so
+# a fresh clone needs the directory made before the link step can write there.
 ARG TARGETARCH
 RUN case "$TARGETARCH" in \
     arm64) arch=arm ;; \
     amd64) arch=x64 ;; \
     *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
     esac \
+    && mkdir -p /edax-src/bin \
     && make -C /edax-src/src build ARCH="$arch" COMP=gcc OS=linux \
     && install -D "/edax-src/bin/lEdax-$arch" /edax/bin/edax
 
