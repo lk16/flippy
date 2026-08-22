@@ -26,10 +26,15 @@ func PathFromEnv() (string, error) {
 	return path, nil
 }
 
+// ErrStartFailed marks a failure to start the edax subprocess at all (missing binary, exec
+// error), which retrying cannot fix.
+var ErrStartFailed = errors.New("failed to start edax process")
+
 // Process manages a long-running edax subprocess, restarted only when the requested level changes.
 type Process struct {
-	path  string
-	tasks int
+	path          string
+	tasks         int
+	hashTableSize int
 
 	mu     sync.Mutex
 	level  int
@@ -40,9 +45,11 @@ type Process struct {
 
 // NewProcess returns a Process for the edax binary at path; no subprocess starts until the first
 // Evaluate. tasks caps the number of parallel search threads edax uses (its -n-tasks flag); tasks <= 0
-// leaves it unset, so edax defaults to one thread per CPU on the machine.
-func NewProcess(path string, tasks int) *Process {
-	return &Process{path: path, tasks: tasks}
+// leaves it unset, so edax defaults to one thread per CPU on the machine. hashTableSize sets edax's
+// hash table size in bits (its -hash-table-size flag, e.g. 20 = 2^20 entries); <= 0 leaves it at
+// edax's default.
+func NewProcess(path string, tasks, hashTableSize int) *Process {
+	return &Process{path: path, tasks: tasks, hashTableSize: hashTableSize}
 }
 
 // Evaluate sends position to edax for a search at level; it must have a legal move (edax crashes otherwise).
@@ -60,22 +67,30 @@ func (p *Process) Evaluate(position othello.Position, level int) (Evaluation, er
 	}
 
 	if _, err := io.WriteString(stdin, problemLine(position)); err != nil {
+		// The subprocess likely died (crash, OOM kill); tear it down so the next Evaluate starts a
+		// fresh one instead of reusing dead pipes.
+		_ = p.Close()
 		return Evaluation{}, fmt.Errorf("failed to write problem to edax: %w", err)
 	}
 
 	eval, err := parseFinalEvaluation(stdout)
 	if err != nil {
+		_ = p.Close()
 		return Evaluation{}, fmt.Errorf("failed to parse edax output: %w", err)
 	}
 
 	return eval, nil
 }
 
-// buildArgs returns the edax arguments for a -solve search at level; -n-tasks only when tasks > 0.
-func buildArgs(level, tasks int) []string {
+// buildArgs returns the edax arguments for a -solve search at level; -n-tasks and -hash-table-size
+// only when positive.
+func buildArgs(level, tasks, hashTableSize int) []string {
 	args := []string{"-solve", "/dev/stdin", "-level", strconv.Itoa(level), "-verbose", "3"}
 	if tasks > 0 {
 		args = append(args, "-n-tasks", strconv.Itoa(tasks))
+	}
+	if hashTableSize > 0 {
+		args = append(args, "-hash-table-size", strconv.Itoa(hashTableSize))
 	}
 	return args
 }
@@ -100,7 +115,7 @@ func (p *Process) ensureStarted(level int) (io.Writer, *bufio.Reader, error) {
 		p.stdout = nil
 	}
 
-	cmd := exec.Command(p.path, buildArgs(level, p.tasks)...)
+	cmd := exec.Command(p.path, buildArgs(level, p.tasks, p.hashTableSize)...)
 	cmd.Dir = filepath.Join(filepath.Dir(p.path), "..")
 
 	stdin, err := cmd.StdinPipe()
@@ -118,7 +133,7 @@ func (p *Process) ensureStarted(level int) (io.Writer, *bufio.Reader, error) {
 		// Close the pipes we opened so a repeatedly-failing Start doesn't leak file descriptors.
 		_ = stdin.Close()
 		_ = stdout.Close()
-		return nil, nil, fmt.Errorf("failed to start edax process: %w", err)
+		return nil, nil, fmt.Errorf("%w: %w", ErrStartFailed, err)
 	}
 
 	p.cmd = cmd

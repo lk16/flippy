@@ -15,12 +15,12 @@ import (
 )
 
 func TestBuildArgs_OmitsNTasksWhenUnset(t *testing.T) {
-	require.NotContains(t, buildArgs(16, 0), "-n-tasks")
-	require.NotContains(t, buildArgs(16, -1), "-n-tasks")
+	require.NotContains(t, buildArgs(16, 0, 0), "-n-tasks")
+	require.NotContains(t, buildArgs(16, -1, 0), "-n-tasks")
 }
 
 func TestBuildArgs_IncludesNTasksWhenPositive(t *testing.T) {
-	args := buildArgs(16, 4)
+	args := buildArgs(16, 4, 0)
 	idx := slices.Index(args, "-n-tasks")
 	require.GreaterOrEqual(t, idx, 0)
 	require.Equal(t, "4", args[idx+1])
@@ -36,7 +36,7 @@ func testProcess(t *testing.T) *Process {
 		t.Skip("EDAX_PATH not set; skipping test requiring the real edax binary")
 	}
 
-	p := NewProcess(path, 0)
+	p := NewProcess(path, 0, 0)
 	t.Cleanup(func() { _ = p.Close() })
 
 	return p
@@ -66,7 +66,7 @@ func TestProcess_Evaluate(t *testing.T) {
 }
 
 func TestProcess_Evaluate_BinaryNotFound(t *testing.T) {
-	p := NewProcess("/does/not/exist/lEdax-x64", 0)
+	p := NewProcess("/does/not/exist/lEdax-x64", 0, 0)
 
 	_, err := p.Evaluate(othello.NewStartPosition(), 10)
 	require.Error(t, err)
@@ -79,7 +79,7 @@ func TestProcess_Evaluate_FailedStartDoesNotLeakFDs(t *testing.T) {
 		t.Skip("open-fd count is read from /proc, which is Linux-only")
 	}
 
-	p := NewProcess("/does/not/exist/lEdax-x64", 0)
+	p := NewProcess("/does/not/exist/lEdax-x64", 0, 0)
 
 	// Warm up once so any one-time allocations aren't counted as a leak.
 	_, err := p.Evaluate(othello.NewStartPosition(), 10)
@@ -123,7 +123,7 @@ func TestProcess_EnsureStarted_FailedRestartClearsStaleState(t *testing.T) {
 	})
 
 	// Simulate a running edax at level 6.
-	p := NewProcess("/does/not/exist/lEdax-x64", 0)
+	p := NewProcess("/does/not/exist/lEdax-x64", 0, 0)
 	p.cmd = prev
 	p.level = 6
 	p.stdin = w

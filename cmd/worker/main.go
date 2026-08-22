@@ -27,6 +27,10 @@ func main() {
 		"cap edax's parallel search threads per process (its -n-tasks flag); 0 leaves it unset, so "+
 			"edax defaults to one thread per CPU. Set this to run multiple workers on one machine "+
 			"without them oversubscribing its CPUs.")
+	edaxHashTableSize := flag.Int("edax-hash-table-size", 0,
+		"edax's hash table size in bits (its -hash-table-size flag, e.g. 20 = 2^20 entries); 0 "+
+			"leaves edax's default. Lower this to run several workers on one memory-constrained "+
+			"machine.")
 	flag.Parse()
 
 	if err := env.Load(); err != nil {
@@ -52,7 +56,7 @@ func main() {
 		hostname = "unknown"
 	}
 
-	edaxProcess := edax.NewProcess(edaxPath, *edaxTasks)
+	edaxProcess := edax.NewProcess(edaxPath, *edaxTasks, *edaxHashTableSize)
 	client := worker.NewClient(serverURL, workerID, hostname, version.Get(), workerToken)
 	w := worker.New(client, edaxProcess)
 
@@ -65,9 +69,14 @@ func main() {
 		_ = edaxProcess.Close()
 	}()
 
-	w.Run(ctx)
+	runErr := w.Run(ctx)
 
 	if err := edaxProcess.Close(); err != nil {
 		log.Printf("error closing edax process: %v", err)
+	}
+
+	// Exit non-zero on an unrecoverable edax failure, so an orchestrator restarts the pod.
+	if runErr != nil {
+		log.Fatalf("worker failed: %v", runErr)
 	}
 }

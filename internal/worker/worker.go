@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -22,6 +24,11 @@ const (
 	// releaseTimeout bounds a best-effort claim release on shutdown, run against a fresh context since
 	// Run's ctx is already canceled by the time it happens.
 	releaseTimeout = 5 * time.Second
+
+	// maxConsecutiveEvalFailures is how many evaluations in a row may fail before the worker gives
+	// up: a persistently failing edax won't heal by retrying, so exit and let the orchestrator
+	// restart the pod (with backoff) instead of looping forever.
+	maxConsecutiveEvalFailures = 5
 )
 
 // apiClient is the subset of Client's behavior Worker depends on, so tests can inject a fake.
@@ -54,6 +61,10 @@ type Worker struct {
 	claimed string
 
 	jobsCompleted atomic.Int64
+
+	// consecutiveEvalFailures counts evaluations failed in a row; reaching
+	// maxConsecutiveEvalFailures makes Run return an error.
+	consecutiveEvalFailures int
 }
 
 // New returns a Worker that claims jobs via api and evaluates them via edax.
@@ -68,19 +79,26 @@ func New(api apiClient, edax evaluator) *Worker {
 	}
 }
 
-// Run blocks running the job, heartbeat, and stats loops until ctx is canceled; callers must close
-// the edax process separately to interrupt a blocked evaluation, since ctx cancellation alone can't.
-func (w *Worker) Run(ctx context.Context) {
+// Run blocks running the job, heartbeat, and stats loops until ctx is canceled or edax fails
+// unrecoverably (non-nil return); callers must close the edax process separately to interrupt a
+// blocked evaluation, since ctx cancellation alone can't.
+func (w *Worker) Run(ctx context.Context) error {
+	// Canceled when the job loop gives up, so the heartbeat and stats loops die with it.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	var wg sync.WaitGroup
 	wg.Add(3)
 
+	var runErr error
 	go func() {
 		defer wg.Done()
-		w.runHeartbeat(ctx)
+		defer cancel()
+		runErr = w.runJobs(ctx)
 	}()
 	go func() {
 		defer wg.Done()
-		w.runJobs(ctx)
+		w.runHeartbeat(ctx)
 	}()
 	go func() {
 		defer wg.Done()
@@ -95,6 +113,8 @@ func (w *Worker) Run(ctx context.Context) {
 		w.releaseJob(position)
 		w.setClaimedPosition("")
 	}
+
+	return runErr
 }
 
 // setClaimedPosition records the position this worker currently holds a claim on ("" for none).
@@ -178,13 +198,14 @@ func (w *Worker) runHeartbeat(ctx context.Context) {
 }
 
 // runJobs claims and processes one job at a time until ctx is canceled, sleeping between attempts
-// when no job is available or claiming fails.
-func (w *Worker) runJobs(ctx context.Context) {
+// when no job is available or claiming fails. A non-nil return means edax failed unrecoverably and
+// the worker should exit.
+func (w *Worker) runJobs(ctx context.Context) error {
 	for ctx.Err() == nil {
 		job, ok, err := w.api.GetJob(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
-				return
+				return nil
 			}
 			log.Printf("failed to get job: %v", err)
 			sleep(ctx, w.errorSleep)
@@ -196,21 +217,27 @@ func (w *Worker) runJobs(ctx context.Context) {
 		}
 
 		w.setClaimedPosition(job.Position)
-		if stillClaimed := w.processJob(ctx, job); !stillClaimed {
+		stillClaimed, fatalErr := w.processJob(ctx, job)
+		if !stillClaimed {
 			w.setClaimedPosition("")
 		}
+		if fatalErr != nil {
+			return fatalErr
+		}
 	}
+	return nil
 }
 
-// processJob evaluates and submits job, sleeping before returning on failure. It reports whether the
-// worker still holds the claim on job's position, which is only the case after a shutdown mid-job; the
-// caller releases it then.
-func (w *Worker) processJob(ctx context.Context, job Job) (stillClaimed bool) {
+// processJob evaluates and submits job, sleeping before returning on failure. stillClaimed reports
+// whether the worker still holds the claim on job's position, which is only the case after a
+// shutdown mid-job; the caller releases it then. A non-nil fatalErr means edax is broken beyond
+// what retrying fixes.
+func (w *Worker) processJob(ctx context.Context, job Job) (stillClaimed bool, fatalErr error) {
 	position, err := othello.ParsePosition(job.Position)
 	if err != nil {
 		// The server always sends valid positions; this indicates a protocol mismatch, not a runtime fluke.
 		log.Printf("received unparseable position %q from server: %v", job.Position, err)
-		return false
+		return false, nil
 	}
 
 	eval, err := w.edax.Evaluate(position, job.Level)
@@ -218,24 +245,34 @@ func (w *Worker) processJob(ctx context.Context, job Job) (stillClaimed bool) {
 		if ctx.Err() != nil {
 			// Shutdown closed the edax process mid-evaluation; the claim is still held and Run
 			// releases it.
-			return true
+			return true, nil
+		}
+		if errors.Is(err, edax.ErrStartFailed) {
+			// A binary that doesn't start won't start next time either.
+			return false, err
+		}
+		w.consecutiveEvalFailures++
+		if w.consecutiveEvalFailures >= maxConsecutiveEvalFailures {
+			return false, fmt.Errorf("%d consecutive evaluation failures, last: %w",
+				w.consecutiveEvalFailures, err)
 		}
 		log.Printf("failed to evaluate job: %v", err)
 		sleep(ctx, w.errorSleep)
-		return false
+		return false, nil
 	}
+	w.consecutiveEvalFailures = 0
 
 	if err := w.api.SubmitJobResult(ctx, job.Position, job.Level, eval); err != nil {
 		if ctx.Err() != nil {
-			return true
+			return true, nil
 		}
 		log.Printf("failed to submit job result: %v", err)
 		sleep(ctx, w.errorSleep)
-		return false
+		return false, nil
 	}
 
 	w.jobsCompleted.Add(1)
-	return false
+	return false, nil
 }
 
 // sleep waits for d or until ctx is canceled, whichever comes first.

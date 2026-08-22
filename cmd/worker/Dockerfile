@@ -56,4 +56,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 COPY --from=edax-build /edax /edax
 COPY --from=go-build /worker /usr/local/bin/worker
 ENV EDAX_PATH=/edax/bin/edax
-ENTRYPOINT ["/bin/sh", "-c", "exec /usr/local/bin/worker -edax-tasks=${EDAX_TASKS:-1}"]
+ENTRYPOINT ["/bin/sh", "-c", "exec /usr/local/bin/worker -edax-tasks=${EDAX_TASKS:-1} -edax-hash-table-size=${EDAX_HASH_TABLE_SIZE:-0}"]
