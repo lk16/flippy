@@ -10,8 +10,12 @@ import (
 	"github.com/lk16/flippy/internal/othello"
 )
 
-// jobCandidateBatch is how many candidate positions are fetched per claim attempt.
-const jobCandidateBatch = 50
+// jobCandidateBatch is how many candidate positions are fetched per claim attempt. Every worker
+// sees the same ordering, so the batch has to outnumber the workers claiming from it concurrently:
+// once the first N candidates are all claimed, a batch of N leaves the next worker with nothing and
+// it sleeps out noJobSleep despite the book being full of work. 300 leaves room for a worker count
+// far past what we run today, and only costs a longer LIMIT on an indexed scan.
+const jobCandidateBatch = 300
 
 // Job is a position a worker should evaluate, and the level to search it at.
 type Job struct {
