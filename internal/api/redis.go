@@ -45,6 +45,14 @@ const bookStatsKey = "book_stats"
 // racing the swap. In between, the incremental counters keep the hash current.
 const bookStatsRefreshInterval = 15 * time.Minute
 
+// bookStatsLockKey elects the one replica that runs a stats resync, so the heavy GROUP BY runs
+// once per interval cluster-wide.
+const bookStatsLockKey = "book_stats:lock"
+
+// bookStatsLockTTL is slightly shorter than the refresh interval, so the next tick elects a fresh
+// runner while a died-mid-hold replica's lock still expires on its own.
+const bookStatsLockTTL = bookStatsRefreshInterval - 5*time.Second
+
 // Redis field names within a worker's hash (see workerKey).
 const (
 	workerFieldHostname          = "hostname"
@@ -107,12 +115,11 @@ func (s *Server) releaseClaim(ctx context.Context, position, workerID string) er
 	return nil
 }
 
-// RunBookStatsRefresh rebuilds the book_stats hash immediately and then every
-// bookStatsRefreshInterval, until ctx is canceled.
+// RunBookStatsRefresh attempts a book_stats resync immediately and then every
+// bookStatsRefreshInterval, until ctx is canceled; each attempt runs only on the replica that
+// wins that interval's lock.
 func (s *Server) RunBookStatsRefresh(ctx context.Context) {
-	if err := s.rebuildBookStats(ctx); err != nil {
-		log.Printf("failed to rebuild book stats: %v", err)
-	}
+	s.refreshBookStatsIfElected(ctx)
 
 	ticker := time.NewTicker(bookStatsRefreshInterval)
 	defer ticker.Stop()
@@ -122,10 +129,26 @@ func (s *Server) RunBookStatsRefresh(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := s.rebuildBookStats(ctx); err != nil {
-				log.Printf("failed to rebuild book stats: %v", err)
-			}
+			s.refreshBookStatsIfElected(ctx)
 		}
+	}
+}
+
+// refreshBookStatsIfElected rebuilds the book_stats hash only if this replica wins the refresh
+// lock; losing the SET means another replica covered this interval. No leader election needed: a
+// dead holder's lock expires and any replica picks it up on its next tick.
+func (s *Server) refreshBookStatsIfElected(ctx context.Context) {
+	won, err := s.redis.SetNX(ctx, bookStatsLockKey, s.replicaID, bookStatsLockTTL).Result()
+	if err != nil {
+		log.Printf("failed to acquire book stats refresh lock: %v", err)
+		return
+	}
+	if !won {
+		return
+	}
+
+	if err := s.rebuildBookStats(ctx); err != nil {
+		log.Printf("failed to rebuild book stats: %v", err)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,10 @@ type Server struct {
 	cache       *book.Cache
 	workerToken string
 
+	// replicaID names this replica in the stats-refresh lock, purely for debugging; under
+	// Kubernetes the hostname is the pod name.
+	replicaID string
+
 	// Cached dependency-ping outcome for /readyz (see pingDependencies).
 	readyMu        sync.Mutex
 	readyCheckedAt time.Time
@@ -33,7 +38,12 @@ type Server struct {
 // NewServer returns a Server backed by repo, redisClient, and cache. workerToken guards the
 // endpoints that mutate the book (see requireWorkerToken).
 func NewServer(repo *db.Repository, redisClient *redis.Client, cache *book.Cache, workerToken string) *Server {
-	return &Server{repo: repo, redis: redisClient, cache: cache, workerToken: workerToken}
+	replicaID, err := os.Hostname()
+	if err != nil {
+		replicaID = "unknown"
+	}
+
+	return &Server{repo: repo, redis: redisClient, cache: cache, workerToken: workerToken, replicaID: replicaID}
 }
 
 // Handler returns the HTTP handler serving the JSON REST API and the "/ws" websocket endpoint.

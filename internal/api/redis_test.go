@@ -755,3 +755,28 @@ func TestConnLiveness_RedisBacked(t *testing.T) {
 	s.unregisterConn(ctx, connID)
 	require.False(t, s.connLive(ctx, connID))
 }
+
+func TestRefreshBookStatsIfElected(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+
+	// First election wins the lock and rebuilds the hash.
+	s.refreshBookStatsIfElected(ctx)
+	_, ok, err := s.getBookStats(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	owner, err := s.redis.Get(ctx, bookStatsLockKey).Result()
+	require.NoError(t, err)
+	require.Equal(t, s.replicaID, owner)
+
+	// While the lock is held, a tick on any replica refreshes nothing.
+	require.NoError(t, s.redis.Del(ctx, bookStatsKey).Err())
+	s.refreshBookStatsIfElected(ctx)
+	_, ok, err = s.getBookStats(ctx)
+	require.NoError(t, err)
+	require.False(t, ok)
+}
