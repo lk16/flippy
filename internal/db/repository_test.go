@@ -233,6 +233,19 @@ func TestRepository_SaveEvaluation_NoOpWhenNotBetter(t *testing.T) {
 	require.Equal(t, first, got)
 }
 
+// testLearnableQuery returns the query these tests share — 12-disc leaves needing level 24, up to
+// 30 discs — varying only the fields a given case is about.
+func testLearnableQuery(minDiscs, deeperLevel, limit int) LearnableQuery {
+	return LearnableQuery{
+		MinDiscs:    minDiscs,
+		MaxDiscs:    30,
+		LeafDiscs:   12,
+		LeafLevel:   24,
+		DeeperLevel: deeperLevel,
+		Limit:       limit,
+	}
+}
+
 func TestRepository_ListLearnable_OrdersByDiscCountThenLevel(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
@@ -245,7 +258,7 @@ func TestRepository_ListLearnable_OrdersByDiscCountThenLevel(t *testing.T) {
 	require.NoError(t, repo.SaveEvaluation(ctx, position13, Evaluation{Level: 10, Score: 0}))
 	require.NoError(t, repo.SaveEvaluation(ctx, position13Other, Evaluation{Level: 20, Score: 0}))
 
-	results, err := repo.ListLearnable(ctx, 12, 30, 12, 24, 24, 10)
+	results, err := repo.ListLearnable(ctx, testLearnableQuery(12, 24, 10))
 	require.NoError(t, err)
 	require.Len(t, results, 3)
 
@@ -272,7 +285,7 @@ func TestRepository_ListLearnable_LeafLevelDoesNotStarveDeeperCandidates(t *test
 
 	// A batch smaller than the number of fully-learned leaves: without the
 	// level filter, this would return only leaves and miss position13 entirely.
-	results, err := repo.ListLearnable(ctx, 12, 30, 12, 24, 16, 3)
+	results, err := repo.ListLearnable(ctx, testLearnableQuery(12, 16, 3))
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	require.Equal(t, position13, results[0].Position)
@@ -292,7 +305,7 @@ func TestRepository_ListLearnable_MinDiscsAboveLeafDiscsKeepsLeafThreshold(t *te
 
 	// position13 must be judged against deeperLevel (16), not leafLevel (24): a bug binding the leaf
 	// check to minDiscs instead of leafDiscs would wrongly return position13 as needing level 24.
-	results, err := repo.ListLearnable(ctx, 13, 30, 12, 24, 16, 10)
+	results, err := repo.ListLearnable(ctx, testLearnableQuery(13, 16, 10))
 	require.NoError(t, err)
 	require.Empty(t, results)
 }
@@ -306,7 +319,7 @@ func TestRepository_ListLearnable_FiltersByDiscCountRange(t *testing.T) {
 
 	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position12, position35}))
 
-	results, err := repo.ListLearnable(ctx, 12, 30, 12, 24, 24, 10)
+	results, err := repo.ListLearnable(ctx, testLearnableQuery(12, 24, 10))
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	require.Equal(t, position12, results[0].Position)
@@ -319,7 +332,7 @@ func TestRepository_ListLearnable_RespectsLimit(t *testing.T) {
 	positions := othello.PrecomputedPositions12()[:5]
 	require.NoError(t, repo.AddPositions(ctx, positions))
 
-	results, err := repo.ListLearnable(ctx, 12, 30, 12, 24, 24, 3)
+	results, err := repo.ListLearnable(ctx, testLearnableQuery(12, 24, 3))
 	require.NoError(t, err)
 	require.Len(t, results, 3)
 }
@@ -327,9 +340,76 @@ func TestRepository_ListLearnable_RespectsLimit(t *testing.T) {
 func TestRepository_ListLearnable_Empty(t *testing.T) {
 	repo := testRepository(t)
 
-	results, err := repo.ListLearnable(context.Background(), 12, 30, 12, 24, 24, 10)
+	results, err := repo.ListLearnable(context.Background(), testLearnableQuery(12, 24, 10))
 	require.NoError(t, err)
 	require.Empty(t, results)
+}
+
+// TestRepository_ListLearnable_AfterResumesWhereTheLastScanStopped walks the whole learnable set one
+// row at a time, which is what a cursor sweep does across refills.
+func TestRepository_ListLearnable_AfterResumesWhereTheLastScanStopped(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	positions := othello.PrecomputedPositions12()[:5]
+	require.NoError(t, repo.AddPositions(ctx, positions))
+
+	query := testLearnableQuery(12, 24, 1)
+	var seen []othello.NormalizedPosition
+	for range len(positions) {
+		results, err := repo.ListLearnable(ctx, query)
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+
+		seen = append(seen, results[0].Position)
+		query.After = results[0].Cursor()
+	}
+
+	require.ElementsMatch(t, positions, seen)
+
+	// The sweep is exhausted: the caller takes this as its cue to wrap.
+	results, err := repo.ListLearnable(ctx, query)
+	require.NoError(t, err)
+	require.Empty(t, results)
+}
+
+// TestRepository_ListLearnable_AfterOrdersRowsSharingDiscCountAndLevel covers the tiebreak a cursor
+// needs: without position in the ordering, rows equal on (disc_count, level) could repeat or be
+// skipped across scans.
+func TestRepository_ListLearnable_AfterOrdersRowsSharingDiscCountAndLevel(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	positions := othello.PrecomputedPositions12()[:3]
+	require.NoError(t, repo.AddPositions(ctx, positions))
+
+	all, err := repo.ListLearnable(ctx, testLearnableQuery(12, 24, 10))
+	require.NoError(t, err)
+	require.Len(t, all, 3)
+
+	query := testLearnableQuery(12, 24, 10)
+	query.After = all[0].Cursor()
+
+	rest, err := repo.ListLearnable(ctx, query)
+	require.NoError(t, err)
+	require.Equal(t, []PositionEvaluation{all[1], all[2]}, rest)
+}
+
+// TestRepository_ListLearnable_ZeroCursorStartsAtTheBeginning pins the zero value's meaning, which
+// the refill path relies on to start and to wrap a sweep.
+func TestRepository_ListLearnable_ZeroCursorStartsAtTheBeginning(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	positions := othello.PrecomputedPositions12()[:3]
+	require.NoError(t, repo.AddPositions(ctx, positions))
+
+	query := testLearnableQuery(12, 24, 10)
+	query.After = LearnableCursor{}
+
+	results, err := repo.ListLearnable(ctx, query)
+	require.NoError(t, err)
+	require.Len(t, results, 3)
 }
 
 func TestRepository_EvaluatedPositions_OnlyReturnsLearnedBoards(t *testing.T) {

@@ -83,6 +83,100 @@ func TestServer_ClaimJob_LeafBoardsDoNotStarveDeeperCandidates(t *testing.T) {
 	require.Equal(t, TargetLevel(13), job.Level)
 }
 
+// TestServer_ClaimJob_BuffersTheRestOfTheRefill covers the point of the buffer: one claim's DB scan
+// leaves candidates ready for the claims after it.
+func TestServer_ClaimJob_BuffersTheRestOfTheRefill(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	positions := testDistinctPositions(t, 12, 3)
+	require.NoError(t, s.repo.AddPositions(ctx, positions))
+
+	_, ok, err := s.claimJob(ctx, "worker-1")
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	buffered, err := s.redis.LLen(ctx, jobBufferKey).Result()
+	require.NoError(t, err)
+	require.Equal(t, int64(len(positions)-1), buffered)
+}
+
+// TestServer_ClaimJob_WrapsSweepAfterAClaimExpires covers the recycling the cursor has to preserve:
+// the sweep has already passed a position whose claim later expires, so only wrapping re-offers it.
+func TestServer_ClaimJob_WrapsSweepAfterAClaimExpires(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+
+	job, ok, err := s.claimJob(ctx, "worker-1")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, position, job.Position)
+
+	// Stand in for the claim TTL running out on a worker that died mid-job.
+	require.NoError(t, s.redis.Del(ctx, claimKey(position.String())).Err())
+
+	job, ok, err = s.claimJob(ctx, "worker-2")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, position, job.Position)
+}
+
+// TestServer_ClaimJob_SkipsCandidateLearnedSinceItWasBuffered covers the staleness a buffer
+// introduces: a position can reach its target level between the refill that buffered it and the pop
+// that hands it out.
+func TestServer_ClaimJob_SkipsCandidateLearnedSinceItWasBuffered(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+	require.NoError(t, s.redis.RPush(ctx, jobBufferKey, position.String()).Err())
+	require.NoError(t, s.repo.SaveEvaluation(ctx, position, db.Evaluation{
+		Level: TargetLevel(12), Score: 0,
+	}))
+
+	_, ok, err := s.claimJob(ctx, "worker-1")
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+// TestServer_ClaimJob_SkipsCandidateWithoutARow covers a buffered position deleted from the book
+// before it was handed out.
+func TestServer_ClaimJob_SkipsCandidateWithoutARow(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	position := testPosition(t, 12)
+	require.NoError(t, s.redis.RPush(ctx, jobBufferKey, position.String()).Err())
+
+	_, ok, err := s.claimJob(ctx, "worker-1")
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+// TestServer_ClaimJob_DoesNotRefillWhileAnotherReplicaHoldsTheLock covers the lock's purpose: only
+// one replica scans the DB per refill, and the rest wait rather than piling on.
+func TestServer_ClaimJob_DoesNotRefillWhileAnotherReplicaHoldsTheLock(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+	require.NoError(t, s.redis.Set(ctx, jobRefillLockKey, "other-replica", jobRefillLockTTL).Err())
+
+	_, ok, err := s.claimJob(ctx, "worker-1")
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	// The lock is the other replica's to release.
+	holder, err := s.redis.Get(ctx, jobRefillLockKey).Result()
+	require.NoError(t, err)
+	require.Equal(t, "other-replica", holder)
+}
+
 func TestServer_ClaimJob_SkipsOutOfRangeDiscCounts(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()

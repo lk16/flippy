@@ -7,6 +7,7 @@ import (
 	"log"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -14,6 +15,7 @@ import (
 	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
 	"github.com/lk16/flippy/internal/edax"
+	"github.com/lk16/flippy/internal/othello"
 )
 
 // NewRedisClient opens a redis client for url and verifies it's reachable.
@@ -60,6 +62,19 @@ const (
 	workerFieldPositionsComputed = "positions_computed"
 	workerFieldLastActive        = "last_active"
 )
+
+// The shared job candidate buffer: workers pop from jobBufferKey, and jobCursorKey records how far
+// through the learnable ordering the current sweep has buffered. Both are derived state — a refill
+// from an empty cursor rebuilds them.
+const (
+	jobBufferKey     = "job:buffer"
+	jobCursorKey     = "job:cursor"
+	jobRefillLockKey = "job:refill:lock"
+)
+
+// jobRefillLockTTL bounds how long a replica that died mid-refill blocks other replicas from
+// refilling; it only needs to outlast one ListLearnable query.
+const jobRefillLockTTL = 30 * time.Second
 
 // claimKey is the redis key holding the worker ID that currently holds position's job, if any.
 func claimKey(position string) string {
@@ -113,6 +128,169 @@ func (s *Server) releaseClaim(ctx context.Context, position, workerID string) er
 	}
 
 	return nil
+}
+
+// popJobCandidate takes the next buffered candidate position, reporting false when the buffer is
+// empty. Popping is what keeps concurrent workers off each other's candidates: each entry goes to
+// exactly one of them.
+func (s *Server) popJobCandidate(ctx context.Context) (othello.NormalizedPosition, bool, error) {
+	// An unparseable entry means a corrupted buffer, so drop it and take the next: false has to
+	// mean drained, or the caller would refill a buffer that still holds candidates.
+	for range jobCandidateBatch {
+		encoded, err := s.redis.LPop(ctx, jobBufferKey).Result()
+		if err == redis.Nil {
+			return othello.NormalizedPosition{}, false, nil
+		}
+		if err != nil {
+			return othello.NormalizedPosition{}, false, fmt.Errorf("failed to pop job candidate: %w", err)
+		}
+
+		position, err := othello.ParsePosition(encoded)
+		if err != nil {
+			continue
+		}
+
+		normalized, err := othello.NewNormalizedPosition(position)
+		if err != nil {
+			continue
+		}
+
+		return normalized, true, nil
+	}
+
+	return othello.NormalizedPosition{}, false, nil
+}
+
+// refillJobBuffer buffers the next candidates from the cursor, wrapping to the start of the ordering
+// once the sweep runs out so positions whose claims expired come round again. It reports how many
+// candidates it buffered; zero means another replica is refilling or nothing is learnable.
+func (s *Server) refillJobBuffer(ctx context.Context) (int, error) {
+	won, err := s.redis.SetNX(ctx, jobRefillLockKey, s.replicaID, jobRefillLockTTL).Result()
+	if err != nil {
+		return 0, fmt.Errorf("failed to acquire job refill lock: %w", err)
+	}
+	if !won {
+		return 0, nil
+	}
+	defer s.releaseJobRefillLock(ctx)
+
+	cursor, err := s.readJobCursor(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	candidates, err := s.listLearnableFrom(ctx, cursor)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(candidates) == 0 && cursor != (db.LearnableCursor{}) {
+		cursor = db.LearnableCursor{}
+		if candidates, err = s.listLearnableFrom(ctx, cursor); err != nil {
+			return 0, err
+		}
+	}
+
+	if len(candidates) == 0 {
+		// Nothing learnable at all; drop the cursor so the next refill rescans from the start.
+		if err := s.redis.Del(ctx, jobCursorKey).Err(); err != nil {
+			return 0, fmt.Errorf("failed to reset job cursor: %w", err)
+		}
+		return 0, nil
+	}
+
+	encoded := make([]any, len(candidates))
+	for i, candidate := range candidates {
+		encoded[i] = candidate.Position.String()
+	}
+
+	pipe := s.redis.TxPipeline()
+	pipe.RPush(ctx, jobBufferKey, encoded...)
+	pipe.Set(ctx, jobCursorKey, encodeJobCursor(candidates[len(candidates)-1].Cursor()), 0)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return 0, fmt.Errorf("failed to buffer job candidates: %w", err)
+	}
+
+	return len(candidates), nil
+}
+
+// listLearnableFrom reads the candidates following cursor, from the lowest disc count the book
+// stats still show work at.
+func (s *Server) listLearnableFrom(ctx context.Context, cursor db.LearnableCursor) ([]db.PositionEvaluation, error) {
+	candidates, err := s.repo.ListLearnable(ctx, db.LearnableQuery{
+		MinDiscs:    s.jobFloor(ctx),
+		MaxDiscs:    book.MaxSavableDiscs,
+		LeafDiscs:   book.LeafDiscs,
+		LeafLevel:   TargetLevel(book.LeafDiscs),
+		DeeperLevel: TargetLevel(book.LeafDiscs + 1),
+		After:       cursor,
+		Limit:       jobCandidateBatch,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list candidate positions: %w", err)
+	}
+	return candidates, nil
+}
+
+// releaseJobRefillLock drops the refill lock if this replica still holds it. GET-compare-DEL is not
+// atomic; the worst case of the race is two replicas refilling at once, which only duplicates
+// buffer entries that tryClaim then rejects.
+func (s *Server) releaseJobRefillLock(ctx context.Context) {
+	holder, err := s.redis.Get(ctx, jobRefillLockKey).Result()
+	if err != nil || holder != s.replicaID {
+		return
+	}
+	if err := s.redis.Del(ctx, jobRefillLockKey).Err(); err != nil {
+		log.Printf("failed to release job refill lock: %v", err)
+	}
+}
+
+// readJobCursor returns how far the current sweep has buffered, or the zero cursor to start over.
+func (s *Server) readJobCursor(ctx context.Context) (db.LearnableCursor, error) {
+	encoded, err := s.redis.Get(ctx, jobCursorKey).Result()
+	if err == redis.Nil {
+		return db.LearnableCursor{}, nil
+	}
+	if err != nil {
+		return db.LearnableCursor{}, fmt.Errorf("failed to read job cursor: %w", err)
+	}
+	return decodeJobCursor(encoded), nil
+}
+
+// encodeJobCursor renders cursor for jobCursorKey.
+func encodeJobCursor(cursor db.LearnableCursor) string {
+	return fmt.Sprintf("%d:%d:%s", cursor.DiscCount, cursor.Level, cursor.Position)
+}
+
+// decodeJobCursor parses encodeJobCursor's output, falling back to the zero cursor: the cursor is
+// derived state, so restarting the sweep costs a rescan rather than correctness.
+func decodeJobCursor(encoded string) db.LearnableCursor {
+	fields := strings.SplitN(encoded, ":", 3)
+	if len(fields) != 3 {
+		return db.LearnableCursor{}
+	}
+
+	discCount, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return db.LearnableCursor{}
+	}
+
+	level, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return db.LearnableCursor{}
+	}
+
+	position, err := othello.ParsePosition(fields[2])
+	if err != nil {
+		return db.LearnableCursor{}
+	}
+
+	normalized, err := othello.NewNormalizedPosition(position)
+	if err != nil {
+		return db.LearnableCursor{}
+	}
+
+	return db.LearnableCursor{DiscCount: discCount, Level: level, Position: normalized}
 }
 
 // RunBookStatsRefresh attempts a book_stats resync immediately and then every

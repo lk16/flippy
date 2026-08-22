@@ -160,18 +160,50 @@ type PositionEvaluation struct {
 	Evaluation Evaluation
 }
 
-// ListLearnable returns up to limit positions in [minDiscs, maxDiscs] below their target level
-// (leafLevel for leafDiscs, deeperLevel beyond); filtering in SQL keeps learned leafDiscs rows from
-// starving the rest. minDiscs may be raised above leafDiscs without changing which count is leaf.
-func (r *Repository) ListLearnable(ctx context.Context, minDiscs, maxDiscs, leafDiscs, leafLevel, deeperLevel, limit int) ([]PositionEvaluation, error) {
+// LearnableCursor is a point in ListLearnable's ordering. The zero value sorts before every row, so
+// it starts a scan at the beginning.
+type LearnableCursor struct {
+	DiscCount int
+	Level     int
+	Position  othello.NormalizedPosition
+}
+
+// Cursor returns the cursor pointing at pe, for resuming a scan after it.
+func (pe PositionEvaluation) Cursor() LearnableCursor {
+	return LearnableCursor{
+		DiscCount: pe.Position.CountDiscs(),
+		Level:     pe.Evaluation.Level,
+		Position:  pe.Position,
+	}
+}
+
+// LearnableQuery bounds a ListLearnable scan: positions in [MinDiscs, MaxDiscs] below their target
+// level, which is LeafLevel at LeafDiscs and DeeperLevel above it. MinDiscs may be raised above
+// LeafDiscs without changing which count is leaf. After resumes a scan, and Limit caps the rows.
+type LearnableQuery struct {
+	MinDiscs    int
+	MaxDiscs    int
+	LeafDiscs   int
+	LeafLevel   int
+	DeeperLevel int
+	After       LearnableCursor
+	Limit       int
+}
+
+// ListLearnable returns up to q.Limit learnable positions matching q, ordered by disc count, then
+// level, then position; filtering in SQL keeps learned LeafDiscs rows from starving the rest.
+func (r *Repository) ListLearnable(ctx context.Context, q LearnableQuery) ([]PositionEvaluation, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT position, level, score
 		 FROM boards
 		 WHERE disc_count BETWEEN $1 AND $2
 		   AND level < CASE WHEN disc_count = $3 THEN $4::smallint ELSE $5::smallint END
-		 ORDER BY disc_count, level
-		 LIMIT $6`,
-		minDiscs, maxDiscs, leafDiscs, leafLevel, deeperLevel, limit,
+		   AND (disc_count, level, position) > ($6::smallint, $7::smallint, $8::bytea)
+		 ORDER BY disc_count, level, position
+		 LIMIT $9`,
+		q.MinDiscs, q.MaxDiscs, q.LeafDiscs, q.LeafLevel, q.DeeperLevel,
+		q.After.DiscCount, q.After.Level, q.After.Position.Position().Bytes(),
+		q.Limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list learnable positions: %w", err)

@@ -780,3 +780,120 @@ func TestRefreshBookStatsIfElected(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, ok)
 }
+
+func TestJobCursorEncoding_RoundTrip(t *testing.T) {
+	position := testPosition(t, 12)
+	cursor := db.LearnableCursor{DiscCount: 12, Level: 24, Position: position}
+
+	require.Equal(t, cursor, decodeJobCursor(encodeJobCursor(cursor)))
+}
+
+// TestDecodeJobCursor_MalformedStartsOver pins the fallback the sweep relies on: a cursor Redis
+// can't return intact costs a rescan, not a failed claim.
+func TestDecodeJobCursor_MalformedStartsOver(t *testing.T) {
+	tests := []struct {
+		name    string
+		encoded string
+	}{
+		{"empty", ""},
+		{"too few fields", "12:24"},
+		{"disc count not a number", "x:24:" + testPosition(t, 12).String()},
+		{"level not a number", "12:x:" + testPosition(t, 12).String()},
+		{"position unparseable", "12:24:not-a-position"},
+		{"position not normalized", "12:24:" + testNonNormalizedPosition(t).String()},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, db.LearnableCursor{}, decodeJobCursor(test.encoded))
+		})
+	}
+}
+
+func TestServer_RefillJobBuffer_AdvancesCursorThenWraps(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	positions := testDistinctPositions(t, 12, 3)
+	require.NoError(t, s.repo.AddPositions(ctx, positions))
+
+	buffered, err := s.refillJobBuffer(ctx)
+	require.NoError(t, err)
+	require.Equal(t, len(positions), buffered)
+
+	encoded, err := s.redis.Get(ctx, jobCursorKey).Result()
+	require.NoError(t, err)
+	require.NotEqual(t, db.LearnableCursor{}, decodeJobCursor(encoded))
+
+	// The sweep is exhausted, so this one wraps and offers the still-unlearned positions again.
+	buffered, err = s.refillJobBuffer(ctx)
+	require.NoError(t, err)
+	require.Equal(t, len(positions), buffered)
+}
+
+func TestServer_RefillJobBuffer_ResetsCursorWhenNothingIsLearnable(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, position, db.Evaluation{Level: TargetLevel(12), Score: 0}))
+	require.NoError(t, s.redis.Set(ctx, jobCursorKey, encodeJobCursor(db.LearnableCursor{
+		DiscCount: 12, Level: 24, Position: position,
+	}), 0).Err())
+
+	buffered, err := s.refillJobBuffer(ctx)
+	require.NoError(t, err)
+	require.Zero(t, buffered)
+
+	require.Equal(t, int64(0), s.redis.Exists(ctx, jobCursorKey).Val())
+}
+
+func TestServer_RefillJobBuffer_ReleasesItsOwnLock(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	positions := testDistinctPositions(t, 12, 2)
+	require.NoError(t, s.repo.AddPositions(ctx, positions))
+
+	_, err := s.refillJobBuffer(ctx)
+	require.NoError(t, err)
+
+	require.Equal(t, int64(0), s.redis.Exists(ctx, jobRefillLockKey).Val())
+}
+
+func TestServer_PopJobCandidate_SkipsUnparseableEntries(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	position := testPosition(t, 12)
+	require.NoError(t, s.redis.RPush(ctx, jobBufferKey, "not-a-position", position.String()).Err())
+
+	popped, found, err := s.popJobCandidate(ctx)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, position, popped)
+}
+
+func TestServer_PopJobCandidate_EmptyBuffer(t *testing.T) {
+	s := testServer(t)
+
+	_, found, err := s.popJobCandidate(context.Background())
+	require.NoError(t, err)
+	require.False(t, found)
+}
+
+// testNonNormalizedPosition returns a position that is not in canonical form. The start position is
+// symmetric enough to be its own normal form, so it can't stand in for one.
+func testNonNormalizedPosition(t *testing.T) othello.Position {
+	t.Helper()
+
+	for _, child := range othello.NewStartPosition().Children() {
+		if !child.IsNormalized() {
+			return child
+		}
+	}
+
+	t.Fatal("no non-normalized position among the start position's children")
+	return othello.Position{}
+}

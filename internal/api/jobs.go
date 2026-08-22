@@ -2,20 +2,26 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"slices"
 
 	"github.com/lk16/flippy/internal/book"
+	"github.com/lk16/flippy/internal/db"
 	"github.com/lk16/flippy/internal/othello"
 )
 
-// jobCandidateBatch is how many candidate positions are fetched per claim attempt. Every worker
-// sees the same ordering, so the batch has to outnumber the workers claiming from it concurrently:
-// once the first N candidates are all claimed, a batch of N leaves the next worker with nothing and
-// it sleeps out noJobSleep despite the book being full of work. 300 leaves room for a worker count
-// far past what we run today, and only costs a longer LIMIT on an indexed scan.
+// jobCandidateBatch is how many candidate positions one refill of the shared buffer reads. Workers
+// pop from that buffer instead of each scanning the same ordering, so this sets how many claims a
+// single DB query serves, not how many workers can be served at once.
 const jobCandidateBatch = 300
+
+// jobClaimAttempts bounds how many buffered candidates one claim walks past before giving up and
+// letting the worker retry. Only entries stale enough to be unusable are walked past, so this need
+// only absorb a burst of them, and the loop must end: a refill can return candidates that every
+// pass then rejects.
+const jobClaimAttempts = 16
 
 // Job is a position a worker should evaluate, and the level to search it at.
 type Job struct {
@@ -27,7 +33,7 @@ type Job struct {
 // (from interactive analysis requests) if any, else the lowest disc-count/level learnable position.
 // ok is false when nothing is claimable.
 func (s *Server) claimJob(ctx context.Context, workerID string) (job Job, ok bool, err error) {
-	// Drain the priority queue before falling back to ListLearnable.
+	// Drain the priority queue before falling back to the candidate buffer.
 	for {
 		entry, found, err := s.dequeuePriority(ctx)
 		if err != nil {
@@ -68,28 +74,48 @@ func (s *Server) claimJob(ctx context.Context, workerID string) (job Job, ok boo
 		return Job{Position: normalized, Level: entry.Level}, true, nil
 	}
 
-	candidates, err := s.repo.ListLearnable(ctx,
-		s.jobFloor(ctx), book.MaxSavableDiscs,
-		book.LeafDiscs, TargetLevel(book.LeafDiscs), TargetLevel(book.LeafDiscs+1),
-		jobCandidateBatch,
-	)
-	if err != nil {
-		return Job{}, false, fmt.Errorf("failed to list candidate positions: %w", err)
-	}
+	return s.claimBufferedJob(ctx, workerID)
+}
 
-	for _, candidate := range candidates {
+// claimBufferedJob claims one candidate from the shared buffer, refilling it when empty. Entries
+// are re-checked against the DB because a sweep may have buffered them well before this pop: the
+// position can have been learned, or claimed through the priority queue, in between.
+func (s *Server) claimBufferedJob(ctx context.Context, workerID string) (job Job, ok bool, err error) {
+	for range jobClaimAttempts {
+		position, found, err := s.popJobCandidate(ctx)
+		if err != nil {
+			return Job{}, false, err
+		}
+		if !found {
+			buffered, err := s.refillJobBuffer(ctx)
+			if err != nil {
+				return Job{}, false, err
+			}
+			if buffered == 0 {
+				return Job{}, false, nil
+			}
+			continue
+		}
+
 		// edax crashes on a position with no legal move.
-		if !candidate.Position.HasMoves() {
+		if !position.HasMoves() {
 			continue
 		}
 
-		discCount := candidate.Position.CountDiscs()
-		target := TargetLevel(discCount)
-		if candidate.Evaluation.Level >= target {
+		target := TargetLevel(position.CountDiscs())
+
+		eval, err := s.repo.GetPosition(ctx, position.Position())
+		if errors.Is(err, db.ErrPositionNotFound) {
+			continue
+		}
+		if err != nil {
+			return Job{}, false, fmt.Errorf("failed to check candidate position: %w", err)
+		}
+		if eval.Level >= target {
 			continue
 		}
 
-		claimed, err := s.tryClaim(ctx, candidate.Position.String(), workerID)
+		claimed, err := s.tryClaim(ctx, position.String(), workerID)
 		if err != nil {
 			return Job{}, false, err
 		}
@@ -97,7 +123,7 @@ func (s *Server) claimJob(ctx context.Context, workerID string) (job Job, ok boo
 			continue
 		}
 
-		return Job{Position: candidate.Position, Level: target}, true, nil
+		return Job{Position: position, Level: target}, true, nil
 	}
 
 	return Job{}, false, nil
