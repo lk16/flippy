@@ -85,6 +85,10 @@ func (s *Server) claimJob(ctx context.Context, workerID string) (job Job, ok boo
 // buffered them well before this pop: the position can have been learned, or claimed through the
 // priority queue, in between.
 func (s *Server) claimBufferedJob(ctx context.Context, workerID string) (job Job, ok bool, err error) {
+	// Walked-past candidates, by why: another worker holds the claim, or the buffered entry no
+	// longer describes work. Logged only when there were any, so a clean claim stays silent.
+	var takenByOthers, stale int
+
 	for range jobClaimAttempts {
 		position, found, err := s.popJobCandidate(ctx)
 		if err != nil {
@@ -96,6 +100,7 @@ func (s *Server) claimBufferedJob(ctx context.Context, workerID string) (job Job
 				return Job{}, false, err
 			}
 			if buffered == 0 {
+				logClaimAttempts("", takenByOthers, stale)
 				return Job{}, false, nil
 			}
 			continue
@@ -103,6 +108,7 @@ func (s *Server) claimBufferedJob(ctx context.Context, workerID string) (job Job
 
 		// edax crashes on a position with no legal move.
 		if !position.HasMoves() {
+			stale++
 			continue
 		}
 
@@ -111,12 +117,14 @@ func (s *Server) claimBufferedJob(ctx context.Context, workerID string) (job Job
 
 		eval, err := s.repo.GetPosition(ctx, position.Position())
 		if errors.Is(err, db.ErrPositionNotFound) {
+			stale++
 			continue
 		}
 		if err != nil {
 			return Job{}, false, fmt.Errorf("failed to check candidate position: %w", err)
 		}
 		if eval.Level >= target {
+			stale++
 			continue
 		}
 
@@ -125,6 +133,7 @@ func (s *Server) claimBufferedJob(ctx context.Context, workerID string) (job Job
 			return Job{}, false, err
 		}
 		if !claimed {
+			takenByOthers++
 			continue
 		}
 
@@ -133,10 +142,28 @@ func (s *Server) claimBufferedJob(ctx context.Context, workerID string) (job Job
 			level = UnlearnedLevel(discCount)
 		}
 
+		logClaimAttempts(position.String(), takenByOthers, stale)
 		return Job{Position: position, Level: level}, true, nil
 	}
 
+	logClaimAttempts("", takenByOthers, stale)
 	return Job{}, false, nil
+}
+
+// logClaimAttempts reports how many buffered candidates one claim had to walk past before taking
+// position (empty for none): the two counts say whether the buffer is contended or just stale.
+func logClaimAttempts(position string, takenByOthers, stale int) {
+	if takenByOthers == 0 && stale == 0 {
+		return
+	}
+
+	taken := position
+	if taken == "" {
+		taken = "nothing"
+	}
+
+	log.Printf("job buffer: took %s past %d already-claimed and %d stale candidates",
+		taken, takenByOthers, stale)
 }
 
 // TargetLevelTier maps an upper disc-count bound to the edax search level positions up to that count

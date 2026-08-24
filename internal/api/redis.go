@@ -179,14 +179,18 @@ func (s *Server) refillJobBuffer(ctx context.Context) (int, error) {
 		return 0, err
 	}
 
-	candidates, err := s.listLearnableFrom(ctx, cursor)
+	floor := s.jobFloor(ctx)
+
+	candidates, err := s.listLearnableFrom(ctx, floor, cursor)
 	if err != nil {
 		return 0, err
 	}
 
+	wrapped := false
 	if len(candidates) == 0 && cursor != (db.LearnableCursor{}) {
 		cursor = db.LearnableCursor{}
-		if candidates, err = s.listLearnableFrom(ctx, cursor); err != nil {
+		wrapped = true
+		if candidates, err = s.listLearnableFrom(ctx, floor, cursor); err != nil {
 			return 0, err
 		}
 	}
@@ -196,6 +200,7 @@ func (s *Server) refillJobBuffer(ctx context.Context) (int, error) {
 		if err := s.redis.Del(ctx, jobCursorKey).Err(); err != nil {
 			return 0, fmt.Errorf("failed to reset job cursor: %w", err)
 		}
+		log.Printf("job buffer: nothing learnable from %d discs up; sweep restarts", floor)
 		return 0, nil
 	}
 
@@ -204,21 +209,31 @@ func (s *Server) refillJobBuffer(ctx context.Context) (int, error) {
 		encoded[i] = candidate.Position.String()
 	}
 
+	next := candidates[len(candidates)-1].Cursor()
+
 	pipe := s.redis.TxPipeline()
 	pipe.RPush(ctx, jobBufferKey, encoded...)
-	pipe.Set(ctx, jobCursorKey, encodeJobCursor(candidates[len(candidates)-1].Cursor()), 0)
+	pipe.Set(ctx, jobCursorKey, encodeJobCursor(next), 0)
 	if _, err := pipe.Exec(ctx); err != nil {
 		return 0, fmt.Errorf("failed to buffer job candidates: %w", err)
 	}
 
+	wrapNote := ""
+	if wrapped {
+		wrapNote = " (wrapped)"
+	}
+	log.Printf("job buffer: %d candidates from %d discs up, cursor now %d discs/level %d%s",
+		len(candidates), floor, next.DiscCount, next.Level, wrapNote)
+
 	return len(candidates), nil
 }
 
-// listLearnableFrom reads the candidates following cursor, from the lowest disc count the book
-// stats still show work at.
-func (s *Server) listLearnableFrom(ctx context.Context, cursor db.LearnableCursor) ([]db.PositionEvaluation, error) {
+// listLearnableFrom reads the candidates following cursor, from minDiscs up.
+func (s *Server) listLearnableFrom(
+	ctx context.Context, minDiscs int, cursor db.LearnableCursor,
+) ([]db.PositionEvaluation, error) {
 	candidates, err := s.repo.ListLearnable(ctx, db.LearnableQuery{
-		MinDiscs:    s.jobFloor(ctx),
+		MinDiscs:    minDiscs,
 		MaxDiscs:    book.MaxSavableDiscs,
 		LeafDiscs:   book.LeafDiscs,
 		LeafLevel:   TargetLevel(book.LeafDiscs),
@@ -333,12 +348,20 @@ func (s *Server) refreshBookStatsIfElected(ctx context.Context) {
 // rebuildBookStats queries the DB and replaces the book_stats hash, writing into a temp key and
 // atomically swapping it in with RENAME so readers never see a partial hash.
 func (s *Server) rebuildBookStats(ctx context.Context) error {
+	start := time.Now()
+
 	stats, err := s.repo.Stats(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to query stats: %w", err)
 	}
 
+	rows := 0
+	for _, stat := range stats {
+		rows += stat.Count
+	}
+
 	entries := statEntries(stats)
+	log.Printf("book stats: resynced %d rows into %d cells in %s", rows, len(entries), time.Since(start).Round(time.Millisecond))
 	if len(entries) == 0 {
 		// RENAME fails on a missing source key; an absent hash already means "fall back to the DB".
 		if err := s.redis.Del(ctx, bookStatsKey).Err(); err != nil {
@@ -633,9 +656,12 @@ func (s *Server) enqueuePriority(ctx context.Context, position string, level int
 // leaves the queue -- but the position is worth learning anyway, so it is promoted into the book
 // instead of being thrown away.
 func (s *Server) dequeuePriority(ctx context.Context) (priorityEntry, bool, error) {
+	var dropped, promoted int
+
 	for {
 		data, err := s.redis.RPop(ctx, priorityQueueKey).Result()
 		if err == redis.Nil {
+			s.logPriorityDequeue(ctx, "", dropped, promoted)
 			return priorityEntry{}, false, nil
 		}
 		if err != nil {
@@ -651,12 +677,38 @@ func (s *Server) dequeuePriority(ctx context.Context) (priorityEntry, bool, erro
 		_ = s.redis.SRem(ctx, priorityPendingKey, entry.Position).Err()
 
 		if entry.ConnID != "" && !s.connLive(ctx, entry.ConnID) {
-			s.promoteToBook(ctx, entry.Position)
+			dropped++
+			if s.promoteToBook(ctx, entry.Position) {
+				promoted++
+			}
 			continue
 		}
 
+		s.logPriorityDequeue(ctx, entry.Position, dropped, promoted)
 		return entry, true, nil
 	}
+}
+
+// logPriorityDequeue reports what one drain of the priority queue did and how deep the queue still
+// is. Silent when it found nothing and dropped nothing, which is every claim while nobody is
+// browsing -- otherwise this would print once per worker poll.
+func (s *Server) logPriorityDequeue(ctx context.Context, position string, dropped, promoted int) {
+	if position == "" && dropped == 0 {
+		return
+	}
+
+	depth, err := s.redis.LLen(ctx, priorityQueueKey).Result()
+	if err != nil {
+		depth = -1
+	}
+
+	taken := position
+	if taken == "" {
+		taken = "nothing"
+	}
+
+	log.Printf("priority queue: took %s, dropped %d (%d promoted to the book), %d waiting",
+		taken, dropped, promoted, depth)
 }
 
 // promoteToBook adds position to the book as an unlearned row, so a priority request whose
