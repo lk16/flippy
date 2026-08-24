@@ -2,13 +2,12 @@ const BITBOARD_MASK = 0xFFFFFFFFFFFFFFFFn;
 
 // LOCAL_EVAL_LEVELS: incremental depths queueLocalEvaluations searches through, in order, for
 // each board the server hasn't evaluated yet. Evaluating at 4 first (sub-millisecond, so every
-// child shows a score as good as immediately) and refining through 6, 8, 10 (the server's
-// PriorityLevel) and on up lets the UI show a rough score right away and sharpen it in place as
-// deeper searches finish, rather than blocking on the deepest result -- which costs seconds per
-// board -- before showing anything.
+// child shows a score as good as immediately) and refining through 6, 8, 10 and on up lets the UI
+// show a rough score right away and sharpen it in place as deeper searches finish, rather than
+// blocking on the deepest result -- which costs seconds per board -- before showing anything.
 //
-// Which of these rungs a given position actually runs depends on how many empty squares it has:
-// see localEvalLevelsFor.
+// These are base rungs: which of them a given position actually runs, and at which level, depends
+// on how many empty squares it has -- see localEvalLevelsFor.
 const LOCAL_EVAL_LEVELS = [4, 6, 8, 10, 12, 14, 16];
 
 // Local searches are scheduled shallow-first across every queued board at once, by handing
@@ -22,35 +21,50 @@ const LOCAL_EVAL_LEVELS = [4, 6, 8, 10, 12, 14, 16];
 // search -- at any level -- goes first.
 const LOCAL_EVAL_PREFETCH_PRIORITY = 100;
 
-// localEvalLevelsFor returns the rungs of LOCAL_EVAL_LEVELS worth searching for a position with
-// nEmpties empty squares, in order. Edax's level does not mean "search this deep": it means "search
-// this deep *unless* few enough squares are left to solve the game outright", and the cutover point
-// is per-level (search_global_init, ported in wasm/edax-eval/src/search.rs depth_and_selectivity).
-// Whether a rung is worth running follows from which side of its cutover the position sits on:
+// isDepthLimitedSearch reports whether an edax search at level over nEmpties empty squares stops
+// before the end of the game, i.e. searches exactly `level` ply. Edax's level does not mean "search
+// this deep": it means "search this deep *unless* few enough squares are left to solve the game
+// outright", and the cutover point is per-level (search_global_init, ported in
+// wasm/edax-eval/src/search.rs depth_and_selectivity and internal/edax's SearchParams).
+function isDepthLimitedSearch(level, nEmpties) {
+    if (level <= 10) return nEmpties > 2 * level;
+    if (level <= 12) return nEmpties > 24;
+    return nEmpties > 27;
+}
+
+// alignedLocalEvalLevel mirrors edax.AlignLevel: a search that stops before the end of the game
+// must search an odd number of ply from an odd disc count and an even number from an even one, or
+// adjacent plies of a line come back ~1.6 discs apart. A board's disc count and its empty count
+// have the same parity, so matching the level to nEmpties is the same rule.
+function alignedLocalEvalLevel(level, nEmpties) {
+    return level % 2 !== nEmpties % 2 && isDepthLimitedSearch(level, nEmpties) ? level + 1 : level;
+}
+
+// localEvalLevelsFor returns the rungs worth searching for a position with nEmpties empty squares,
+// in order: each LOCAL_EVAL_LEVELS entry parity-aligned, up to the point where searching deeper
+// stops being worth it. Whether a rung is worth running follows from which side of its cutover the
+// position sits on:
 //
-//   - level L <= 10, nEmpties > 2L: fixed-depth midgame search, cost grows with L. Run it.
-//   - level L <= 10, nEmpties <= 2L: exact full-width solve. Run it -- and stop, because the score
-//     is the game-theoretic result, so every deeper rung would burn the same seconds-to-minutes
-//     recomputing a number that cannot change.
-//   - level L >= 11, nEmpties > 24 (L <= 12) or > 27 (L >= 13): fixed-depth midgame search with
-//     ProbCut. Run it.
-//   - level L >= 11, otherwise: an endgame solve over 21+ empties -- minutes in the browser, and
-//     selective above 21 empties so not even exact. Stop; level 10 already answered as well as we
-//     can afford to.
+//   - depth-limited: a fixed-depth midgame search whose cost grows with the level. Run it.
+//   - not depth-limited at level <= 10: exact full-width solve. Run it -- and stop, because the
+//     score is the game-theoretic result, so every deeper rung would burn the same
+//     seconds-to-minutes recomputing a number that cannot change.
+//   - not depth-limited at level >= 11: an endgame solve over 21+ empties -- minutes in the
+//     browser, and selective above 21 empties so not even exact. Stop; the previous rung already
+//     answered as well as we can afford to.
 //
-// So an opening position climbs the whole ladder to 16, a midgame one stops where the endgame
-// solves start, and an endgame one stops at the first rung that solves it exactly.
+// So an opening position climbs the whole ladder, a midgame one stops where the endgame solves
+// start, and an endgame one stops at the first rung that solves it exactly.
 function localEvalLevelsFor(nEmpties) {
     const levels = [];
-    for (const level of LOCAL_EVAL_LEVELS) {
-        if (level <= 10) {
+    for (const base of LOCAL_EVAL_LEVELS) {
+        const level = alignedLocalEvalLevel(base, nEmpties);
+        if (isDepthLimitedSearch(level, nEmpties)) {
             levels.push(level);
-            if (nEmpties <= 2 * level) break;
-        } else if (nEmpties > (level <= 12 ? 24 : 27)) {
-            levels.push(level);
-        } else {
-            break;
+            continue;
         }
+        if (level <= 10) levels.push(level);
+        break;
     }
     return levels;
 }
@@ -428,8 +442,9 @@ class OthelloGame {
             '/static/wasm/dist/weights.bin.gz',
             numWorkers,
             // Reserve a worker for the shallowest level, so a move that just appeared on screen
-            // gets its first score without waiting behind a deep search already running.
-            { fastLaneMaxLevel: LOCAL_EVAL_LEVELS[0] },
+            // gets its first score without waiting behind a deep search already running. +1 covers
+            // odd-disc-count boards, whose shallowest rung is the parity-aligned one above it.
+            { fastLaneMaxLevel: LOCAL_EVAL_LEVELS[0] + 1 },
         );
         this.edaxWorkerPool.ready()
             .then(() => {
@@ -455,6 +470,7 @@ class OthelloGame {
                     priorityLevel: data.priority_level,
                     maxSavableDiscs: data.max_savable_discs,
                     targetLevels: data.target_levels.map((t) => ({ maxDiscs: t.max_discs, level: t.level })),
+                    parityBumpDiscs: data.parity_bump_discs || [],
                 };
             }
         } catch (_) {}
@@ -466,6 +482,7 @@ class OthelloGame {
                 priorityLevel: 10,
                 maxSavableDiscs: 30,
                 targetLevels: [{ maxDiscs: 13, level: 40 }, { maxDiscs: 16, level: 36 }, { maxDiscs: 20, level: 34 }, { maxDiscs: 64, level: 32 }],
+                parityBumpDiscs: [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23],
             };
         }
     }
@@ -478,13 +495,15 @@ class OthelloGame {
     }
 
     // targetLevelForBoard returns the final target edax level for a board string. Mirrors
-    // api.EffectiveTargetLevel: pick the tier the disc count falls in, with boards past
-    // maxSavableDiscs treated as if they had exactly that many discs.
+    // api.EffectiveTargetLevel: pick the tier the disc count falls in -- with boards past
+    // maxSavableDiscs treated as if they had exactly that many discs -- then apply the parity
+    // alignment (edax.AlignLevel), which the server sends as the disc counts it raises a level for.
     targetLevelForBoard(boardStr) {
-        const dc = Math.min(this.discCountFromBoardStr(boardStr), this.levelConfig.maxSavableDiscs);
+        const discCount = this.discCountFromBoardStr(boardStr);
+        const tierDiscs = Math.min(discCount, this.levelConfig.maxSavableDiscs);
         const tiers = this.levelConfig.targetLevels;
-        const tier = tiers.find((t) => dc <= t.maxDiscs);
-        return (tier || tiers[tiers.length - 1]).level;
+        const tier = tiers.find((t) => tierDiscs <= t.maxDiscs) || tiers[tiers.length - 1];
+        return tier.level + (this.levelConfig.parityBumpDiscs.includes(discCount) ? 1 : 0);
     }
 
     // evalIsFinal reports whether an evaluation searched the game out at full width: depth reached

@@ -9,6 +9,7 @@ import (
 
 	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
+	"github.com/lk16/flippy/internal/edax"
 	"github.com/lk16/flippy/internal/othello"
 )
 
@@ -151,9 +152,8 @@ func TargetLevelTiers() []TargetLevelTier {
 	return slices.Clone(targetLevelTiers)
 }
 
-// TargetLevel returns the edax search level for a position with discCount discs; deeper positions get
-// shallower searches to keep evaluation time roughly bounded.
-func TargetLevel(discCount int) int {
+// tierLevel returns the level targetLevelTiers assigns to discCount, before parity alignment.
+func tierLevel(discCount int) int {
 	for _, tier := range targetLevelTiers {
 		if discCount <= tier.MaxDiscs {
 			return tier.Level
@@ -162,15 +162,33 @@ func TargetLevel(discCount int) int {
 	return targetLevelTiers[len(targetLevelTiers)-1].Level
 }
 
+// TargetLevel returns the edax search level for a position with discCount discs; deeper positions get
+// shallower searches to keep evaluation time roughly bounded. Parity-aligned, so adjacent plies are
+// never both searched at the same depth parity (see edax.AlignLevel).
+func TargetLevel(discCount int) int {
+	return edax.AlignLevel(discCount, tierLevel(discCount))
+}
+
 // EffectiveTargetLevel returns the target level for a position at the given disc count, capping at
-// TargetLevel(MaxSavableDiscs) for positions that exceed that count and are not persisted to the DB.
+// the tier of MaxSavableDiscs for positions that exceed that count and are not persisted to the DB.
+// Only the tier lookup is capped: parity alignment uses the position's real disc count.
 func EffectiveTargetLevel(discCount int) int {
-	if discCount > book.MaxSavableDiscs {
-		discCount = book.MaxSavableDiscs
+	return edax.AlignLevel(discCount, tierLevel(min(discCount, book.MaxSavableDiscs)))
+}
+
+// ParityBumpDiscs returns the disc counts whose EffectiveTargetLevel is one above their tier's
+// level, so the frontend can reproduce the target from the tier table alone.
+func ParityBumpDiscs() []int {
+	var discCounts []int
+	for discCount := range 65 {
+		if EffectiveTargetLevel(discCount) != tierLevel(min(discCount, book.MaxSavableDiscs)) {
+			discCounts = append(discCounts, discCount)
+		}
 	}
-	return TargetLevel(discCount)
+	return discCounts
 }
 
 // PriorityLevel is the level of the first interactive analysis request: light, so the worker
-// responds quickly; the frontend then climbs by 2 per round toward EffectiveTargetLevel.
+// responds quickly; the frontend then climbs by 2 per round toward EffectiveTargetLevel. Aligned per
+// position by edax.AlignLevel before it becomes a search level.
 const PriorityLevel = 10

@@ -85,7 +85,7 @@ test('requestMissingEvaluations: off-book children skip server requests entirely
   assert.equal(game.wsClient.sent.length, 0, 'no evaluation_request or analyze_request for off-book boards');
 });
 
-test('requestMissingEvaluations: on-book children go to the local wasm chain too, at level 4 first', () => {
+test('requestMissingEvaluations: on-book children go to the local wasm chain too, shallowest first', () => {
   const game = buildNormalGame();
   game.wsClient = recordingWsClient();
   const pool = recordingWorkerPool();
@@ -95,7 +95,8 @@ test('requestMissingEvaluations: on-book children go to the local wasm chain too
 
   const expected = new Set(childStrings(game.board).map(bitsOf));
   assert.deepEqual(pool.keys(), expected, 'every child is queued locally, not just off-book ones');
-  assert.ok(pool.calls.every((c) => c.level === 4), 'each chain starts at the shallowest level');
+  // The start position's children have 5 discs, so their ladder is parity-aligned up from 4 to 5.
+  assert.ok(pool.calls.every((c) => c.level === 5), 'each chain starts at the shallowest rung');
   assert.ok(
     game.wsClient.sent.some((m) => m.event === 'analyze_request'),
     'the server is still asked for the real evaluation',

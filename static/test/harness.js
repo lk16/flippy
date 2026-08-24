@@ -169,11 +169,12 @@ const DEFAULT_LEVEL_CONFIG = {
     { maxDiscs: 20, level: 34 },
     { maxDiscs: 64, level: 32 },
   ],
+  parityBumpDiscs: [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23],
 };
 
 // MAX_TARGET_LEVEL is the deepest target any board can have, so an evaluation at this level counts
 // as "at target" whatever the board's disc count.
-const MAX_TARGET_LEVEL = Math.max(...DEFAULT_LEVEL_CONFIG.targetLevels.map((t) => t.level));
+const MAX_TARGET_LEVEL = Math.max(...DEFAULT_LEVEL_CONFIG.targetLevels.map((t) => t.level)) + 1;
 
 // buildGame constructs an OthelloGame without its DOM-touching constructor, wiring up the same
 // PGN-review state analyzePGN()/pgnBuildChildSets() would, already in pgnState 'graph'. With

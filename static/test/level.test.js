@@ -6,16 +6,18 @@ const { test } = require('./framework');
 const { buildGame, OthelloGame, DEFAULT_LEVEL_CONFIG, MAX_TARGET_LEVEL } = require('./harness');
 const { FORCED_PASS_BOARDS } = require('./fixtures');
 
-test('targetLevelForBoard: picks the tier the board\'s disc count falls in', () => {
+test('targetLevelForBoard: picks the tier the board\'s disc count falls in, parity-aligned', () => {
   const game = buildGame(FORCED_PASS_BOARDS, { complete: false });
   // FORCED_PASS_BOARDS is one board per ply, starting at 4 discs, so ply n has n + 4 discs.
+  // Odd disc counts get the tier level + 1 (parityBumpDiscs), so a line's plies alternate parity.
   assert.equal(game.targetLevelForBoard(game.pgnBoards[0].normalize().toString()), 40, '4 discs -> first tier');
-  assert.equal(game.targetLevelForBoard(game.pgnBoards[9].normalize().toString()), 40, '13 discs -> still first tier');
+  assert.equal(game.targetLevelForBoard(game.pgnBoards[9].normalize().toString()), 41, '13 discs -> first tier, bumped');
   assert.equal(game.targetLevelForBoard(game.pgnBoards[10].normalize().toString()), 36, '14 discs -> second tier');
+  assert.equal(game.targetLevelForBoard(game.pgnBoards[11].normalize().toString()), 37, '15 discs -> second tier, bumped');
   assert.equal(game.targetLevelForBoard(game.pgnBoards[12].normalize().toString()), 36, '16 discs -> still second tier');
-  assert.equal(game.targetLevelForBoard(game.pgnBoards[13].normalize().toString()), 34, '17 discs -> third tier');
+  assert.equal(game.targetLevelForBoard(game.pgnBoards[13].normalize().toString()), 35, '17 discs -> third tier, bumped');
   assert.equal(game.targetLevelForBoard(game.pgnBoards[16].normalize().toString()), 34, '20 discs -> still third tier');
-  assert.equal(game.targetLevelForBoard(game.pgnBoards[17].normalize().toString()), 32, '21 discs -> last tier');
+  assert.equal(game.targetLevelForBoard(game.pgnBoards[17].normalize().toString()), 33, '21 discs -> last tier, bumped');
   assert.equal(game.targetLevelForBoard(game.pgnBoards[20].normalize().toString()), 32, '24 discs -> last tier');
 });
 
@@ -177,6 +179,7 @@ test('fetchLevelConfig maps the backend\'s snake_case JSON to the camelCase fiel
         { max_discs: 20, level: 34 },
         { max_discs: 64, level: 32 },
       ],
+      parity_bump_discs: [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23],
     }),
   });
   try {

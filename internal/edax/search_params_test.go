@@ -164,3 +164,46 @@ func TestIsFinal(t *testing.T) {
 		})
 	}
 }
+
+func TestAlignLevel(t *testing.T) {
+	tests := []struct {
+		name      string
+		discCount int
+		level     int
+		want      int
+	}{
+		{"depth-limited, parity already matches", 12, 40, 40},
+		{"depth-limited, parity mismatch", 13, 40, 41},
+		{"depth-limited, parity mismatch the other way", 12, 41, 42},
+		{"interactive level at an odd disc count", 13, 16, 17},
+		{"interactive level at an even disc count", 14, 16, 16},
+		// 39 empties searched to the end: the depth is the empty count, so the parity already
+		// alternates per ply and raising the level would only buy a slower identical search.
+		{"search runs the game out", 25, 32, 32},
+		{"exact solve", 44, 10, 10},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, AlignLevel(tt.discCount, tt.level))
+		})
+	}
+}
+
+// TestAlignLevel_MatchesDiscParity is the property the rule exists for: after alignment a
+// depth-limited search always searches as many ply as the disc count's parity, so adjacent plies
+// never share a depth parity.
+func TestAlignLevel_MatchesDiscParity(t *testing.T) {
+	for discCount := 4; discCount < boardSquares; discCount++ {
+		for level := 1; level <= MaxLevel; level++ {
+			aligned := AlignLevel(discCount, level)
+			require.Contains(t, []int{level, level + 1}, aligned, "discs=%d level=%d", discCount, level)
+
+			depth, _ := SearchParams(discCount, aligned)
+			if depth == boardSquares-discCount {
+				continue
+			}
+			require.Equal(t, discCount%2, depth%2, "discs=%d level=%d", discCount, level)
+		}
+	}
+}

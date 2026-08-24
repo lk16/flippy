@@ -429,6 +429,7 @@ func (s *Server) handleLevelConfig(w http.ResponseWriter, r *http.Request) {
 		PriorityLevel:   PriorityLevel,
 		MaxSavableDiscs: book.MaxSavableDiscs,
 		TargetLevels:    TargetLevelTiers(),
+		ParityBumpDiscs: ParityBumpDiscs(),
 	})
 }
 
@@ -561,9 +562,11 @@ type pgnResponse struct {
 }
 
 // levelConfigResponse is the JSON body returned by GET /api/level-config. TargetLevels carries the
-// whole tier table so the frontend computes exactly the targets the server enforces.
+// whole tier table and ParityBumpDiscs the disc counts edax.AlignLevel raises a tier level for, so
+// the frontend computes exactly the targets the server enforces.
 type levelConfigResponse struct {
 	PriorityLevel   int               `json:"priority_level"`
 	MaxSavableDiscs int               `json:"max_savable_discs"`
 	TargetLevels    []TargetLevelTier `json:"target_levels"`
+	ParityBumpDiscs []int             `json:"parity_bump_discs"`
 }
