@@ -39,6 +39,23 @@ func testRepository(t *testing.T) *Repository {
 
 var testPosition = othellotest.Position
 
+// testUnnormalizedPosition returns a Position with exactly discs discs that is not its own
+// normalized form, so a caller can check that a lookup normalizes what it is given.
+func testUnnormalizedPosition(t *testing.T, discs int) othello.Position {
+	t.Helper()
+
+	for _, parent := range othellotest.DistinctPositions(t, discs-1, 20) {
+		for _, child := range parent.Position().Children() {
+			if child.CountDiscs() == discs && !child.IsNormalized() {
+				return child
+			}
+		}
+	}
+
+	t.Fatalf("no unnormalized position with %d discs found", discs)
+	return othello.Position{}
+}
+
 var testDistinctPositions = othellotest.DistinctPositions
 
 func TestEvaluation_IsLearned(t *testing.T) {
@@ -111,6 +128,41 @@ func TestRepository_AddPositionsInserted_Empty(t *testing.T) {
 	require.Equal(t, 0, inserted)
 }
 
+// TestRepository_AddPositionsInserted_RejectsOutOfRangeDiscCounts is the guard that keeps rows
+// nothing will ever learn out of the table: below MinSavableDiscs internal/book derives the score
+// by minimax, above MaxSavableDiscs no job is ever handed out.
+func TestRepository_AddPositionsInserted_RejectsOutOfRangeDiscCounts(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	tooFew := testPosition(t, MinSavableDiscs-1)
+	tooMany := testPosition(t, MaxSavableDiscs+1)
+	savable := testPosition(t, MinSavableDiscs)
+
+	inserted, err := repo.AddPositionsInserted(ctx, []othello.NormalizedPosition{tooFew, savable, tooMany})
+	require.NoError(t, err)
+	require.Equal(t, 1, inserted, "only the in-range position is stored")
+
+	for _, position := range []othello.NormalizedPosition{tooFew, tooMany} {
+		_, err := repo.GetPosition(ctx, position.Position())
+		require.ErrorIs(t, err, ErrPositionNotFound)
+	}
+
+	_, err = repo.GetPosition(ctx, savable.Position())
+	require.NoError(t, err)
+}
+
+// TestRepository_AddPositionsInserted_OnlyOutOfRange covers the batch that filters down to nothing:
+// no query runs, and the caller is told no row was inserted rather than getting an error.
+func TestRepository_AddPositionsInserted_OnlyOutOfRange(t *testing.T) {
+	repo := testRepository(t)
+
+	inserted, err := repo.AddPositionsInserted(context.Background(),
+		[]othello.NormalizedPosition{testPosition(t, MinSavableDiscs-1)})
+	require.NoError(t, err)
+	require.Equal(t, 0, inserted)
+}
+
 func TestRepository_AddPositions_Multiple(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
@@ -138,10 +190,8 @@ func TestRepository_GetPosition_NormalizesInput(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	position, err := othello.NewStartPosition().DoMove(19)
-	require.NoError(t, err)
-	require.False(t, position.IsNormalized())
-
+	// Savable, so AddPositions keeps it, but not the normalized form of itself.
+	position := testUnnormalizedPosition(t, MinSavableDiscs+1)
 	normalized := position.Normalize()
 	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{normalized}))
 

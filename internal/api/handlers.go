@@ -82,6 +82,13 @@ func checkReportedSearchParams(req jobResultRequest, discCount int) {
 	}
 }
 
+// isSavableDiscCount reports whether a position with discCount discs may have a row in the boards
+// table. Repository.AddPositionsInserted enforces the same range; checking here too keeps a caller
+// from counting an insert that never happened, and keeps the write paths readable.
+func isSavableDiscCount(discCount int) bool {
+	return discCount >= book.LeafDiscs && discCount <= book.MaxSavableDiscs
+}
+
 // isBookQuality reports whether an evaluation is deep enough for the boards table: at least the
 // position's target level, or a search that ran the game out, which no deeper search can improve on.
 // Enforced on every submission so interactive analysis's shallow rungs never enter the book.
@@ -143,7 +150,7 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 		// Below book quality: accepted but never persisted; the ephemeral cache is the only record.
 		// A savable priority position still gets an empty-evaluation row so ListLearnable finds it
 		// later (AddPositions never downgrades an existing row).
-		if isPriority && discCount <= book.MaxSavableDiscs {
+		if isPriority && isSavableDiscCount(discCount) {
 			if inserted, err := s.repo.AddPositionsInserted(r.Context(), []othello.NormalizedPosition{normalized}); err != nil {
 				log.Printf("failed to schedule priority position for learning: %v", err)
 			} else {
@@ -151,7 +158,7 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	case isPriority:
-		if discCount <= book.MaxSavableDiscs {
+		if isSavableDiscCount(discCount) {
 			if outcome, saveErr := s.repo.SaveEvaluationOutcome(r.Context(), normalized, eval); saveErr != nil {
 				if errors.Is(saveErr, db.ErrPositionNotFound) {
 					// Position has no row yet; add one and retry.
@@ -257,19 +264,25 @@ func (s *Server) lookupEvaluation(ctx context.Context, position othello.Position
 		return s.lookupPassEvaluation(ctx, position)
 	}
 
-	eval, err := s.repo.GetPosition(ctx, position)
-	if err == nil && eval.IsLearned() {
-		depth, confidence := edax.SearchParams(position.CountDiscs(), eval.Level)
-		return evaluationResponse{
-			Level:      eval.Level,
-			Depth:      depth,
-			Confidence: confidence,
-			Score:      eval.Score,
-			Source:     evaluationSourceEdax,
-		}, true, nil
-	}
-	if err != nil && !errors.Is(err, db.ErrPositionNotFound) {
-		return evaluationResponse{}, false, err
+	// Below LeafDiscs the minimax cache is the only legitimate source: internal/book derives every
+	// such position from the rows at LeafDiscs, and AddPositionsInserted refuses to create one of
+	// its own. Not looking further down keeps a stray row predating that guard from being served as
+	// a book entry.
+	if position.CountDiscs() >= book.LeafDiscs {
+		eval, err := s.repo.GetPosition(ctx, position)
+		if err == nil && eval.IsLearned() {
+			depth, confidence := edax.SearchParams(position.CountDiscs(), eval.Level)
+			return evaluationResponse{
+				Level:      eval.Level,
+				Depth:      depth,
+				Confidence: confidence,
+				Score:      eval.Score,
+				Source:     evaluationSourceEdax,
+			}, true, nil
+		}
+		if err != nil && !errors.Is(err, db.ErrPositionNotFound) {
+			return evaluationResponse{}, false, err
+		}
 	}
 
 	if score, ok := s.cache.Get(position); ok {

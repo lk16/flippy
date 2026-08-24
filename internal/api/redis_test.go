@@ -238,10 +238,10 @@ func TestServer_JobFloor_IgnoresDiscCountsOutsideSavableRange(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	// An unlearned position above MaxSavableDiscs must not drag the floor up there.
-	position35 := testPosition(t, 35)
-	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position35}))
-	require.NoError(t, s.rebuildBookStats(ctx))
+	// The hash is written directly: AddPositions refuses out-of-range rows, but an older book's
+	// leftovers can still show up in a resync, and they must not drag the floor to a disc count no
+	// job is ever handed out for.
+	require.NoError(t, s.redis.HSet(ctx, bookStatsKey, "0:0:35", 4, "0:0:5", 2).Err())
 
 	require.Equal(t, book.MaxSavableDiscs, s.jobFloor(ctx))
 }
@@ -894,4 +894,39 @@ func testNonNormalizedPosition(t *testing.T) othello.Position {
 
 	t.Fatal("no non-normalized position among the start position's children")
 	return othello.Position{}
+}
+
+// TestHandleSubmitJobResult_PriorityBelowLeafDiscsAddsNoRow is the other end of the savable range:
+// everything under book.LeafDiscs is minimax-derived, so a frontend analysis request for such a
+// position must not leave a row behind however the worker answers it.
+func TestHandleSubmitJobResult_PriorityBelowLeafDiscsAddsNoRow(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	position := testPosition(t, book.LeafDiscs-1)
+
+	for _, level := range []int{PriorityLevel, TargetLevel(position.CountDiscs())} {
+		require.Equal(t, 200, submitPriorityResult(t, s, position, level, 6).Code)
+
+		_, err := s.repo.GetPosition(ctx, position.Position())
+		require.ErrorIs(t, err, db.ErrPositionNotFound, "level %d", level)
+	}
+}
+
+// TestLookupEvaluation_IgnoresRowsBelowLeafDiscs covers the frontend side of the same rule: a stray
+// sub-leaf row left over from before the guard is not served as a book entry, so the minimax cache
+// stays the only source down there.
+func TestLookupEvaluation_IgnoresRowsBelowLeafDiscs(t *testing.T) {
+	s, tx := testServerWithTx(t)
+	ctx := context.Background()
+
+	position := testPosition(t, book.LeafDiscs-1)
+	_, err := tx.Exec(ctx,
+		`INSERT INTO boards (position, disc_count, level, score) VALUES ($1, $2, $3, 7)`,
+		position.Position().Bytes(), position.CountDiscs(), TargetLevel(position.CountDiscs()))
+	require.NoError(t, err)
+
+	_, ok, err := s.lookupEvaluation(ctx, position.Position())
+	require.NoError(t, err)
+	require.False(t, ok)
 }

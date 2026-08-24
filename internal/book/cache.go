@@ -9,11 +9,12 @@ import (
 	"github.com/lk16/flippy/internal/othello"
 )
 
-// LeafDiscs is the disc count of the positions learned directly; Cache backfills everything below it.
-const LeafDiscs = 12
+// LeafDiscs is the disc count of the positions learned directly; Cache backfills everything below
+// it, which is why nothing below it may have a row of its own.
+const LeafDiscs = db.MinSavableDiscs
 
 // MaxSavableDiscs is the highest disc count worth a row in the boards table.
-const MaxSavableDiscs = 30
+const MaxSavableDiscs = db.MaxSavableDiscs
 
 // Cache holds minimax-derived evaluations for positions below LeafDiscs, rebuilt from scratch on
 // demand rather than updated incrementally. Safe for concurrent use.

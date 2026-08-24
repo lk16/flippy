@@ -179,12 +179,22 @@ func TestServer_ClaimJob_DoesNotRefillWhileAnotherReplicaHoldsTheLock(t *testing
 	require.Equal(t, "other-replica", holder)
 }
 
+// TestServer_ClaimJob_SkipsOutOfRangeDiscCounts covers both ends of the savable range end to end:
+// AddPositions drops such a position rather than storing it, so no job is ever handed out for one.
 func TestServer_ClaimJob_SkipsOutOfRangeDiscCounts(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	position35 := testPosition(t, 35)
-	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position35}))
+	outOfRange := []othello.NormalizedPosition{
+		testPosition(t, book.LeafDiscs-1),
+		testPosition(t, book.MaxSavableDiscs+5),
+	}
+	require.NoError(t, s.repo.AddPositions(ctx, outOfRange))
+
+	for _, position := range outOfRange {
+		_, err := s.repo.GetPosition(ctx, position.Position())
+		require.ErrorIs(t, err, db.ErrPositionNotFound)
+	}
 
 	_, ok, err := s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
