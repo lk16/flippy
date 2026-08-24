@@ -28,7 +28,29 @@ func SearchParams(discCount, level int) (depth, confidence int) {
 // game full-width, making its score the game-theoretic result: no deeper search can change it.
 func IsFinal(discCount, level int) bool {
 	depth, confidence := SearchParams(discCount, level)
+	return IsFinalSearch(discCount, depth, confidence)
+}
+
+// IsFinalSearch is IsFinal stated about the search itself, for callers holding a (depth, confidence)
+// pair whose level is no longer available.
+func IsFinalSearch(discCount, depth, confidence int) bool {
 	return depth == boardSquares-discCount && confidence == 100
+}
+
+// AlignLevel raises level by one when a search at it stops before the end of the game and its depth
+// parity doesn't match discCount's. An even-depth search ends with the opponent to move and scores
+// the side to move about 0.8 discs low; an odd-depth one about 0.8 discs high. Scores are stored
+// mover-relative and the mover swaps colour every ply, so searching every ply at the same depth
+// parity makes a line of best moves alternate by ~1.6 discs. Raise rather than lower: a lowered
+// target would strand rows already stored above it, which SaveEvaluation never overwrites. A search
+// that runs the game out needs no alignment -- its depth is the empty count, whose parity already
+// flips every ply. Aligned levels stay aligned when climbed by 2.
+func AlignLevel(discCount, level int) int {
+	depth, _ := SearchParams(discCount, level)
+	if depth < boardSquares-discCount && depth%2 != discCount%2 {
+		return level + 1
+	}
+	return level
 }
 
 // depthAndSelectivity returns the search depth and selectivity index for a search at level with

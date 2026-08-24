@@ -9,6 +9,7 @@ import (
 
 	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
+	"github.com/lk16/flippy/internal/edax"
 	"github.com/lk16/flippy/internal/othello"
 )
 
@@ -29,9 +30,10 @@ type Job struct {
 	Level    int
 }
 
-// claimJob atomically claims one position for workerID: the oldest claimable priority-queue position
-// (from interactive analysis requests) if any, else the lowest disc-count/level learnable position.
-// ok is false when nothing is claimable.
+// claimJob atomically claims one position for workerID, highest tier first: a position requested
+// from the frontend (the priority queue), then an unlearned book position, then one below its
+// target level. The first two are searched at UnlearnedLevel, the third at its target. ok is false
+// when nothing is claimable.
 func (s *Server) claimJob(ctx context.Context, workerID string) (job Job, ok bool, err error) {
 	// Drain the priority queue before falling back to the candidate buffer.
 	for {
@@ -77,10 +79,16 @@ func (s *Server) claimJob(ctx context.Context, workerID string) (job Job, ok boo
 	return s.claimBufferedJob(ctx, workerID)
 }
 
-// claimBufferedJob claims one candidate from the shared buffer, refilling it when empty. Entries
-// are re-checked against the DB because a sweep may have buffered them well before this pop: the
-// position can have been learned, or claimed through the priority queue, in between.
+// claimBufferedJob claims one candidate from the shared buffer, refilling it when empty, and picks
+// the level from what the row already holds: UnlearnedLevel for a never-searched position, its
+// target for one below target. Entries are re-checked against the DB because a sweep may have
+// buffered them well before this pop: the position can have been learned, or claimed through the
+// priority queue, in between.
 func (s *Server) claimBufferedJob(ctx context.Context, workerID string) (job Job, ok bool, err error) {
+	// Walked-past candidates, by why: another worker holds the claim, or the buffered entry no
+	// longer describes work. Logged only when there were any, so a clean claim stays silent.
+	var takenByOthers, stale int
+
 	for range jobClaimAttempts {
 		position, found, err := s.popJobCandidate(ctx)
 		if err != nil {
@@ -92,6 +100,7 @@ func (s *Server) claimBufferedJob(ctx context.Context, workerID string) (job Job
 				return Job{}, false, err
 			}
 			if buffered == 0 {
+				logClaimAttempts("", takenByOthers, stale)
 				return Job{}, false, nil
 			}
 			continue
@@ -99,19 +108,23 @@ func (s *Server) claimBufferedJob(ctx context.Context, workerID string) (job Job
 
 		// edax crashes on a position with no legal move.
 		if !position.HasMoves() {
+			stale++
 			continue
 		}
 
-		target := TargetLevel(position.CountDiscs())
+		discCount := position.CountDiscs()
+		target := TargetLevel(discCount)
 
 		eval, err := s.repo.GetPosition(ctx, position.Position())
 		if errors.Is(err, db.ErrPositionNotFound) {
+			stale++
 			continue
 		}
 		if err != nil {
 			return Job{}, false, fmt.Errorf("failed to check candidate position: %w", err)
 		}
 		if eval.Level >= target {
+			stale++
 			continue
 		}
 
@@ -120,13 +133,37 @@ func (s *Server) claimBufferedJob(ctx context.Context, workerID string) (job Job
 			return Job{}, false, err
 		}
 		if !claimed {
+			takenByOthers++
 			continue
 		}
 
-		return Job{Position: position, Level: target}, true, nil
+		level := target
+		if !eval.IsLearned() {
+			level = UnlearnedLevel(discCount)
+		}
+
+		logClaimAttempts(position.String(), takenByOthers, stale)
+		return Job{Position: position, Level: level}, true, nil
 	}
 
+	logClaimAttempts("", takenByOthers, stale)
 	return Job{}, false, nil
+}
+
+// logClaimAttempts reports how many buffered candidates one claim had to walk past before taking
+// position (empty for none): the two counts say whether the buffer is contended or just stale.
+func logClaimAttempts(position string, takenByOthers, stale int) {
+	if takenByOthers == 0 && stale == 0 {
+		return
+	}
+
+	taken := position
+	if taken == "" {
+		taken = "nothing"
+	}
+
+	log.Printf("job buffer: took %s past %d already-claimed and %d stale candidates",
+		taken, takenByOthers, stale)
 }
 
 // TargetLevelTier maps an upper disc-count bound to the edax search level positions up to that count
@@ -151,9 +188,8 @@ func TargetLevelTiers() []TargetLevelTier {
 	return slices.Clone(targetLevelTiers)
 }
 
-// TargetLevel returns the edax search level for a position with discCount discs; deeper positions get
-// shallower searches to keep evaluation time roughly bounded.
-func TargetLevel(discCount int) int {
+// tierLevel returns the level targetLevelTiers assigns to discCount, before parity alignment.
+func tierLevel(discCount int) int {
 	for _, tier := range targetLevelTiers {
 		if discCount <= tier.MaxDiscs {
 			return tier.Level
@@ -162,15 +198,41 @@ func TargetLevel(discCount int) int {
 	return targetLevelTiers[len(targetLevelTiers)-1].Level
 }
 
-// EffectiveTargetLevel returns the target level for a position at the given disc count, capping at
-// TargetLevel(MaxSavableDiscs) for positions that exceed that count and are not persisted to the DB.
-func EffectiveTargetLevel(discCount int) int {
-	if discCount > book.MaxSavableDiscs {
-		discCount = book.MaxSavableDiscs
-	}
-	return TargetLevel(discCount)
+// TargetLevel returns the edax search level for a position with discCount discs; deeper positions get
+// shallower searches to keep evaluation time roughly bounded. Parity-aligned, so adjacent plies are
+// never both searched at the same depth parity (see edax.AlignLevel).
+func TargetLevel(discCount int) int {
+	return edax.AlignLevel(discCount, tierLevel(discCount))
 }
 
-// PriorityLevel is the level of the first interactive analysis request: light, so the worker
-// responds quickly; the frontend then climbs by 2 per round toward EffectiveTargetLevel.
-const PriorityLevel = 10
+// EffectiveTargetLevel returns the target level for a position at the given disc count, capping at
+// the tier of MaxSavableDiscs for positions that exceed that count and are not persisted to the DB.
+// Only the tier lookup is capped: parity alignment uses the position's real disc count.
+func EffectiveTargetLevel(discCount int) int {
+	return edax.AlignLevel(discCount, tierLevel(min(discCount, book.MaxSavableDiscs)))
+}
+
+// ParityBumpDiscs returns the disc counts whose EffectiveTargetLevel is one above their tier's
+// level, so the frontend can reproduce the target from the tier table alone.
+func ParityBumpDiscs() []int {
+	var discCounts []int
+	for discCount := range 65 {
+		if EffectiveTargetLevel(discCount) != tierLevel(min(discCount, book.MaxSavableDiscs)) {
+			discCounts = append(discCounts, discCount)
+		}
+	}
+	return discCounts
+}
+
+// PriorityLevel is the level an interactive analysis request and an unlearned book row are searched
+// at -- the top two of the three job tiers. Light, so a worker answers quickly, but deep enough that
+// the result is worth a row; the position is re-searched at its target level afterwards, as a
+// below-target row. Aligned per position by UnlearnedLevel before it becomes a search level.
+const PriorityLevel = 16
+
+// UnlearnedLevel returns the level a position with discCount discs is first searched at:
+// PriorityLevel, parity-aligned. So an interactive request and the book row it leaves behind
+// describe the same search.
+func UnlearnedLevel(discCount int) int {
+	return edax.AlignLevel(discCount, PriorityLevel)
+}

@@ -1,21 +1,22 @@
-// Tests for incremental level-up analysis: target levels, "at target" completion tracking,
-// eval dedup that never downgrades a cached result, and the batched level-up requests that
-// drive analysis from the priority level up to each board's target.
+// Tests for the level config PGN review reads: target levels per board, "at target" completion
+// tracking, eval dedup that never downgrades a cached result, and the graph's progress line.
 const assert = require('node:assert');
 const { test } = require('./framework');
 const { buildGame, OthelloGame, DEFAULT_LEVEL_CONFIG, MAX_TARGET_LEVEL } = require('./harness');
 const { FORCED_PASS_BOARDS } = require('./fixtures');
 
-test('targetLevelForBoard: picks the tier the board\'s disc count falls in', () => {
+test('targetLevelForBoard: picks the tier the board\'s disc count falls in, parity-aligned', () => {
   const game = buildGame(FORCED_PASS_BOARDS, { complete: false });
   // FORCED_PASS_BOARDS is one board per ply, starting at 4 discs, so ply n has n + 4 discs.
+  // Odd disc counts get the tier level + 1 (parityBumpDiscs), so a line's plies alternate parity.
   assert.equal(game.targetLevelForBoard(game.pgnBoards[0].normalize().toString()), 40, '4 discs -> first tier');
-  assert.equal(game.targetLevelForBoard(game.pgnBoards[9].normalize().toString()), 40, '13 discs -> still first tier');
+  assert.equal(game.targetLevelForBoard(game.pgnBoards[9].normalize().toString()), 41, '13 discs -> first tier, bumped');
   assert.equal(game.targetLevelForBoard(game.pgnBoards[10].normalize().toString()), 36, '14 discs -> second tier');
+  assert.equal(game.targetLevelForBoard(game.pgnBoards[11].normalize().toString()), 37, '15 discs -> second tier, bumped');
   assert.equal(game.targetLevelForBoard(game.pgnBoards[12].normalize().toString()), 36, '16 discs -> still second tier');
-  assert.equal(game.targetLevelForBoard(game.pgnBoards[13].normalize().toString()), 34, '17 discs -> third tier');
+  assert.equal(game.targetLevelForBoard(game.pgnBoards[13].normalize().toString()), 35, '17 discs -> third tier, bumped');
   assert.equal(game.targetLevelForBoard(game.pgnBoards[16].normalize().toString()), 34, '20 discs -> still third tier');
-  assert.equal(game.targetLevelForBoard(game.pgnBoards[17].normalize().toString()), 32, '21 discs -> last tier');
+  assert.equal(game.targetLevelForBoard(game.pgnBoards[17].normalize().toString()), 33, '21 discs -> last tier, bumped');
   assert.equal(game.targetLevelForBoard(game.pgnBoards[20].normalize().toString()), 32, '24 discs -> last tier');
 });
 
@@ -65,21 +66,6 @@ test('isAtTarget: a search that ran the game out is at target whatever its level
   assert.equal(game.isAtTarget(s), false);
 });
 
-test('pgnRequestLevelUps: does not climb past a search that ran the game out', () => {
-  const game = buildGame(FORCED_PASS_BOARDS, { complete: false });
-  const sent = [];
-  game.wsClient = { sendEvent: (event, boards, level) => sent.push({ event, boards, level }) };
-
-  for (const s of game.pgnAllChildStrings) {
-    const empties = 64 - game.discCountFromBoardStr(s);
-    if (empties === 0) continue; // a full board is game over, not a search result
-    game.evaluations.set(s, { board: s, score: 1, source: 'edax', level: 10, depth: empties, confidence: 100 });
-  }
-  game.pgnRequestLevelUps();
-
-  assert.deepEqual(sent, []);
-});
-
 test('shouldUpdateEval: never downgrades minimax/final to edax; edax only upgrades on higher level', () => {
   const game = buildGame(FORCED_PASS_BOARDS, { complete: false });
   const final = { source: 'final', score: 5, level: 0 };
@@ -103,65 +89,6 @@ test('pgnUnresolved: excludes boards at target, includes boards below target or 
   assert.ok(unresolved.includes(b), 'unevaluated board is unresolved');
 });
 
-test('pgnRequestLevelUps: requests the next level (+2) for boards below target, batched by level', () => {
-  const game = buildGame(FORCED_PASS_BOARDS, { complete: false });
-  const nonLeaf = game.pgnBoards[40].getChildren().map((c) => c.normalize().toString())
-    .filter((s) => game.pgnAllChildStrings.includes(s))[0];
-  assert.ok(nonLeaf, 'found a non-leaf child board to test with');
-
-  game.evaluations.set(nonLeaf, { board: nonLeaf, score: 1, source: 'edax', level: 10 });
-  const sent = [];
-  game.wsClient = { requestEvaluations() {}, sendEvent(event, boards, level) { sent.push({ event, boards, level }); } };
-
-  game.pgnRequestLevelUps();
-
-  const req = sent.find((m) => m.boards.includes(nonLeaf));
-  assert.ok(req, 'a level-up request was sent for the below-target board');
-  assert.equal(req.level, 12, 'requested level is current (10) + 2');
-  assert.equal(game.pendingLevelRequests.get(nonLeaf), 12, 'pendingLevelRequests tracks the new level');
-});
-
-test('pgnRequestLevelUps: the last step lands exactly on the target, never past it', () => {
-  const game = buildGame(FORCED_PASS_BOARDS, { complete: false });
-  const s = game.pgnAllChildStrings.find((b) => game.targetLevelForBoard(b) % 2 === 0);
-  const target = game.targetLevelForBoard(s);
-  game.evaluations.set(s, { board: s, score: 1, source: 'edax', level: target - 1 });
-
-  const sent = [];
-  game.wsClient = { requestEvaluations() {}, sendEvent(event, boards, level) { sent.push({ event, boards, level }); } };
-  game.pgnRequestLevelUps();
-
-  const req = sent.find((m) => m.boards.includes(s));
-  assert.ok(req, 'a level-up request was sent for the below-target board');
-  assert.equal(req.level, target, 'capped at the target rather than current + 2');
-  assert.equal(game.pendingLevelRequests.get(s), target);
-});
-
-test('pgnRequestLevelUps: does not re-request a level already pending', () => {
-  const game = buildGame(FORCED_PASS_BOARDS, { complete: false });
-  const s = game.pgnAllChildStrings[0];
-  game.evaluations.set(s, { board: s, score: 1, source: 'edax', level: 10 });
-  game.pendingLevelRequests.set(s, 12); // already requested the next level
-
-  const sent = [];
-  game.wsClient = { requestEvaluations() {}, sendEvent(event, boards, level) { sent.push({ event, boards, level }); } };
-  game.pgnRequestLevelUps();
-
-  assert.ok(!sent.some((m) => m.boards.includes(s)), 'no duplicate request for an already-pending level');
-});
-
-test('pgnRequestLevelUps: never re-requests minimax/final results', () => {
-  const game = buildGame(FORCED_PASS_BOARDS, { complete: false });
-  const s = game.pgnAllChildStrings[0];
-  game.evaluations.set(s, { board: s, score: 1, source: 'final', level: 0 });
-
-  const sent = [];
-  game.wsClient = { requestEvaluations() {}, sendEvent(event, boards, level) { sent.push({ event, boards, level }); } };
-  game.pgnRequestLevelUps();
-
-  assert.ok(!sent.some((m) => m.boards.includes(s)), 'final results are never leveled up further');
-});
-
 test('fetchLevelConfig maps the backend\'s snake_case JSON to the camelCase fields the rest of the code reads', async () => {
   const game = Object.create(OthelloGame.prototype);
   game.levelConfig = null;
@@ -169,7 +96,7 @@ test('fetchLevelConfig maps the backend\'s snake_case JSON to the camelCase fiel
   global.fetch = async () => ({
     ok: true,
     json: async () => ({
-      priority_level: 10,
+      priority_level: 16,
       max_savable_discs: 30,
       target_levels: [
         { max_discs: 13, level: 40 },
@@ -177,6 +104,7 @@ test('fetchLevelConfig maps the backend\'s snake_case JSON to the camelCase fiel
         { max_discs: 20, level: 34 },
         { max_discs: 64, level: 32 },
       ],
+      parity_bump_discs: [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23],
     }),
   });
   try {
@@ -209,32 +137,14 @@ function graphStatus(game) {
   return statusEl.textContent;
 }
 
-test('pgnUpdateGraphStatus: reports the current (lowest) search level and progress', () => {
-  const game = buildGame(FORCED_PASS_BOARDS, { complete: false });
-  const [a] = game.pgnAllChildStrings;
-  // a is ahead at level 12; every other board is still untouched, so implicitly at the
-  // priority level (10) — the reported level should be the minimum across all of them.
-  game.evaluations.set(a, { board: a, score: 1, source: 'edax', level: 12 });
-  game.pendingLevelRequests.set(a, 12);
-
-  assert.equal(graphStatus(game), `Searching at level 10 — 0 / ${game.pgnAllChildStrings.length} boards evaluated…`);
-});
-
-test('pgnUpdateGraphStatus: boards already at target do not hold the reported level back', () => {
+test('pgnUpdateGraphStatus: reports progress only -- there is one interactive search level', () => {
   const game = buildGame(FORCED_PASS_BOARDS, { complete: false });
   const total = game.pgnAllChildStrings.length;
-  // Every board but the last is finished — and keeps its last requested level (the priority
-  // level) in pendingLevelRequests forever. Only the unfinished one, now being searched at 16,
-  // says anything about how deep the search currently is.
   for (const s of game.pgnAllChildStrings.slice(0, -1)) {
     game.evaluations.set(s, { board: s, score: 1, source: 'edax', level: MAX_TARGET_LEVEL });
-    game.pendingLevelRequests.set(s, game.levelConfig.priorityLevel);
   }
-  const last = game.pgnAllChildStrings[total - 1];
-  game.evaluations.set(last, { board: last, score: 1, source: 'edax', level: 14 });
-  game.pendingLevelRequests.set(last, 16);
 
-  assert.equal(graphStatus(game), `Searching at level 16 — ${total - 1} / ${total} boards evaluated…`);
+  assert.equal(graphStatus(game), `${total - 1} / ${total} positions evaluated…`);
 });
 
 test('pgnUpdateGraphStatus: reports completion once every board is at target', () => {

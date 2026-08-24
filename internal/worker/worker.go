@@ -18,7 +18,7 @@ const (
 	defaultNoJobSleep        = 10 * time.Second
 	defaultErrorSleep        = 10 * time.Second
 
-	// defaultStatsInterval is how often throughput (positions/sec, sec/position since start) is logged.
+	// defaultStatsInterval is how often throughput (positions/hour since start) is logged.
 	defaultStatsInterval = 10 * time.Second
 
 	// releaseTimeout bounds a best-effort claim release on shutdown, run against a fresh context since
@@ -140,8 +140,8 @@ func (w *Worker) releaseJob(position string) {
 	}
 }
 
-// runStats logs cumulative throughput (positions/sec and sec/position since start) every statsInterval,
-// until ctx is canceled.
+// runStats logs cumulative throughput (positions/hour since start) every statsInterval, until ctx
+// is canceled.
 func (w *Worker) runStats(ctx context.Context) {
 	start := time.Now()
 
@@ -158,21 +158,19 @@ func (w *Worker) runStats(ctx context.Context) {
 	}
 }
 
-// logStats logs positions processed and throughput since start, both positions/sec and sec/position formatted
-// to 2 decimals.
+// logStats logs positions processed since start and the rate they came in at. Positions/hour rather
+// than per second: a single position takes seconds to minutes, so the per-second figure was three
+// leading zeros.
 func (w *Worker) logStats(start time.Time) {
-	elapsed := time.Since(start).Seconds()
+	elapsed := time.Since(start).Hours()
 	count := w.jobsCompleted.Load()
 
-	var positionsPerSec, secPerPosition float64
+	var positionsPerHour float64
 	if elapsed > 0 {
-		positionsPerSec = float64(count) / elapsed
-	}
-	if count > 0 {
-		secPerPosition = elapsed / float64(count)
+		positionsPerHour = float64(count) / elapsed
 	}
 
-	log.Printf("%d positions done, %.2f positions/sec, %.2f sec/position", count, positionsPerSec, secPerPosition)
+	log.Printf("%d positions done, %.1f positions/hour", count, positionsPerHour)
 }
 
 // runHeartbeat sends a heartbeat immediately, then every heartbeatInterval, until ctx is canceled.

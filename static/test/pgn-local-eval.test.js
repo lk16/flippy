@@ -36,7 +36,8 @@ test('pgnQueueLineEvaluations: searches every board the graph is drawn from, not
   const searched = new Set(pool.calls.map((c) => c.player + ':' + c.opponent));
   const expected = game.pgnAllChildStrings.filter((s) => !game.evaluations.has(s));
   assert.equal(searched.size, expected.length, 'one search per line board the server has not answered for');
-  assert.ok(pool.calls.every((c) => c.level === 4), 'the whole line starts at the shallowest level');
+  // 4 for an even disc count, 5 for an odd one -- the shallowest rung, parity-aligned per board.
+  assert.ok(pool.calls.every((c) => c.level === 4 || c.level === 5), 'the whole line starts at its shallowest rung');
   assert.ok(pool.calls.every((c) => c.tag === game._localEvalLineTag()), 'tagged as line work, not board work');
 });
 
@@ -115,28 +116,6 @@ test('pgnAbandonLineEvaluations: loading another PGN drops the previous line\'s 
 
   assert.ok(pool.calls.every((c) => c.resolved), 'every queued search was cancelled');
   assert.equal(game._pendingLocalEvals.size, 0, 'and their boards are free to be queued again');
-});
-
-test('pgnRequestLevelUps: a local wasm score is not a rung on the server\'s level ladder', () => {
-  const game = buildGame(FORCED_PASS_BOARDS, { complete: false });
-  const requests = [];
-  game.wsClient = { requestEvaluations() {}, sendEvent(event, boards, level) { requests.push({ event, boards, level }); } };
-
-  // The state right after loading: the server was asked at the priority level and has not answered
-  // yet, while the local evaluator has already refined a board to level 8.
-  const boardStr = game.pgnAllChildStrings[0];
-  for (const s of game.pgnAllChildStrings) game.pendingLevelRequests.set(s, game.levelConfig.priorityLevel);
-  game.evaluations.set(boardStr, { board: boardStr, score: 1, source: 'wasm', level: 8 });
-
-  game.pgnRequestLevelUps();
-
-  assert.deepEqual(requests, [], 'no request: stepping up from level 8 would ask for a shallower search than level 10');
-
-  // Once the server does answer, the ladder climbs from *its* level.
-  game.evaluations.set(boardStr, { board: boardStr, score: 1, source: 'edax', level: 10 });
-  game.pgnRequestLevelUps();
-
-  assert.deepEqual(requests, [{ event: 'analyze_request', boards: [boardStr], level: 12 }]);
 });
 
 test('a local result redraws the score graph, not just the board overlay', async () => {

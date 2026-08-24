@@ -6,7 +6,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
+	"github.com/lk16/flippy/internal/edax"
 	"github.com/lk16/flippy/internal/othello"
 )
 
@@ -23,7 +25,7 @@ func TestServer_ClaimJob_PicksLowestDiscCountThenLevel(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, position12, job.Position)
-	require.Equal(t, TargetLevel(12), job.Level)
+	require.Equal(t, UnlearnedLevel(12), job.Level)
 }
 
 func TestServer_ClaimJob_SkipsAlreadyClaimedBoards(t *testing.T) {
@@ -80,7 +82,7 @@ func TestServer_ClaimJob_LeafBoardsDoNotStarveDeeperCandidates(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, position13, job.Position)
-	require.Equal(t, TargetLevel(13), job.Level)
+	require.Equal(t, UnlearnedLevel(13), job.Level)
 }
 
 // TestServer_ClaimJob_BuffersTheRestOfTheRefill covers the point of the buffer: one claim's DB scan
@@ -177,12 +179,22 @@ func TestServer_ClaimJob_DoesNotRefillWhileAnotherReplicaHoldsTheLock(t *testing
 	require.Equal(t, "other-replica", holder)
 }
 
+// TestServer_ClaimJob_SkipsOutOfRangeDiscCounts covers both ends of the savable range end to end:
+// AddPositions drops such a position rather than storing it, so no job is ever handed out for one.
 func TestServer_ClaimJob_SkipsOutOfRangeDiscCounts(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	position35 := testPosition(t, 35)
-	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position35}))
+	outOfRange := []othello.NormalizedPosition{
+		testPosition(t, book.LeafDiscs-1),
+		testPosition(t, book.MaxSavableDiscs+5),
+	}
+	require.NoError(t, s.repo.AddPositions(ctx, outOfRange))
+
+	for _, position := range outOfRange {
+		_, err := s.repo.GetPosition(ctx, position.Position())
+		require.ErrorIs(t, err, db.ErrPositionNotFound)
+	}
 
 	_, ok, err := s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
@@ -224,41 +236,83 @@ func TestServer_ClaimJob_StaleFloorSkipsNewlyAddedLowerBoards(t *testing.T) {
 	require.Equal(t, position13, job.Position)
 }
 
+// TestTargetLevel covers the tier boundaries and the parity alignment on top of them: a
+// depth-limited target at an odd disc count is one level above its tier's.
 func TestTargetLevel(t *testing.T) {
 	require.Equal(t, 40, TargetLevel(12))
-	require.Equal(t, 40, TargetLevel(13))
+	require.Equal(t, 41, TargetLevel(13))
 	require.Equal(t, 36, TargetLevel(14))
+	require.Equal(t, 37, TargetLevel(15))
 	require.Equal(t, 36, TargetLevel(16))
-	require.Equal(t, 34, TargetLevel(17))
+	require.Equal(t, 35, TargetLevel(17))
 	require.Equal(t, 34, TargetLevel(20))
-	require.Equal(t, 32, TargetLevel(21))
+	require.Equal(t, 33, TargetLevel(21))
 	require.Equal(t, 32, TargetLevel(30))
 	require.Equal(t, 32, TargetLevel(64))
 }
 
-// TestTargetLevelTiers_MatchTargetLevel guards the contract handleLevelConfig relies on: the tiers
-// served to the frontend must reproduce TargetLevel for every disc count, so the frontend's target
-// for a position is exactly the one handleAnalyzeRequest clamps its requests to.
-func TestTargetLevelTiers_MatchTargetLevel(t *testing.T) {
+// TestTargetLevel_AlternatesDepthParity is the point of the alignment: no two adjacent plies may be
+// searched at the same depth parity, or a line of best moves alternates by ~1.6 discs. From 25 discs
+// up the search runs the game out and its depth is the empty count, which alternates on its own.
+func TestTargetLevel_AlternatesDepthParity(t *testing.T) {
+	for discCount := book.LeafDiscs; discCount <= book.MaxSavableDiscs; discCount++ {
+		depth, _ := edax.SearchParams(discCount, TargetLevel(discCount))
+		require.Equal(t, discCount%2, depth%2, "disc count %d searches %d ply", discCount, depth)
+	}
+}
+
+// TestTargetLevel_ConfidenceUnchangedByAlignment guards against the alignment silently buying a
+// different selectivity: raising the level by one must only add a ply.
+func TestTargetLevel_ConfidenceUnchangedByAlignment(t *testing.T) {
+	for discCount := book.LeafDiscs; discCount <= book.MaxSavableDiscs; discCount++ {
+		_, tierConfidence := edax.SearchParams(discCount, tierLevel(discCount))
+		_, confidence := edax.SearchParams(discCount, TargetLevel(discCount))
+		require.Equal(t, tierConfidence, confidence, "disc count %d", discCount)
+	}
+}
+
+// TestEffectiveTargetLevel_AlignsOnTheRealDiscCount covers the one place the two lookups differ:
+// past MaxSavableDiscs the tier is capped, but the parity rule still uses the position's own count.
+func TestEffectiveTargetLevel_AlignsOnTheRealDiscCount(t *testing.T) {
+	for discCount := range 65 {
+		want := edax.AlignLevel(discCount, tierLevel(min(discCount, book.MaxSavableDiscs)))
+		require.Equal(t, want, EffectiveTargetLevel(discCount), "disc count %d", discCount)
+	}
+	require.Equal(t, TargetLevel(book.MaxSavableDiscs), EffectiveTargetLevel(book.MaxSavableDiscs+2))
+}
+
+// TestTargetLevelTiers_MatchEffectiveTargetLevel guards the contract handleLevelConfig relies on:
+// the tiers plus the parity bumps served to the frontend must reproduce EffectiveTargetLevel for
+// every disc count, so the frontend's target for a position is exactly the one
+// handleAnalyzeRequest clamps its requests to.
+func TestTargetLevelTiers_MatchEffectiveTargetLevel(t *testing.T) {
 	tiers := TargetLevelTiers()
 	require.NotEmpty(t, tiers)
 	require.Equal(t, 64, tiers[len(tiers)-1].MaxDiscs, "last tier must cover a full board")
 
+	bumped := make(map[int]bool)
+	for _, discCount := range ParityBumpDiscs() {
+		bumped[discCount] = true
+	}
+
 	for discCount := range 65 {
 		var want int
 		for _, tier := range tiers {
-			if discCount <= tier.MaxDiscs {
+			if min(discCount, book.MaxSavableDiscs) <= tier.MaxDiscs {
 				want = tier.Level
 				break
 			}
 		}
-		require.Equal(t, want, TargetLevel(discCount), "disc count %d", discCount)
+		if bumped[discCount] {
+			want++
+		}
+		require.Equal(t, want, EffectiveTargetLevel(discCount), "disc count %d", discCount)
 	}
 }
 
-// TestIsBookQuality covers the level floor handleSubmitJobResult applies to every submission:
-// only a search at least as deep as the position's target level -- or one that already ran the game
-// out -- may reach the DB.
+// TestIsBookQuality covers the level floor handleSubmitJobResult applies to every submission: only
+// a search at least as deep as the shallowest job tier -- or one that already ran the game out --
+// may reach the DB.
 func TestIsBookQuality(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -266,15 +320,16 @@ func TestIsBookQuality(t *testing.T) {
 		level     int
 		want      bool
 	}{
-		{"below target", 14, PriorityLevel, false},
-		{"one rung below target", 14, TargetLevel(14) - 2, false},
+		{"below the unlearned tier", 14, UnlearnedLevel(14) - 1, false},
+		{"at the unlearned tier", 14, UnlearnedLevel(14), true},
+		{"between the tiers", 14, TargetLevel(14) - 2, true},
 		{"at target", 14, TargetLevel(14), true},
 		{"above target", 14, TargetLevel(14) + 2, true},
 		{"at target, deepest tier", 30, TargetLevel(30), true},
 		// 52 discs is past MaxSavableDiscs, so the disc-count check keeps it out of the DB anyway,
 		// but it is the shape the IsFinal clause exists for: a shallow search that is still the
 		// game-theoretic result, which no deeper level could improve on.
-		{"below target but final", 52, 12, true},
+		{"below the unlearned tier but final", 52, 12, true},
 	}
 
 	for _, tt := range tests {
@@ -288,4 +343,31 @@ func TestIsBookQuality(t *testing.T) {
 func TestTargetLevelTiers_ReturnsACopy(t *testing.T) {
 	TargetLevelTiers()[0].Level = 1
 	require.Equal(t, 40, TargetLevel(4))
+}
+
+// TestServer_ClaimJob_LevelPerTier covers what separates the second job tier from the third: an
+// unlearned row is searched at UnlearnedLevel, a row that already has a score at its target.
+func TestServer_ClaimJob_LevelPerTier(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	unlearned := testPosition(t, 14)
+	belowTarget := testPosition(t, 16)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{unlearned, belowTarget}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, belowTarget, db.Evaluation{
+		Level: UnlearnedLevel(16), Score: 0,
+	}))
+
+	// Unlearned first, whatever the disc counts (see db.ListLearnable's ordering).
+	job, ok, err := s.claimJob(ctx, "worker-1")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, unlearned, job.Position)
+	require.Equal(t, UnlearnedLevel(14), job.Level)
+
+	job, ok, err = s.claimJob(ctx, "worker-2")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, belowTarget, job.Position)
+	require.Equal(t, TargetLevel(16), job.Level)
 }

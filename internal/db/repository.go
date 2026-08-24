@@ -18,6 +18,16 @@ type querier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
+// MinSavableDiscs and MaxSavableDiscs bound the disc counts the boards table holds a row for.
+// Below the minimum every position is minimax-derived from the rows at it (see internal/book, whose
+// LeafDiscs is this constant); above the maximum a position is not worth a search. The range lives
+// here rather than in internal/book so AddPositionsInserted can enforce it -- validation is the
+// app's job by design, the table has no CHECK constraint.
+const (
+	MinSavableDiscs = 12
+	MaxSavableDiscs = 30
+)
+
 // Evaluation is the current edax evaluation state stored for a position; the zero value means unlearned.
 // Depth and confidence are not stored: they follow from (disc count, level) via edax.SearchParams.
 type Evaluation struct {
@@ -60,18 +70,24 @@ func (r *Repository) AddPositions(ctx context.Context, positions []othello.Norma
 }
 
 // AddPositionsInserted inserts positions that don't already have a row and returns the number
-// actually inserted (existing ones are skipped, not counted). Rows are sent via UNNEST rather than
-// one placeholder pair each, to stay under Postgres's parameter limit.
+// actually inserted (existing ones are skipped, not counted). Positions outside
+// [MinSavableDiscs, MaxSavableDiscs] are dropped here rather than at the call sites, so no caller
+// can put a row in the table that nothing will ever learn. Rows are sent via UNNEST rather than one
+// placeholder pair each, to stay under Postgres's parameter limit.
 func (r *Repository) AddPositionsInserted(ctx context.Context, positions []othello.NormalizedPosition) (int, error) {
-	if len(positions) == 0 {
-		return 0, nil
+	encoded := make([][]byte, 0, len(positions))
+	discCounts := make([]int16, 0, len(positions))
+	for _, position := range positions {
+		discCount := position.CountDiscs()
+		if discCount < MinSavableDiscs || discCount > MaxSavableDiscs {
+			continue
+		}
+		encoded = append(encoded, position.Position().Bytes())
+		discCounts = append(discCounts, int16(discCount))
 	}
 
-	encoded := make([][]byte, len(positions))
-	discCounts := make([]int16, len(positions))
-	for i, position := range positions {
-		encoded[i] = position.Position().Bytes()
-		discCounts[i] = int16(position.CountDiscs())
+	if len(encoded) == 0 {
+		return 0, nil
 	}
 
 	tag, err := r.db.Exec(ctx,
@@ -160,8 +176,9 @@ type PositionEvaluation struct {
 	Evaluation Evaluation
 }
 
-// LearnableCursor is a point in ListLearnable's ordering. The zero value sorts before every row, so
-// it starts a scan at the beginning.
+// LearnableCursor is a point in ListLearnable's ordering. Level is what says which of the two
+// segments the cursor is in -- unlearned means Level == 0 -- so nothing has to be encoded for it.
+// The zero value sorts before every row, so it starts a scan at the beginning.
 type LearnableCursor struct {
 	DiscCount int
 	Level     int
@@ -190,19 +207,22 @@ type LearnableQuery struct {
 	Limit       int
 }
 
-// ListLearnable returns up to q.Limit learnable positions matching q, ordered by disc count, then
-// level, then position; filtering in SQL keeps learned LeafDiscs rows from starving the rest.
+// ListLearnable returns up to q.Limit learnable positions matching q: every unlearned position
+// first, then the partially learned ones, each segment by disc count, then level, then position.
+// Unlearned first is global, not per disc count, so a 12-disc row that already has a score doesn't
+// outrank a 20-disc one with none. Filtering in SQL keeps learned LeafDiscs rows from starving the
+// rest.
 func (r *Repository) ListLearnable(ctx context.Context, q LearnableQuery) ([]PositionEvaluation, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT position, level, score
 		 FROM boards
 		 WHERE disc_count BETWEEN $1 AND $2
 		   AND level < CASE WHEN disc_count = $3 THEN $4::smallint ELSE $5::smallint END
-		   AND (disc_count, level, position) > ($6::smallint, $7::smallint, $8::bytea)
-		 ORDER BY disc_count, level, position
-		 LIMIT $9`,
+		   AND ((level > 0), disc_count, level, position) > ($6::boolean, $7::smallint, $8::smallint, $9::bytea)
+		 ORDER BY (level > 0), disc_count, level, position
+		 LIMIT $10`,
 		q.MinDiscs, q.MaxDiscs, q.LeafDiscs, q.LeafLevel, q.DeeperLevel,
-		q.After.DiscCount, q.After.Level, q.After.Position.Position().Bytes(),
+		q.After.Level > 0, q.After.DiscCount, q.After.Level, q.After.Position.Position().Bytes(),
 		q.Limit,
 	)
 	if err != nil {

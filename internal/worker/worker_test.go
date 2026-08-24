@@ -1,9 +1,12 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -493,4 +496,33 @@ func TestWorker_ProcessJob_SuccessResetsFailureStreak(t *testing.T) {
 
 	require.NoError(t, fatalErr)
 	require.Zero(t, w.consecutiveEvalFailures)
+}
+
+// TestWorker_LogStats covers the throughput line operators read: positions done and the rate they
+// came in at, in positions/hour.
+func TestWorker_LogStats(t *testing.T) {
+	w := New(nil, nil)
+	w.jobsCompleted.Store(30)
+
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+
+	w.logStats(time.Now().Add(-2 * time.Hour))
+
+	require.Contains(t, buf.String(), "30 positions done, 15.0 positions/hour")
+}
+
+// TestWorker_LogStats_NoElapsedTime covers the divide-by-zero guard: a stats tick that somehow runs
+// at the start time reports a rate of zero rather than NaN or an infinity.
+func TestWorker_LogStats_NoElapsedTime(t *testing.T) {
+	w := New(nil, nil)
+
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+
+	w.logStats(time.Now().Add(time.Hour))
+
+	require.Contains(t, buf.String(), "0 positions done, 0.0 positions/hour")
 }

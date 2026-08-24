@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
@@ -17,6 +18,15 @@ import (
 // testServer returns a Server backed by a rolled-back Postgres transaction and a flushed redis
 // database, skipping the test if FLIPPY_POSTGRES_URL or FLIPPY_REDIS_URL isn't set.
 func testServer(t *testing.T) *Server {
+	t.Helper()
+
+	server, _ := testServerWithTx(t)
+	return server
+}
+
+// testServerWithTx is testServer, also handing back the transaction its repository runs in, for
+// tests that need to write a row Repository itself refuses to create.
+func testServerWithTx(t *testing.T) (*Server, pgx.Tx) {
 	t.Helper()
 
 	pgURL := os.Getenv("FLIPPY_POSTGRES_URL")
@@ -50,7 +60,7 @@ func testServer(t *testing.T) *Server {
 	})
 
 	repo := db.NewRepository(tx)
-	return NewServer(repo, redisClient, book.NewCache(repo), testWorkerToken)
+	return NewServer(repo, redisClient, book.NewCache(repo), testWorkerToken), tx
 }
 
 // testWorkerToken is the worker token every testServer is configured with; doRequest sends it on
@@ -89,3 +99,10 @@ func testPassRequiredPosition(t *testing.T) othello.Position {
 // testDistinctPositions returns n distinct NormalizedPositions with exactly discs
 // discs, found via breadth-first search from the starting position.
 var testDistinctPositions = othellotest.DistinctPositions
+
+// classifiedStat is the statEntry /api/stats reports for count positions with discCount discs
+// searched to (depth, confidence): the bucket and target fields are derived, so tests state only
+// the inputs.
+func classifiedStat(discCount, depth, confidence, count int) statEntry {
+	return statEntry{DiscCount: discCount, Depth: depth, Confidence: confidence, Count: count}.classified()
+}

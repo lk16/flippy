@@ -82,11 +82,19 @@ func checkReportedSearchParams(req jobResultRequest, discCount int) {
 	}
 }
 
+// isSavableDiscCount reports whether a position with discCount discs may have a row in the boards
+// table. Repository.AddPositionsInserted enforces the same range; checking here too keeps a caller
+// from counting an insert that never happened, and keeps the write paths readable.
+func isSavableDiscCount(discCount int) bool {
+	return discCount >= book.LeafDiscs && discCount <= book.MaxSavableDiscs
+}
+
 // isBookQuality reports whether an evaluation is deep enough for the boards table: at least the
-// position's target level, or a search that ran the game out, which no deeper search can improve on.
-// Enforced on every submission so interactive analysis's shallow rungs never enter the book.
+// level the job tiers hand an unlearned position out at, or a search that ran the game out, which no
+// deeper search can improve on. Enforced on every submission, so a client asking for something
+// shallower than any tier gets an answer but never a row.
 func isBookQuality(discCount, level int) bool {
-	return level >= TargetLevel(discCount) || edax.IsFinal(discCount, level)
+	return level >= UnlearnedLevel(discCount) || edax.IsFinal(discCount, level)
 }
 
 // handleSubmitJobResult handles POST /api/jobs/result: stores a worker's evaluation and releases its claim.
@@ -143,7 +151,7 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 		// Below book quality: accepted but never persisted; the ephemeral cache is the only record.
 		// A savable priority position still gets an empty-evaluation row so ListLearnable finds it
 		// later (AddPositions never downgrades an existing row).
-		if isPriority && discCount <= book.MaxSavableDiscs {
+		if isPriority && isSavableDiscCount(discCount) {
 			if inserted, err := s.repo.AddPositionsInserted(r.Context(), []othello.NormalizedPosition{normalized}); err != nil {
 				log.Printf("failed to schedule priority position for learning: %v", err)
 			} else {
@@ -151,7 +159,7 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	case isPriority:
-		if discCount <= book.MaxSavableDiscs {
+		if isSavableDiscCount(discCount) {
 			if outcome, saveErr := s.repo.SaveEvaluationOutcome(r.Context(), normalized, eval); saveErr != nil {
 				if errors.Is(saveErr, db.ErrPositionNotFound) {
 					// Position has no row yet; add one and retry.
@@ -257,19 +265,25 @@ func (s *Server) lookupEvaluation(ctx context.Context, position othello.Position
 		return s.lookupPassEvaluation(ctx, position)
 	}
 
-	eval, err := s.repo.GetPosition(ctx, position)
-	if err == nil && eval.IsLearned() {
-		depth, confidence := edax.SearchParams(position.CountDiscs(), eval.Level)
-		return evaluationResponse{
-			Level:      eval.Level,
-			Depth:      depth,
-			Confidence: confidence,
-			Score:      eval.Score,
-			Source:     evaluationSourceEdax,
-		}, true, nil
-	}
-	if err != nil && !errors.Is(err, db.ErrPositionNotFound) {
-		return evaluationResponse{}, false, err
+	// Below LeafDiscs the minimax cache is the only legitimate source: internal/book derives every
+	// such position from the rows at LeafDiscs, and AddPositionsInserted refuses to create one of
+	// its own. Not looking further down keeps a stray row predating that guard from being served as
+	// a book entry.
+	if position.CountDiscs() >= book.LeafDiscs {
+		eval, err := s.repo.GetPosition(ctx, position)
+		if err == nil && eval.IsLearned() {
+			depth, confidence := edax.SearchParams(position.CountDiscs(), eval.Level)
+			return evaluationResponse{
+				Level:      eval.Level,
+				Depth:      depth,
+				Confidence: confidence,
+				Score:      eval.Score,
+				Source:     evaluationSourceEdax,
+			}, true, nil
+		}
+		if err != nil && !errors.Is(err, db.ErrPositionNotFound) {
+			return evaluationResponse{}, false, err
+		}
 	}
 
 	if score, ok := s.cache.Get(position); ok {
@@ -404,11 +418,45 @@ func statEntries(stats []db.LevelStat) []statEntry {
 	entries := make([]statEntry, 0, len(counts))
 	for key, count := range counts {
 		key.Count = count
-		entries = append(entries, key)
+		entries = append(entries, key.classified())
 	}
 
 	sortStatEntries(entries)
 	return entries
+}
+
+// Which of the stats page's three column groups a cell belongs in.
+const (
+	statBucketUnlearned = "unlearned"
+	statBucketPartial   = "partial"
+	statBucketLearned   = "learned"
+)
+
+// statBucket classifies a stats cell: unlearned when the position was never searched, learned when
+// its search reaches the disc count's target or better -- including one that ran the game out, which
+// no deeper search can improve on -- and partial in between. Decided from (depth, confidence) alone:
+// neither /api/stats nor the book_stats hash carries the level that produced them.
+func statBucket(discCount, depth, confidence int) string {
+	if depth == 0 {
+		return statBucketUnlearned
+	}
+	if edax.IsFinalSearch(discCount, depth, confidence) {
+		return statBucketLearned
+	}
+
+	targetDepth, targetConfidence := edax.SearchParams(discCount, TargetLevel(discCount))
+	if depth > targetDepth || (depth == targetDepth && confidence >= targetConfidence) {
+		return statBucketLearned
+	}
+	return statBucketPartial
+}
+
+// classified fills in the fields the stats page can't derive itself: e's bucket and the target
+// search its disc count aims for. Both would need a JS port of edax.SearchParams in the browser.
+func (e statEntry) classified() statEntry {
+	e.Bucket = statBucket(e.DiscCount, e.Depth, e.Confidence)
+	e.TargetDepth, e.TargetConfidence = edax.SearchParams(e.DiscCount, TargetLevel(e.DiscCount))
+	return e
 }
 
 // sortStatEntries orders entries by disc count, then depth, then confidence.
@@ -429,6 +477,7 @@ func (s *Server) handleLevelConfig(w http.ResponseWriter, r *http.Request) {
 		PriorityLevel:   PriorityLevel,
 		MaxSavableDiscs: book.MaxSavableDiscs,
 		TargetLevels:    TargetLevelTiers(),
+		ParityBumpDiscs: ParityBumpDiscs(),
 	})
 }
 
@@ -538,12 +587,16 @@ type evaluationResponse struct {
 }
 
 // statEntry is one row of the GET /api/stats response: how many positions with DiscCount discs have
-// been searched to Depth at Confidence percent.
+// been searched to Depth at Confidence percent. Bucket and the Target fields are derived, not
+// stored; see classified.
 type statEntry struct {
-	DiscCount  int `json:"disc_count"`
-	Depth      int `json:"depth"`
-	Confidence int `json:"confidence"`
-	Count      int `json:"count"`
+	DiscCount        int    `json:"disc_count"`
+	Depth            int    `json:"depth"`
+	Confidence       int    `json:"confidence"`
+	Count            int    `json:"count"`
+	Bucket           string `json:"bucket"`
+	TargetDepth      int    `json:"target_depth"`
+	TargetConfidence int    `json:"target_confidence"`
 }
 
 // workerResponse is one entry of the GET /api/workers response.
@@ -561,9 +614,11 @@ type pgnResponse struct {
 }
 
 // levelConfigResponse is the JSON body returned by GET /api/level-config. TargetLevels carries the
-// whole tier table so the frontend computes exactly the targets the server enforces.
+// whole tier table and ParityBumpDiscs the disc counts edax.AlignLevel raises a tier level for, so
+// the frontend computes exactly the targets the server enforces.
 type levelConfigResponse struct {
 	PriorityLevel   int               `json:"priority_level"`
 	MaxSavableDiscs int               `json:"max_savable_discs"`
 	TargetLevels    []TargetLevelTier `json:"target_levels"`
+	ParityBumpDiscs []int             `json:"parity_bump_discs"`
 }

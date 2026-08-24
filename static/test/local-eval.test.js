@@ -21,18 +21,29 @@ test('localEvalLevelsFor: an opening position climbs the whole ladder', () => {
   assert.deepEqual(localEvalLevelsFor(28), LOCAL_EVAL_LEVELS);
 });
 
+test('localEvalLevelsFor: an odd empty count searches every depth-limited rung one deeper', () => {
+  // A depth-limited search has to match the board's parity (edax.AlignLevel), and a board's empty
+  // count has the same parity as its disc count -- so at an odd empty count every rung is base + 1.
+  assert.deepEqual(localEvalLevelsFor(59), [5, 7, 9, 11, 13, 15, 17]);
+  assert.deepEqual(localEvalLevelsFor(29), [5, 7, 9, 11, 13, 15, 17]);
+});
+
 test('localEvalLevelsFor: stops before rungs that would turn into an endgame solve', () => {
-  // 25-27 empties: level 12 is still a fixed-depth search, 14 and 16 would solve to the end.
-  assert.deepEqual(localEvalLevelsFor(27), [4, 6, 8, 10, 12]);
-  assert.deepEqual(localEvalLevelsFor(25), [4, 6, 8, 10, 12]);
+  // 26 empties: level 12 is still a fixed-depth search, 14 and 16 would solve to the end. At 25 and
+  // 27 the bumped rung 13 already solves to the end, so the ladder stops one rung earlier.
+  assert.deepEqual(localEvalLevelsFor(27), [5, 7, 9, 11]);
+  assert.deepEqual(localEvalLevelsFor(26), [4, 6, 8, 10, 12]);
+  assert.deepEqual(localEvalLevelsFor(25), [5, 7, 9, 11]);
   // 21-24 empties: even level 12 would solve to the end (selectively, so not even exactly).
   assert.deepEqual(localEvalLevelsFor(24), [4, 6, 8, 10]);
-  assert.deepEqual(localEvalLevelsFor(21), [4, 6, 8, 10]);
+  assert.deepEqual(localEvalLevelsFor(21), [5, 7, 9]);
 });
 
 test('localEvalLevelsFor: stops at the rung that solves the position exactly', () => {
-  // Level 10 solves exactly at <= 20 empties, so nothing deeper can improve on it.
+  // Level 10 solves exactly at <= 20 empties, so nothing deeper can improve on it. An exact solve
+  // searches every empty square, so its parity alternates on its own and the rung is not bumped.
   assert.deepEqual(localEvalLevelsFor(20), [4, 6, 8, 10]);
+  assert.deepEqual(localEvalLevelsFor(19), [5, 7, 9, 10]);
   // ...and level 8 already does at <= 16, level 4 at <= 8.
   assert.deepEqual(localEvalLevelsFor(16), [4, 6, 8]);
   assert.deepEqual(localEvalLevelsFor(12), [4, 6]);
@@ -40,15 +51,22 @@ test('localEvalLevelsFor: stops at the rung that solves the position exactly', (
   assert.deepEqual(localEvalLevelsFor(0), [4]);
 });
 
-test('queueLocalEvaluations: refines a board through LOCAL_EVAL_LEVELS in order', async () => {
+// rungsFor returns the ladder a board string actually climbs -- LOCAL_EVAL_LEVELS parity-aligned to
+// the board, so an odd-disc-count board starts at 5 rather than 4.
+function rungsFor(game, boardStr) {
+  return localEvalLevelsFor(64 - game.discCountFromBoardStr(boardStr));
+}
+
+test('queueLocalEvaluations: refines a board through its ladder in order', async () => {
   const game = buildGame(FORCED_PASS_BOARDS, { complete: false });
   const pool = mockWorkerPool();
   game.edaxWorkerPool = pool;
 
   const boardStr = game.pgnAllChildStrings[0];
+  const rungs = rungsFor(game, boardStr);
   game.queueLocalEvaluations([boardStr]);
 
-  for (const level of LOCAL_EVAL_LEVELS) {
+  for (const level of rungs) {
     await flush();
     const call = pool.calls.find((c) => c.level === level && !c.resolved);
     assert.ok(call, `expected a pending evaluate() call at level ${level}`);
@@ -61,7 +79,7 @@ test('queueLocalEvaluations: refines a board through LOCAL_EVAL_LEVELS in order'
     assert.equal(e.source, 'wasm');
   }
 
-  assert.equal(pool.calls.length, LOCAL_EVAL_LEVELS.length, 'exactly one evaluate() call per level, no more');
+  assert.equal(pool.calls.length, rungs.length, 'exactly one evaluate() call per level, no more');
   assert.ok(!game._pendingLocalEvals.has(boardStr), 'no longer pending once the chain completes');
 });
 
@@ -101,9 +119,9 @@ test('queueLocalEvaluations: stops refining once a server-sourced evaluation sup
   await flush();
 
   assert.equal(pool.calls.length, 1);
-  assert.equal(pool.calls[0].level, 4);
+  assert.equal(pool.calls[0].level, rungsFor(game, boardStr)[0]);
 
-  // A real (server) evaluation arrives while the level-4 worker call is still in flight.
+  // A real (server) evaluation arrives while the first worker call is still in flight.
   game.evaluations.set(boardStr, { board: boardStr, score: 3, source: 'edax', level: 10 });
 
   pool.calls[0].resolve(999);
@@ -123,10 +141,10 @@ test('queueLocalEvaluations: different boards dispatch independently (no waiting
   const [a, b] = game.pgnAllChildStrings;
   game.queueLocalEvaluations([a, b]);
 
-  // Both boards' first (level-4) calls are queued up front, without waiting for either to
-  // resolve -- this is what lets the pool run them on separate workers at the same time.
+  // Both boards' shallowest calls are queued up front, without waiting for either to resolve --
+  // this is what lets the pool run them on separate workers at the same time.
   assert.equal(pool.calls.length, 2);
-  assert.deepEqual(pool.calls.map((c) => c.level), [4, 4]);
+  assert.deepEqual(pool.calls.map((c) => c.level), [rungsFor(game, a)[0], rungsFor(game, b)[0]]);
 });
 
 test('queueLocalEvaluations: priority is the search level, with an offset for off-screen prefetch', () => {
@@ -140,7 +158,7 @@ test('queueLocalEvaluations: priority is the search level, with an offset for of
 
   // Shallow-first across boards (level as priority), and nothing off screen ever precedes
   // something on screen -- LOCAL_EVAL_PREFETCH_PRIORITY is larger than any level.
-  assert.deepEqual(pool.calls.map((c) => c.priority), [4, 104]);
+  assert.deepEqual(pool.calls.map((c) => c.priority), [rungsFor(game, a)[0], rungsFor(game, b)[0] + 100]);
 });
 
 test('queueLocalEvaluations: resumes a partly refined board at the next deeper level', () => {
@@ -149,11 +167,12 @@ test('queueLocalEvaluations: resumes a partly refined board at the next deeper l
   game.edaxWorkerPool = pool;
 
   const boardStr = game.pgnAllChildStrings[0];
-  game.evaluations.set(boardStr, { board: boardStr, score: 1, level: 6, source: 'wasm' });
+  const rungs = rungsFor(game, boardStr);
+  game.evaluations.set(boardStr, { board: boardStr, score: 1, level: rungs[1], source: 'wasm' });
   game.queueLocalEvaluations([boardStr]);
 
   assert.equal(pool.calls.length, 1);
-  assert.equal(pool.calls[0].level, 8, 'picks up above the level already reached, not from scratch');
+  assert.equal(pool.calls[0].level, rungs[2], 'picks up above the level already reached, not from scratch');
 });
 
 test('queueLocalEvaluations: skips a board a local chain already took to the deepest level', () => {
@@ -162,7 +181,8 @@ test('queueLocalEvaluations: skips a board a local chain already took to the dee
   game.edaxWorkerPool = pool;
 
   const boardStr = game.pgnAllChildStrings[0];
-  const deepest = LOCAL_EVAL_LEVELS[LOCAL_EVAL_LEVELS.length - 1];
+  const rungs = rungsFor(game, boardStr);
+  const deepest = rungs[rungs.length - 1];
   game.evaluations.set(boardStr, { board: boardStr, score: 1, level: deepest, source: 'wasm' });
   game.queueLocalEvaluations([boardStr]);
 
@@ -198,7 +218,7 @@ test('requestMissingEvaluations: moving on abandons the previous position\'s loc
 
   const childCount = new Set(game.board.getChildren().map((c) => c.normalize().toString())).size;
   game.requestMissingEvaluations(game.board);
-  assert.equal(pool.calls.length, childCount, 'one level-4 search per distinct child');
+  assert.equal(pool.calls.length, childCount, 'one shallowest-rung search per distinct child');
   const generation = game._localEvalGeneration;
   assert.ok(pool.calls.every((c) => c.tag === generation), 'every search is tagged with the position it belongs to');
 
@@ -206,14 +226,16 @@ test('requestMissingEvaluations: moving on abandons the previous position\'s loc
   const running = pool.calls[0];
   running.resolved = true;
 
-  game.requestMissingEvaluations(game.board.getChildren()[0]);
+  const next = game.board.getChildren()[0];
+  game.requestMissingEvaluations(next);
 
   const queued = pool.calls.slice(1, childCount);
   assert.ok(queued.every((c) => c.resolved), 'the queued searches for the old position were cancelled');
   assert.notEqual(game._localEvalGeneration, generation);
   const fresh = pool.calls.slice(childCount);
   assert.ok(fresh.length > 0, 'the new position queued its own searches');
-  assert.ok(fresh.every((c) => c.level === 4 && c.tag === game._localEvalGeneration));
+  const freshRung = rungsFor(game, next.getChildren()[0].normalize().toString())[0];
+  assert.ok(fresh.every((c) => c.level === freshRung && c.tag === game._localEvalGeneration));
 
   const beforeStaleResult = pool.calls.length;
   running.resolve(5);

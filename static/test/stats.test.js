@@ -1,69 +1,106 @@
-// Tests for the stats table's columns: one per search rather than per level, labeled with the
-// depth and confidence the search ran at, ordered shallow -> deep -> "searched to the end".
+// Tests for the stats table's two header rows: three fixed groups (unlearned, partially learned,
+// learned) with one column per below-target search under the middle one. The bucket and the row's
+// target come from /api/stats (api.statEntries), so these tests feed the shapes the server sends.
 const assert = require('node:assert');
 const { test } = require('./framework');
-const { buildStatsRows, columnFor } = require('../stats');
+const { buildStatsTable, partialColumns, searchLabel } = require('../stats');
 
-// headerOf returns the column labels of a built table, without the leading blank and the "Total".
-function headerOf(rows) {
-    return rows[0].slice(1, -1);
+// entry builds one /api/stats entry; target defaults to a 40 @ 73% search (the 12-disc target).
+function entry({ discs, depth, confidence = 73, count, bucket, target = [40, 73] }) {
+    return {
+        disc_count: discs,
+        depth,
+        confidence: depth === 0 ? 0 : confidence,
+        count,
+        bucket,
+        target_depth: target[0],
+        target_confidence: target[1],
+    };
 }
 
-test('columnFor: labels a search by its depth and confidence', () => {
-    assert.equal(columnFor({ disc_count: 21, depth: 32, confidence: 73 }).label, '32 @ 73%');
-    assert.equal(columnFor({ disc_count: 17, depth: 34, confidence: 73 }).label, '34 @ 73%');
+// groupLabels returns the top header row as [label, span] pairs.
+function groupLabels(table) {
+    return table.groups.map((g) => [g.label, g.span]);
+}
+
+// The group row is rendered with colSpan, so a total that disagrees with the column count silently
+// shears the table.
+function assertSpansCoverColumns(table) {
+    const span = table.groups.reduce((sum, g) => sum + g.span, 0);
+    assert.equal(span, table.rows[0].length, 'group spans cover exactly the columns');
+}
+
+test('searchLabel: names a search by its depth and confidence', () => {
+    assert.equal(searchLabel(32, 73), '32 @ 73%');
+    assert.equal(searchLabel(41, 73), '41 @ 73%');
 });
 
-test('columnFor: labels a search that reached the end of the game "max"', () => {
-    // 25 discs + 39 depth and 28 discs + 36 depth both run out the game, at different depths.
-    assert.equal(columnFor({ disc_count: 25, depth: 39, confidence: 73 }).label, 'max @ 73%');
-    assert.equal(columnFor({ disc_count: 28, depth: 36, confidence: 73 }).label, 'max @ 73%');
-    assert.equal(columnFor({ disc_count: 44, depth: 20, confidence: 100 }).label, 'max @ 100%');
-});
-
-test('columnFor: boards that were never searched get their own column', () => {
-    assert.equal(columnFor({ disc_count: 12, depth: 0, confidence: 0 }).label, 'unlearned');
-});
-
-test('buildStatsRows: columns run unlearned, then by depth, then confidence, with max last', () => {
-    const rows = buildStatsRows([
-        { disc_count: 21, depth: 43, confidence: 100, count: 1 }, // max, full width
-        { disc_count: 21, depth: 32, confidence: 95, count: 2 },
-        { disc_count: 21, depth: 32, confidence: 73, count: 3 },
-        { disc_count: 21, depth: 0, confidence: 0, count: 4 },
-        { disc_count: 21, depth: 43, confidence: 73, count: 5 }, // max, selective
-        { disc_count: 21, depth: 20, confidence: 73, count: 6 },
+test('partialColumns: one column per below-target search, shallowest first', () => {
+    const columns = partialColumns([
+        entry({ discs: 12, depth: 32, count: 1, bucket: 'partial' }),
+        entry({ discs: 12, depth: 16, count: 2, bucket: 'partial' }),
+        entry({ discs: 12, depth: 32, confidence: 95, count: 3, bucket: 'partial' }),
+        entry({ discs: 12, depth: 16, count: 4, bucket: 'partial' }), // same search, same column
+        entry({ discs: 12, depth: 40, count: 5, bucket: 'learned' }),
+        entry({ discs: 12, depth: 0, count: 6, bucket: 'unlearned' }),
     ]);
 
-    assert.deepEqual(headerOf(rows), ['unlearned', '20 @ 73%', '32 @ 73%', '32 @ 95%', 'max @ 73%', 'max @ 100%']);
+    assert.deepEqual(columns.map((c) => searchLabel(c.depth, c.confidence)), ['16 @ 73%', '32 @ 73%', '32 @ 95%']);
 });
 
-test('buildStatsRows: rows sum across columns and columns across disc counts', () => {
-    const rows = buildStatsRows([
-        { disc_count: 12, depth: 40, confidence: 73, count: 10 },
-        { disc_count: 13, depth: 40, confidence: 73, count: 3 },
-        { disc_count: 13, depth: 0, confidence: 0, count: 7 },
+test('buildStatsTable: three groups, with one column per partial search between them', () => {
+    const table = buildStatsTable([
+        entry({ discs: 12, depth: 0, count: 1, bucket: 'unlearned' }),
+        entry({ discs: 12, depth: 16, count: 2, bucket: 'partial' }),
+        entry({ discs: 12, depth: 32, count: 3, bucket: 'partial' }),
+        entry({ discs: 12, depth: 40, count: 4, bucket: 'learned' }),
     ]);
 
-    assert.deepEqual(headerOf(rows), ['unlearned', '40 @ 73%']);
-    assert.deepEqual(rows[1], ['12 discs', 0, 10, 10]);
-    assert.deepEqual(rows[2], ['13 discs', 7, 3, 10]);
-    assert.deepEqual(rows[3], ['Total', 7, 13, 20]);
+    assert.deepEqual(groupLabels(table), [['', 1], ['Unlearned', 1], ['Partially learned', 2], ['Learned', 2], ['', 1]]);
+    assert.deepEqual(table.rows[0], ['', '0', '16 @ 73%', '32 @ 73%', 'target', 'count', 'Total']);
+    assertSpansCoverColumns(table);
+    assert.deepEqual(table.rows[1], ['12 discs', 1, 2, 3, '40 @ 73%', 4, 10]);
 });
 
-test('buildStatsRows: one "max" column can hold different depths from different rows', () => {
-    // A 25-disc board solved to the end searches 39 ply, a 28-disc one 36 -- the same column.
-    const rows = buildStatsRows([
-        { disc_count: 25, depth: 39, confidence: 73, count: 2 },
-        { disc_count: 28, depth: 36, confidence: 73, count: 5 },
+test('buildStatsTable: the target column shows each row\'s own target search', () => {
+    const table = buildStatsTable([
+        entry({ discs: 12, depth: 40, count: 1, bucket: 'learned', target: [40, 73] }),
+        entry({ discs: 13, depth: 41, count: 2, bucket: 'learned', target: [41, 73] }),
+        entry({ discs: 28, depth: 36, confidence: 95, count: 3, bucket: 'learned', target: [36, 95] }),
     ]);
 
-    assert.deepEqual(headerOf(rows), ['max @ 73%']);
-    assert.deepEqual(rows[1], ['25 discs', 2, 2]);
-    assert.deepEqual(rows[2], ['28 discs', 5, 5]);
-    assert.deepEqual(rows[3], ['Total', 7, 7]);
+    assert.deepEqual(table.rows.map((r) => r[r.length - 3]), ['target', '40 @ 73%', '41 @ 73%', '36 @ 95%', '']);
 });
 
-test('buildStatsRows: no entries yields just the header and an empty total', () => {
-    assert.deepEqual(buildStatsRows([]), [['', 'Total'], ['Total', 0]]);
+// The same search can be partial for one disc count and at target for another; only the partial
+// cells get a column, so a learned cell never lands under "Partially learned".
+test('buildStatsTable: a search partial for one row and at target for another splits by bucket', () => {
+    const table = buildStatsTable([
+        entry({ discs: 12, depth: 36, count: 7, bucket: 'partial', target: [40, 73] }),
+        entry({ discs: 14, depth: 36, count: 5, bucket: 'learned', target: [36, 73] }),
+    ]);
+
+    assert.deepEqual(table.rows[0], ['', '0', '36 @ 73%', 'target', 'count', 'Total']);
+    assert.deepEqual(table.rows[1], ['12 discs', 0, 7, '40 @ 73%', 0, 7]);
+    assert.deepEqual(table.rows[2], ['14 discs', 0, 0, '36 @ 73%', 5, 5]);
+});
+
+test('buildStatsTable: rows sum across columns and columns across disc counts', () => {
+    const table = buildStatsTable([
+        entry({ discs: 12, depth: 40, count: 10, bucket: 'learned' }),
+        entry({ discs: 13, depth: 41, count: 3, bucket: 'learned', target: [41, 73] }),
+        entry({ discs: 13, depth: 0, count: 7, bucket: 'unlearned', target: [41, 73] }),
+    ]);
+
+    assert.deepEqual(table.rows[1], ['12 discs', 0, '40 @ 73%', 10, 10]);
+    assert.deepEqual(table.rows[2], ['13 discs', 7, '41 @ 73%', 3, 10]);
+    assert.deepEqual(table.rows[3], ['Total', 7, '', 13, 20]);
+});
+
+test('buildStatsTable: no entries yields the two header rows and an empty total', () => {
+    const table = buildStatsTable([]);
+
+    assert.deepEqual(groupLabels(table), [['', 1], ['Unlearned', 1], ['Learned', 2], ['', 1]]);
+    assert.deepEqual(table.rows, [['', '0', 'target', 'count', 'Total'], ['Total', 0, '', 0, 0]]);
+    assertSpansCoverColumns(table);
 });

@@ -2,13 +2,12 @@ const BITBOARD_MASK = 0xFFFFFFFFFFFFFFFFn;
 
 // LOCAL_EVAL_LEVELS: incremental depths queueLocalEvaluations searches through, in order, for
 // each board the server hasn't evaluated yet. Evaluating at 4 first (sub-millisecond, so every
-// child shows a score as good as immediately) and refining through 6, 8, 10 (the server's
-// PriorityLevel) and on up lets the UI show a rough score right away and sharpen it in place as
-// deeper searches finish, rather than blocking on the deepest result -- which costs seconds per
-// board -- before showing anything.
+// child shows a score as good as immediately) and refining through 6, 8, 10 and on up lets the UI
+// show a rough score right away and sharpen it in place as deeper searches finish, rather than
+// blocking on the deepest result -- which costs seconds per board -- before showing anything.
 //
-// Which of these rungs a given position actually runs depends on how many empty squares it has:
-// see localEvalLevelsFor.
+// These are base rungs: which of them a given position actually runs, and at which level, depends
+// on how many empty squares it has -- see localEvalLevelsFor.
 const LOCAL_EVAL_LEVELS = [4, 6, 8, 10, 12, 14, 16];
 
 // Local searches are scheduled shallow-first across every queued board at once, by handing
@@ -22,35 +21,50 @@ const LOCAL_EVAL_LEVELS = [4, 6, 8, 10, 12, 14, 16];
 // search -- at any level -- goes first.
 const LOCAL_EVAL_PREFETCH_PRIORITY = 100;
 
-// localEvalLevelsFor returns the rungs of LOCAL_EVAL_LEVELS worth searching for a position with
-// nEmpties empty squares, in order. Edax's level does not mean "search this deep": it means "search
-// this deep *unless* few enough squares are left to solve the game outright", and the cutover point
-// is per-level (search_global_init, ported in wasm/edax-eval/src/search.rs depth_and_selectivity).
-// Whether a rung is worth running follows from which side of its cutover the position sits on:
+// isDepthLimitedSearch reports whether an edax search at level over nEmpties empty squares stops
+// before the end of the game, i.e. searches exactly `level` ply. Edax's level does not mean "search
+// this deep": it means "search this deep *unless* few enough squares are left to solve the game
+// outright", and the cutover point is per-level (search_global_init, ported in
+// wasm/edax-eval/src/search.rs depth_and_selectivity and internal/edax's SearchParams).
+function isDepthLimitedSearch(level, nEmpties) {
+    if (level <= 10) return nEmpties > 2 * level;
+    if (level <= 12) return nEmpties > 24;
+    return nEmpties > 27;
+}
+
+// alignedLocalEvalLevel mirrors edax.AlignLevel: a search that stops before the end of the game
+// must search an odd number of ply from an odd disc count and an even number from an even one, or
+// adjacent plies of a line come back ~1.6 discs apart. A board's disc count and its empty count
+// have the same parity, so matching the level to nEmpties is the same rule.
+function alignedLocalEvalLevel(level, nEmpties) {
+    return level % 2 !== nEmpties % 2 && isDepthLimitedSearch(level, nEmpties) ? level + 1 : level;
+}
+
+// localEvalLevelsFor returns the rungs worth searching for a position with nEmpties empty squares,
+// in order: each LOCAL_EVAL_LEVELS entry parity-aligned, up to the point where searching deeper
+// stops being worth it. Whether a rung is worth running follows from which side of its cutover the
+// position sits on:
 //
-//   - level L <= 10, nEmpties > 2L: fixed-depth midgame search, cost grows with L. Run it.
-//   - level L <= 10, nEmpties <= 2L: exact full-width solve. Run it -- and stop, because the score
-//     is the game-theoretic result, so every deeper rung would burn the same seconds-to-minutes
-//     recomputing a number that cannot change.
-//   - level L >= 11, nEmpties > 24 (L <= 12) or > 27 (L >= 13): fixed-depth midgame search with
-//     ProbCut. Run it.
-//   - level L >= 11, otherwise: an endgame solve over 21+ empties -- minutes in the browser, and
-//     selective above 21 empties so not even exact. Stop; level 10 already answered as well as we
-//     can afford to.
+//   - depth-limited: a fixed-depth midgame search whose cost grows with the level. Run it.
+//   - not depth-limited at level <= 10: exact full-width solve. Run it -- and stop, because the
+//     score is the game-theoretic result, so every deeper rung would burn the same
+//     seconds-to-minutes recomputing a number that cannot change.
+//   - not depth-limited at level >= 11: an endgame solve over 21+ empties -- minutes in the
+//     browser, and selective above 21 empties so not even exact. Stop; the previous rung already
+//     answered as well as we can afford to.
 //
-// So an opening position climbs the whole ladder to 16, a midgame one stops where the endgame
-// solves start, and an endgame one stops at the first rung that solves it exactly.
+// So an opening position climbs the whole ladder, a midgame one stops where the endgame solves
+// start, and an endgame one stops at the first rung that solves it exactly.
 function localEvalLevelsFor(nEmpties) {
     const levels = [];
-    for (const level of LOCAL_EVAL_LEVELS) {
-        if (level <= 10) {
+    for (const base of LOCAL_EVAL_LEVELS) {
+        const level = alignedLocalEvalLevel(base, nEmpties);
+        if (isDepthLimitedSearch(level, nEmpties)) {
             levels.push(level);
-            if (nEmpties <= 2 * level) break;
-        } else if (nEmpties > (level <= 12 ? 24 : 27)) {
-            levels.push(level);
-        } else {
-            break;
+            continue;
         }
+        if (level <= 10) levels.push(level);
+        break;
     }
     return levels;
 }
@@ -393,9 +407,7 @@ class OthelloGame {
         // graph data change.
         this.flipped = false;
 
-        // Level-increment tracking, scoped to PGN review.
         this.levelConfig = null;        // fetched from /api/level-config
-        this.pendingLevelRequests = new Map(); // board -> highest level we have requested
 
         // Client-side evaluator for every child the server hasn't answered for yet -- both
         // positions beyond levelConfig.maxSavableDiscs (see internal/book.MaxSavableDiscs), which
@@ -428,8 +440,9 @@ class OthelloGame {
             '/static/wasm/dist/weights.bin.gz',
             numWorkers,
             // Reserve a worker for the shallowest level, so a move that just appeared on screen
-            // gets its first score without waiting behind a deep search already running.
-            { fastLaneMaxLevel: LOCAL_EVAL_LEVELS[0] },
+            // gets its first score without waiting behind a deep search already running. +1 covers
+            // odd-disc-count boards, whose shallowest rung is the parity-aligned one above it.
+            { fastLaneMaxLevel: LOCAL_EVAL_LEVELS[0] + 1 },
         );
         this.edaxWorkerPool.ready()
             .then(() => {
@@ -455,6 +468,7 @@ class OthelloGame {
                     priorityLevel: data.priority_level,
                     maxSavableDiscs: data.max_savable_discs,
                     targetLevels: data.target_levels.map((t) => ({ maxDiscs: t.max_discs, level: t.level })),
+                    parityBumpDiscs: data.parity_bump_discs || [],
                 };
             }
         } catch (_) {}
@@ -463,9 +477,10 @@ class OthelloGame {
         // never reaches, so isAtTarget would never come true for those boards.
         if (!this.levelConfig) {
             this.levelConfig = {
-                priorityLevel: 10,
+                priorityLevel: 16,
                 maxSavableDiscs: 30,
                 targetLevels: [{ maxDiscs: 13, level: 40 }, { maxDiscs: 16, level: 36 }, { maxDiscs: 20, level: 34 }, { maxDiscs: 64, level: 32 }],
+                parityBumpDiscs: [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23],
             };
         }
     }
@@ -478,20 +493,22 @@ class OthelloGame {
     }
 
     // targetLevelForBoard returns the final target edax level for a board string. Mirrors
-    // api.EffectiveTargetLevel: pick the tier the disc count falls in, with boards past
-    // maxSavableDiscs treated as if they had exactly that many discs.
+    // api.EffectiveTargetLevel: pick the tier the disc count falls in -- with boards past
+    // maxSavableDiscs treated as if they had exactly that many discs -- then apply the parity
+    // alignment (edax.AlignLevel), which the server sends as the disc counts it raises a level for.
     targetLevelForBoard(boardStr) {
-        const dc = Math.min(this.discCountFromBoardStr(boardStr), this.levelConfig.maxSavableDiscs);
+        const discCount = this.discCountFromBoardStr(boardStr);
+        const tierDiscs = Math.min(discCount, this.levelConfig.maxSavableDiscs);
         const tiers = this.levelConfig.targetLevels;
-        const tier = tiers.find((t) => dc <= t.maxDiscs);
-        return (tier || tiers[tiers.length - 1]).level;
+        const tier = tiers.find((t) => tierDiscs <= t.maxDiscs) || tiers[tiers.length - 1];
+        return tier.level + (this.levelConfig.parityBumpDiscs.includes(discCount) ? 1 : 0);
     }
 
     // evalIsFinal reports whether an evaluation searched the game out at full width: depth reached
     // every empty square with no forward pruning, so the score is the game-theoretic result and no
     // deeper level can change it. Mirrors edax.IsFinal, which is what makes the server skip such a
-    // board however deep a search is asked for -- without this the level ladder would climb toward
-    // a target the board can never report reaching.
+    // board however deep a search is asked for -- without this isAtTarget would wait forever on a
+    // target the board can never report reaching.
     evalIsFinal(boardStr, e) {
         if (!e || !e.depth || e.confidence !== 100) return false;
         return e.depth + this.discCountFromBoardStr(boardStr) === 64;
@@ -703,18 +720,15 @@ class OthelloGame {
         return !e || e.source === 'wasm';
     }
 
-    // hasUnresolvedEvaluations reports whether board's children or grandchildren are missing an
-    // on-book evaluation -- i.e. one requestServerAnalysis can ask the server to compute. Off-book
-    // boards are excluded: those are handled by queueLocalEvaluations' wasm chain, which needs no
-    // polling since each worker result drives its own re-render.
+    // hasUnresolvedEvaluations reports whether board's children are missing an on-book evaluation --
+    // i.e. one requestServerAnalysis can ask the server to compute. Off-book boards are excluded:
+    // those are handled by queueLocalEvaluations' wasm chain, which needs no polling since each
+    // worker result drives its own re-render. Grandchildren are excluded too: nothing asks the
+    // server for those any more (see requestGrandchildrenEvaluations), so counting them would keep
+    // the poll running until its timeout.
     hasUnresolvedEvaluations(board) {
-        const seen = new Set();
-        for (const child of board.getChildren()) {
-            seen.add(child.normalize().toString());
-            for (const grandchild of child.getChildren()) seen.add(grandchild.normalize().toString());
-        }
-        const missing = [...seen].filter((b) => this.needsServerEvaluation(b));
-        const [onBook] = this.splitOffBook(missing);
+        const children = [...new Set(board.getChildren().map((child) => child.normalize().toString()))];
+        const [onBook] = this.splitOffBook(children.filter((b) => this.needsServerEvaluation(b)));
         return onBook.length > 0;
     }
 
@@ -925,30 +939,21 @@ class OthelloGame {
         this.queueLocalEvaluations(children);
     }
 
-    // Prefetch evaluations for grandchildren so they are cached before the user clicks a move.
-    //
-    // Unlike requestMissingEvaluations, on-book grandchildren are not handed to the wasm chain:
-    // there are an order of magnitude more of them than children and none of them is on screen,
-    // while the server can answer for them in one batched request. Off-book grandchildren still go
-    // local, since for those the server is not an option at all -- queued as prefetch, so the
-    // ~100 invisible searches never delay a visible one. Whichever grandchildren the user actually
-    // navigates to become children, and requestMissingEvaluations re-queues them at full priority,
-    // resuming from whatever level the prefetch reached.
+    // Prefetch evaluations for off-book grandchildren so they are cached before the user clicks a
+    // move. Only off-book ones: there are an order of magnitude more grandchildren than children
+    // and none of them is on screen, so sending the on-book ones to the server made every
+    // analyze_request payload enormous for results nobody was looking at. For off-book positions
+    // the server is not an option at all, so those still go to the local wasm chain -- queued as
+    // prefetch, so the ~100 invisible searches never delay a visible one. Whichever grandchildren
+    // the user actually navigates to become children, and requestMissingEvaluations then asks the
+    // server and re-queues them at full priority, resuming from whatever level the prefetch reached.
     requestGrandchildrenEvaluations(board) {
         if (!this.evalMode) return;
         const seen = new Set();
-        const missing = [];
         for (const child of board.getChildren()) {
-            for (const grandchild of child.getChildren()) {
-                const key = grandchild.normalize().toString();
-                if (!seen.has(key) && this.needsServerEvaluation(key)) {
-                    seen.add(key);
-                    missing.push(key);
-                }
-            }
+            for (const grandchild of child.getChildren()) seen.add(grandchild.normalize().toString());
         }
-        const [onBook, offBook] = this.splitOffBook(missing);
-        this.requestServerAnalysis(onBook);
+        const [, offBook] = this.splitOffBook([...seen]);
         this.queueLocalEvaluations(offBook, { prefetch: true });
     }
 
@@ -966,49 +971,11 @@ class OthelloGame {
         if (this.pgnState === 'graph') {
             this.pgnRenderGraph();
             this.pgnUpdateGraphStatus();
-            this.pgnRequestLevelUps();
             if (this.evalMode) {
                 this.renderEvaluations(this.pgnDisplayBoardOriented());
             }
         } else {
             this.renderEvaluations(this.board);
-        }
-    }
-
-    // pgnRequestLevelUps checks every board that has an evaluation below its target and sends
-    // batched analyze_requests (grouped by next level) for those not yet re-requested at that level.
-    pgnRequestLevelUps() {
-        if (!this.wsClient || !this.levelConfig) return;
-
-        const byLevel = new Map(); // nextLevel -> [boardStr, ...]
-
-        for (const boardStr of this.pgnAllChildStrings) {
-            // Nothing from the server yet: either no evaluation at all, or only the local wasm
-            // stand-in, whose level is not a rung on this ladder -- pgnSendRequests' request at
-            // priorityLevel is still outstanding, and stepping up from a level-4 wasm score would
-            // ask for a *shallower* search than that one.
-            if (this.needsServerEvaluation(boardStr)) continue;
-            const e = this.evaluations.get(boardStr);
-            // Covers minimax/final results, searches that already ran the game out, and boards at
-            // their target level: for all of them a deeper search would come back with the same score.
-            if (this.isAtTarget(boardStr)) continue;
-            const target = this.targetLevelForBoard(boardStr);
-            const current = e.level || 0;
-
-            // Never past the target: the server clamps to it anyway (handleAnalyzeRequest), so
-            // asking for more would leave pendingLevelRequests -- and the level the status line
-            // reports -- claiming a search deeper than any that is actually running.
-            const nextLevel = Math.min(current + 2, target);
-            const alreadyRequested = (this.pendingLevelRequests.get(boardStr) || 0) >= nextLevel;
-            if (alreadyRequested) continue;
-
-            this.pendingLevelRequests.set(boardStr, nextLevel);
-            if (!byLevel.has(nextLevel)) byLevel.set(nextLevel, []);
-            byLevel.get(nextLevel).push(boardStr);
-        }
-
-        for (const [level, boards] of byLevel) {
-            this.wsClient.sendEvent('analyze_request', boards, level);
         }
     }
 
@@ -1178,7 +1145,6 @@ class OthelloGame {
         this.pgnCurrentPly = 0;
         this.pgnAlternativeMoves = [];
         this.flipped = false;
-        this.pendingLevelRequests = new Map();
 
         this.pgnBuildChildSets();
         this.stopPGNPolling();
@@ -1188,7 +1154,7 @@ class OthelloGame {
         this.pgnRenderCurrentPly(); // also queues the whole line's local searches
 
         // Give the socket a tick to open (or it may already be open from a previous run).
-        setTimeout(() => this.pgnSendRequests(), 50);
+        setTimeout(() => this.requestServerAnalysis(this.pgnAllChildStrings), 50);
         this.startPGNPolling();
     }
 
@@ -1218,7 +1184,7 @@ class OthelloGame {
 
     // pgnQueueLineEvaluations hands every board the score graph is drawn from to the local wasm
     // evaluator, so the graph covers the whole game within a second or so instead of only the plies
-    // the book happens to hold: each board is searched at level 4 first and refined up its ladder
+    // the book happens to hold: each board is searched at its shallowest rung first and refined up
     // (see queueLocalEvaluations), and any server evaluation that arrives supersedes the local one.
     // Tagged as line work, so stepping through plies doesn't abandon the rest of the graph.
     pgnQueueLineEvaluations() {
@@ -1246,33 +1212,16 @@ class OthelloGame {
         return [...targets];
     }
 
-    pgnSendRequests() {
-        const all = this.pgnAllChildStrings;
-        if (!all.length) return;
-
-        const startLevel = this.levelConfig.priorityLevel;
-        for (const s of all) this.pendingLevelRequests.set(s, startLevel);
-
-        // evaluation_request uses the buffering path in WebSocketClient; analyze_request is best-effort.
-        this.wsClient.requestEvaluations(all);
-        this.wsClient.sendEvent('analyze_request', all, startLevel);
-    }
-
     // requestServerAnalysis sends both request kinds (evaluation_request + analyze_request) at the
-    // priority level for boards not yet tracked in pendingLevelRequests -- asking the server to
-    // actually compute a board the first time it's needed, not just checking whatever it already
-    // has saved. Used by PGN's divergence exploration (pgnRequestDivergedEvals) and normal-mode
-    // play (requestMissingEvaluations/requestGrandchildrenEvaluations); pgnSendRequests's initial
-    // line-wide batch duplicates this instead of calling it, since it always (re)stamps the
-    // priority level rather than skipping boards already tracked.
+    // priority level -- asking the server to actually compute a board, not just checking whatever it
+    // already has saved. There is one interactive level, so a board is requested once and the server
+    // decides how deep to go (it clamps and parity-aligns, see handleAnalyzeRequest); repeats are
+    // deduped by the priority queue. Used by PGN review (analyzePGN's line-wide batch,
+    // pgnRequestDivergedEvals) and normal-mode play (requestMissingEvaluations).
     requestServerAnalysis(list) {
-        if (!this.wsClient || !this.levelConfig) return;
-        const startLevel = this.levelConfig.priorityLevel;
-        for (const s of list) {
-            if (!this.pendingLevelRequests.has(s)) this.pendingLevelRequests.set(s, startLevel);
-        }
+        if (!this.wsClient || !this.levelConfig || !list.length) return;
         this.wsClient.requestEvaluations(list);
-        this.wsClient.sendEvent('analyze_request', list, startLevel);
+        this.wsClient.sendEvent('analyze_request', list, this.levelConfig.priorityLevel);
     }
 
     startPGNPolling() {
@@ -1309,26 +1258,14 @@ class OthelloGame {
     }
 
     pgnUpdateGraphStatus() {
-        const total = this.pgnAllChildStrings.length;
-        const unresolved = this.pgnUnresolved();
-        const done = total - unresolved.length;
         const statusEl = document.getElementById('graph-status');
         if (!statusEl) return;
 
-        if (done >= total) {
-            statusEl.textContent = 'Analysis complete.';
-            return;
-        }
-
-        // Boards ramp up their search level together in +2 rounds (see pgnRequestLevelUps), so
-        // the lowest currently-requested level is a fair read of "how deep the search is right
-        // now" -- but only across the boards still being searched. Boards already at target keep
-        // their last requested level in pendingLevelRequests forever, so counting them in pinned
-        // the reported level at whatever the first board finished at (usually priorityLevel) and
-        // it never moved again.
-        const levels = unresolved.map((s) => this.pendingLevelRequests.get(s) || this.levelConfig.priorityLevel);
-        const currentLevel = Math.min(...levels);
-        statusEl.textContent = `Searching at level ${currentLevel} — ${done} / ${total} boards evaluated…`;
+        const total = this.pgnAllChildStrings.length;
+        const done = total - this.pgnUnresolved().length;
+        statusEl.textContent = done >= total
+            ? 'Analysis complete.'
+            : `${done} / ${total} positions evaluated…`;
     }
 
     // ── PGN board display ─────────────────────────────────────────────────────

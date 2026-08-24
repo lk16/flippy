@@ -1,0 +1,1 @@
+DROP INDEX idx_boards_unlearned_first;

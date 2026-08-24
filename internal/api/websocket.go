@@ -214,8 +214,10 @@ func (s *Server) handleAnalyzeRequest(ctx context.Context, positionStrings []str
 		normalized := position.Normalize()
 		discCount := normalized.CountDiscs()
 
-		// Cap the level so a malicious client cannot request arbitrarily deep searches.
-		clampedLevel := min(level, EffectiveTargetLevel(discCount))
+		// Cap the level so a malicious client cannot request arbitrarily deep searches, then align
+		// its parity so an interactive search is no more biased than a book one. Aligning can only
+		// raise the level to the target itself, never past it: the target is already aligned.
+		clampedLevel := edax.AlignLevel(discCount, min(level, EffectiveTargetLevel(discCount)))
 
 		// Skip positions whose stored evaluation already answers the request.
 		eval, ok, err := s.lookupEvaluation(ctx, position)

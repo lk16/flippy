@@ -59,7 +59,7 @@ func TestHandleGetJob_ReturnsJob(t *testing.T) {
 	var resp jobResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Equal(t, position.String(), resp.Position)
-	require.Equal(t, TargetLevel(12), resp.Level)
+	require.Equal(t, UnlearnedLevel(12), resp.Level, "an unlearned row is the second tier, not the third")
 }
 
 func TestHandleGetJob_RepeatedRequestsReturnDistinctJobs(t *testing.T) {
@@ -225,10 +225,10 @@ func TestHandleSubmitJobResult_BoardNotFound(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
-// TestHandleSubmitJobResult_NonPriorityBelowTargetNotPersisted covers the API-wide book-quality
-// floor: a below-target result is accepted (cached ephemerally, claim released) but never saved,
-// even on the non-priority path.
-func TestHandleSubmitJobResult_NonPriorityBelowTargetNotPersisted(t *testing.T) {
+// TestHandleSubmitJobResult_NonPriorityBelowFloorNotPersisted covers the API-wide book-quality
+// floor: a result shallower than any job tier hands out is accepted (cached ephemerally, claim
+// released) but never saved, even on the non-priority path.
+func TestHandleSubmitJobResult_NonPriorityBelowFloorNotPersisted(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 	position := testPosition(t, 12)
@@ -238,8 +238,8 @@ func TestHandleSubmitJobResult_NonPriorityBelowTargetNotPersisted(t *testing.T) 
 	require.NoError(t, err)
 	require.True(t, claimed)
 
-	require.Less(t, 24, TargetLevel(12))
-	reqBody := jobResultRequest{WorkerID: "w1", Position: position.String(), Level: 24, Score: 4}
+	shallow := UnlearnedLevel(12) - 1
+	reqBody := jobResultRequest{WorkerID: "w1", Position: position.String(), Level: shallow, Score: 4}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 	require.Equal(t, http.StatusOK, w.Code)
 
@@ -499,7 +499,7 @@ func TestHandleStats_ReturnsCounts(t *testing.T) {
 
 	var entries []statEntry
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &entries))
-	require.Contains(t, entries, statEntry{DiscCount: 12, Count: 1})
+	require.Contains(t, entries, classifiedStat(12, 0, 0, 1))
 }
 
 // TestHandleStats_ServesFromBookStatsHash proves the endpoint reads the rebuilt hash rather than the
@@ -520,7 +520,7 @@ func TestHandleStats_ServesFromBookStatsHash(t *testing.T) {
 
 	var entries []statEntry
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &entries))
-	require.Equal(t, []statEntry{{DiscCount: 12, Count: 1}}, entries)
+	require.Equal(t, []statEntry{classifiedStat(12, 0, 0, 1)}, entries)
 }
 
 // TestHandleStats_ReportsDerivedSearchParams checks that a learned position is reported by the search
@@ -537,7 +537,7 @@ func TestHandleStats_ReportsDerivedSearchParams(t *testing.T) {
 
 	var entries []statEntry
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &entries))
-	require.Contains(t, entries, statEntry{DiscCount: 12, Depth: 20, Confidence: 73, Count: 1})
+	require.Contains(t, entries, classifiedStat(12, 20, 73, 1))
 }
 
 // TestStatEntries_MergesLevelsThatMeanTheSameSearch covers the merge and the ordering: at 44 discs
@@ -552,9 +552,9 @@ func TestStatEntries_MergesLevelsThatMeanTheSameSearch(t *testing.T) {
 	})
 
 	require.Equal(t, []statEntry{
-		{DiscCount: 44, Depth: 0, Confidence: 0, Count: 7},
-		{DiscCount: 44, Depth: 8, Confidence: 100, Count: 2},
-		{DiscCount: 44, Depth: 20, Confidence: 100, Count: 8},
+		classifiedStat(44, 0, 0, 7),
+		classifiedStat(44, 8, 100, 2),
+		classifiedStat(44, 20, 100, 8),
 	}, entries)
 }
 
@@ -578,4 +578,60 @@ func TestHandleListWorkers_ReturnsActiveWorkers(t *testing.T) {
 	require.Equal(t, "w1", workers[0].ID)
 	require.Equal(t, "host-1", workers[0].Hostname)
 	require.Equal(t, "commit-1", workers[0].GitCommit)
+}
+
+// TestStatBucket covers the three groups the stats page shows, decided from (depth, confidence)
+// alone -- the level that produced them is not carried by /api/stats or the book_stats hash.
+func TestStatBucket(t *testing.T) {
+	targetDepth, targetConfidence := edax.SearchParams(12, TargetLevel(12))
+
+	tests := []struct {
+		name       string
+		discCount  int
+		depth      int
+		confidence int
+		want       string
+	}{
+		{"never searched", 12, 0, 0, statBucketUnlearned},
+		{"below target", 12, 16, 73, statBucketPartial},
+		{"same depth as target but more selective", 12, targetDepth, targetConfidence - 10, statBucketPartial},
+		{"at target", 12, targetDepth, targetConfidence, statBucketLearned},
+		{"deeper than target", 12, targetDepth + 2, targetConfidence, statBucketLearned},
+		// 20 empties solved full-width: below the 32 target level, but no deeper search can change it.
+		{"ran the game out", 44, 20, 100, statBucketLearned},
+		{"ran the game out selectively", 44, 20, 73, statBucketPartial},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, statBucket(tt.discCount, tt.depth, tt.confidence))
+		})
+	}
+}
+
+// TestStatEntries_CarriesTheRowsTarget checks the other half of what the stats page can't compute
+// itself: which search each disc count is aiming for.
+func TestStatEntries_CarriesTheRowsTarget(t *testing.T) {
+	entries := statEntries([]db.LevelStat{{DiscCount: 13, Level: 0, Count: 1}})
+
+	depth, confidence := edax.SearchParams(13, TargetLevel(13))
+	require.Equal(t, depth, entries[0].TargetDepth)
+	require.Equal(t, confidence, entries[0].TargetConfidence)
+	require.Equal(t, statBucketUnlearned, entries[0].Bucket)
+}
+
+// TestHandleLevelConfig covers the contract static/board.js reads: the tier table plus the parity
+// bumps, which together have to reproduce EffectiveTargetLevel for every disc count.
+func TestHandleLevelConfig(t *testing.T) {
+	s := testServer(t)
+
+	w := doRequest(t, s, http.MethodGet, "/api/level-config", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp levelConfigResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, PriorityLevel, resp.PriorityLevel)
+	require.Equal(t, book.MaxSavableDiscs, resp.MaxSavableDiscs)
+	require.Equal(t, TargetLevelTiers(), resp.TargetLevels)
+	require.Equal(t, ParityBumpDiscs(), resp.ParityBumpDiscs)
 }

@@ -161,7 +161,7 @@ const { OthelloPosition, OthelloGame, LOCAL_EVAL_LEVELS, localEvalLevelsFor } = 
 
 // Mirrors GET /api/level-config (internal/api/handlers.go handleLevelConfig).
 const DEFAULT_LEVEL_CONFIG = {
-  priorityLevel: 10,
+  priorityLevel: 16,
   maxSavableDiscs: 30,
   targetLevels: [
     { maxDiscs: 13, level: 40 },
@@ -169,11 +169,12 @@ const DEFAULT_LEVEL_CONFIG = {
     { maxDiscs: 20, level: 34 },
     { maxDiscs: 64, level: 32 },
   ],
+  parityBumpDiscs: [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23],
 };
 
 // MAX_TARGET_LEVEL is the deepest target any board can have, so an evaluation at this level counts
 // as "at target" whatever the board's disc count.
-const MAX_TARGET_LEVEL = Math.max(...DEFAULT_LEVEL_CONFIG.targetLevels.map((t) => t.level));
+const MAX_TARGET_LEVEL = Math.max(...DEFAULT_LEVEL_CONFIG.targetLevels.map((t) => t.level)) + 1;
 
 // buildGame constructs an OthelloGame without its DOM-touching constructor, wiring up the same
 // PGN-review state analyzePGN()/pgnBuildChildSets() would, already in pgnState 'graph'. With
@@ -185,7 +186,6 @@ function buildGame(boardStrings, { complete = true } = {}) {
   // Mirror analyzePGN(): a PGN line starts with black to move and every ply hands the turn over.
   game.pgnBoards = boardStrings.map((s, ply) => OthelloPosition.fromString(s, ply % 2 === 0));
   game.evaluations = new Map();
-  game.pendingLevelRequests = new Map();
   game.pgnCurrentPly = 0;
   game.pgnAlternativeMoves = [];
   game.flipped = false;
@@ -249,7 +249,6 @@ function buildNormalGame(board = new OthelloPosition()) {
   game.evalPollTimer = null;
   game.evalPollStart = 0;
   game.levelConfig = { ...DEFAULT_LEVEL_CONFIG };
-  game.pendingLevelRequests = new Map();
   game._pendingLocalEvals = new Map();
   game._localEvalRenderPending = false;
   game._localEvalBoardKey = null;
