@@ -22,3 +22,10 @@
     font-weight: bold;
     background-color: #333333;
 }
+
+/* Group header row: one cell spanning each group's columns, so the column labels below it read as
+   "which search within this group". The border is what makes the spans visible. */
+#stats-table th.group {
+    border-bottom: 1px solid #666666;
+    background-color: #333333;
+}

@@ -445,7 +445,7 @@ func (s *Server) getBookStats(ctx context.Context) (entries []statEntry, ok bool
 			continue
 		}
 		e.Count = count
-		entries = append(entries, e)
+		entries = append(entries, e.classified())
 	}
 
 	sortStatEntries(entries)
@@ -467,10 +467,7 @@ func (s *Server) jobFloor(ctx context.Context) int {
 		if e.DiscCount < book.LeafDiscs || e.DiscCount > book.MaxSavableDiscs {
 			continue
 		}
-		targetDepth, targetConfidence := edax.SearchParams(e.DiscCount, TargetLevel(e.DiscCount))
-		learnable := e.Depth == 0 ||
-			e.Depth < targetDepth ||
-			(e.Depth == targetDepth && e.Confidence < targetConfidence)
+		learnable := e.Bucket != statBucketLearned
 		if learnable && (!found || e.DiscCount < floor) {
 			floor = e.DiscCount
 			found = true

@@ -89,3 +89,10 @@ func testPassRequiredPosition(t *testing.T) othello.Position {
 // testDistinctPositions returns n distinct NormalizedPositions with exactly discs
 // discs, found via breadth-first search from the starting position.
 var testDistinctPositions = othellotest.DistinctPositions
+
+// classifiedStat is the statEntry /api/stats reports for count positions with discCount discs
+// searched to (depth, confidence): the bucket and target fields are derived, so tests state only
+// the inputs.
+func classifiedStat(discCount, depth, confidence, count int) statEntry {
+	return statEntry{DiscCount: discCount, Depth: depth, Confidence: confidence, Count: count}.classified()
+}

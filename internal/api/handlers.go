@@ -404,11 +404,45 @@ func statEntries(stats []db.LevelStat) []statEntry {
 	entries := make([]statEntry, 0, len(counts))
 	for key, count := range counts {
 		key.Count = count
-		entries = append(entries, key)
+		entries = append(entries, key.classified())
 	}
 
 	sortStatEntries(entries)
 	return entries
+}
+
+// Which of the stats page's three column groups a cell belongs in.
+const (
+	statBucketUnlearned = "unlearned"
+	statBucketPartial   = "partial"
+	statBucketLearned   = "learned"
+)
+
+// statBucket classifies a stats cell: unlearned when the position was never searched, learned when
+// its search reaches the disc count's target or better -- including one that ran the game out, which
+// no deeper search can improve on -- and partial in between. Decided from (depth, confidence) alone:
+// neither /api/stats nor the book_stats hash carries the level that produced them.
+func statBucket(discCount, depth, confidence int) string {
+	if depth == 0 {
+		return statBucketUnlearned
+	}
+	if edax.IsFinalSearch(discCount, depth, confidence) {
+		return statBucketLearned
+	}
+
+	targetDepth, targetConfidence := edax.SearchParams(discCount, TargetLevel(discCount))
+	if depth > targetDepth || (depth == targetDepth && confidence >= targetConfidence) {
+		return statBucketLearned
+	}
+	return statBucketPartial
+}
+
+// classified fills in the fields the stats page can't derive itself: e's bucket and the target
+// search its disc count aims for. Both would need a JS port of edax.SearchParams in the browser.
+func (e statEntry) classified() statEntry {
+	e.Bucket = statBucket(e.DiscCount, e.Depth, e.Confidence)
+	e.TargetDepth, e.TargetConfidence = edax.SearchParams(e.DiscCount, TargetLevel(e.DiscCount))
+	return e
 }
 
 // sortStatEntries orders entries by disc count, then depth, then confidence.
@@ -539,12 +573,16 @@ type evaluationResponse struct {
 }
 
 // statEntry is one row of the GET /api/stats response: how many positions with DiscCount discs have
-// been searched to Depth at Confidence percent.
+// been searched to Depth at Confidence percent. Bucket and the Target fields are derived, not
+// stored; see classified.
 type statEntry struct {
-	DiscCount  int `json:"disc_count"`
-	Depth      int `json:"depth"`
-	Confidence int `json:"confidence"`
-	Count      int `json:"count"`
+	DiscCount        int    `json:"disc_count"`
+	Depth            int    `json:"depth"`
+	Confidence       int    `json:"confidence"`
+	Count            int    `json:"count"`
+	Bucket           string `json:"bucket"`
+	TargetDepth      int    `json:"target_depth"`
+	TargetConfidence int    `json:"target_confidence"`
 }
 
 // workerResponse is one entry of the GET /api/workers response.

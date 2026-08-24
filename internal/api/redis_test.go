@@ -153,9 +153,7 @@ func TestServer_BookStats_IncrementalSave(t *testing.T) {
 	entries, ok, err := s.getBookStats(ctx)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, []statEntry{
-		{DiscCount: 12, Depth: depth, Confidence: confidence, Count: 1},
-	}, entries)
+	require.Equal(t, []statEntry{classifiedStat(12, depth, confidence, 1)}, entries)
 }
 
 func TestServer_BookStats_NoPartialHashCreated(t *testing.T) {
@@ -198,9 +196,9 @@ func TestServer_GetBookStats_ReturnsSortedEntries(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, []statEntry{
-		{DiscCount: 12, Depth: 0, Confidence: 0, Count: 7},
-		{DiscCount: 12, Depth: 20, Confidence: 73, Count: 2},
-		{DiscCount: 13, Depth: 20, Confidence: 73, Count: 3},
+		classifiedStat(12, 0, 0, 7),
+		classifiedStat(12, 20, 73, 2),
+		classifiedStat(13, 20, 73, 3),
 	}, entries)
 }
 

@@ -499,7 +499,7 @@ func TestHandleStats_ReturnsCounts(t *testing.T) {
 
 	var entries []statEntry
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &entries))
-	require.Contains(t, entries, statEntry{DiscCount: 12, Count: 1})
+	require.Contains(t, entries, classifiedStat(12, 0, 0, 1))
 }
 
 // TestHandleStats_ServesFromBookStatsHash proves the endpoint reads the rebuilt hash rather than the
@@ -520,7 +520,7 @@ func TestHandleStats_ServesFromBookStatsHash(t *testing.T) {
 
 	var entries []statEntry
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &entries))
-	require.Equal(t, []statEntry{{DiscCount: 12, Count: 1}}, entries)
+	require.Equal(t, []statEntry{classifiedStat(12, 0, 0, 1)}, entries)
 }
 
 // TestHandleStats_ReportsDerivedSearchParams checks that a learned position is reported by the search
@@ -537,7 +537,7 @@ func TestHandleStats_ReportsDerivedSearchParams(t *testing.T) {
 
 	var entries []statEntry
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &entries))
-	require.Contains(t, entries, statEntry{DiscCount: 12, Depth: 20, Confidence: 73, Count: 1})
+	require.Contains(t, entries, classifiedStat(12, 20, 73, 1))
 }
 
 // TestStatEntries_MergesLevelsThatMeanTheSameSearch covers the merge and the ordering: at 44 discs
@@ -552,9 +552,9 @@ func TestStatEntries_MergesLevelsThatMeanTheSameSearch(t *testing.T) {
 	})
 
 	require.Equal(t, []statEntry{
-		{DiscCount: 44, Depth: 0, Confidence: 0, Count: 7},
-		{DiscCount: 44, Depth: 8, Confidence: 100, Count: 2},
-		{DiscCount: 44, Depth: 20, Confidence: 100, Count: 8},
+		classifiedStat(44, 0, 0, 7),
+		classifiedStat(44, 8, 100, 2),
+		classifiedStat(44, 20, 100, 8),
 	}, entries)
 }
 
@@ -578,4 +578,44 @@ func TestHandleListWorkers_ReturnsActiveWorkers(t *testing.T) {
 	require.Equal(t, "w1", workers[0].ID)
 	require.Equal(t, "host-1", workers[0].Hostname)
 	require.Equal(t, "commit-1", workers[0].GitCommit)
+}
+
+// TestStatBucket covers the three groups the stats page shows, decided from (depth, confidence)
+// alone -- the level that produced them is not carried by /api/stats or the book_stats hash.
+func TestStatBucket(t *testing.T) {
+	targetDepth, targetConfidence := edax.SearchParams(12, TargetLevel(12))
+
+	tests := []struct {
+		name       string
+		discCount  int
+		depth      int
+		confidence int
+		want       string
+	}{
+		{"never searched", 12, 0, 0, statBucketUnlearned},
+		{"below target", 12, 16, 73, statBucketPartial},
+		{"same depth as target but more selective", 12, targetDepth, targetConfidence - 10, statBucketPartial},
+		{"at target", 12, targetDepth, targetConfidence, statBucketLearned},
+		{"deeper than target", 12, targetDepth + 2, targetConfidence, statBucketLearned},
+		// 20 empties solved full-width: below the 32 target level, but no deeper search can change it.
+		{"ran the game out", 44, 20, 100, statBucketLearned},
+		{"ran the game out selectively", 44, 20, 73, statBucketPartial},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, statBucket(tt.discCount, tt.depth, tt.confidence))
+		})
+	}
+}
+
+// TestStatEntries_CarriesTheRowsTarget checks the other half of what the stats page can't compute
+// itself: which search each disc count is aiming for.
+func TestStatEntries_CarriesTheRowsTarget(t *testing.T) {
+	entries := statEntries([]db.LevelStat{{DiscCount: 13, Level: 0, Count: 1}})
+
+	depth, confidence := edax.SearchParams(13, TargetLevel(13))
+	require.Equal(t, depth, entries[0].TargetDepth)
+	require.Equal(t, confidence, entries[0].TargetConfidence)
+	require.Equal(t, statBucketUnlearned, entries[0].Bucket)
 }

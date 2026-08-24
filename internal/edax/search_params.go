@@ -28,6 +28,12 @@ func SearchParams(discCount, level int) (depth, confidence int) {
 // game full-width, making its score the game-theoretic result: no deeper search can change it.
 func IsFinal(discCount, level int) bool {
 	depth, confidence := SearchParams(discCount, level)
+	return IsFinalSearch(discCount, depth, confidence)
+}
+
+// IsFinalSearch is IsFinal stated about the search itself, for callers holding a (depth, confidence)
+// pair whose level is no longer available.
+func IsFinalSearch(discCount, depth, confidence int) bool {
 	return depth == boardSquares-discCount && confidence == 100
 }
 

@@ -1,103 +1,101 @@
-// Stats table: boards per disc count (rows) and per search (columns). A column is the search a
-// board actually got -- "32 @ 73%" is a 32-ply search with edax's 73% selectivity -- not the level
-// it was requested at, since (disc count, level) determines both and different levels can mean the
-// identical search. /api/stats already merges those (see api.statEntries).
+// Stats table: positions per disc count (rows), grouped by how far each row's evaluation got
+// toward the target search for its disc count. A partial column is the search a position actually
+// got -- "32 @ 73%" is a 32-ply search with edax's 73% selectivity -- not the level it was
+// requested at, since (disc count, level) determines both and different levels can mean the
+// identical search. /api/stats already merges those and classifies every entry (see
+// api.statEntries), so this page needs no copy of edax's level table.
 
-// UNLEARNED_LABEL is the column for boards with no evaluation yet; the API reports them as depth 0.
-const UNLEARNED_LABEL = 'unlearned';
+// Buckets, as api.statBucket labels them.
+const BUCKET_UNLEARNED = 'unlearned';
+const BUCKET_PARTIAL = 'partial';
 
-// BOARD_SQUARES: a search whose depth plus the board's disc count reaches this searched to the end
-// of the game, so its depth is that board's maximum. Those columns are labeled "max" and grouped
-// together: the depth behind them differs per row, but "searched to the end" is one thing.
-const BOARD_SQUARES = 64;
-
-// columnFor returns the column a stat entry belongs in: key to group by, label to print, and a
-// sort key ordering unlearned boards first, then searches by depth, then the searches that reached
-// the end of the game -- each group by ascending confidence.
-function columnFor(stat) {
-    if (stat.depth === 0) {
-        return { key: UNLEARNED_LABEL, label: UNLEARNED_LABEL, sort: [0, 0, 0] };
-    }
-    if (stat.depth + stat.disc_count === BOARD_SQUARES) {
-        return { key: `max:${stat.confidence}`, label: `max @ ${stat.confidence}%`, sort: [2, 0, stat.confidence] };
-    }
-    return {
-        key: `${stat.depth}:${stat.confidence}`,
-        label: `${stat.depth} @ ${stat.confidence}%`,
-        sort: [1, stat.depth, stat.confidence],
-    };
+// searchLabel names a search by the depth and confidence it ran at.
+function searchLabel(depth, confidence) {
+    return `${depth} @ ${confidence}%`;
 }
 
-// compareColumns orders two columns by their sort keys, lexicographically.
-function compareColumns(a, b) {
-    for (let i = 0; i < a.sort.length; i++) {
-        if (a.sort[i] !== b.sort[i]) return a.sort[i] - b.sort[i];
-    }
-    return 0;
-}
-
-// buildStatsRows turns /api/stats entries into the table's cells: a header row, one row per disc
-// count, and a totals row, each with a trailing total column.
-function buildStatsRows(stats) {
-    const countsByKey = new Map();
-    const discCounts = new Set();
+// partialColumns returns the columns of the "Partially learned" group: every search seen below
+// some row's target, ordered by depth and then confidence. One column can be partial for one disc
+// count and already at target for another; only the partial cells land here.
+function partialColumns(stats) {
     const columns = new Map();
+    for (const stat of stats) {
+        if (stat.bucket !== BUCKET_PARTIAL) continue;
+        const key = `${stat.depth}:${stat.confidence}`;
+        if (!columns.has(key)) {
+            columns.set(key, { key, depth: stat.depth, confidence: stat.confidence });
+        }
+    }
+    return [...columns.values()].sort((a, b) => a.depth - b.depth || a.confidence - b.confidence);
+}
 
-    stats.forEach((stat) => {
-        const column = columnFor(stat);
-        countsByKey.set(`${stat.disc_count}:${column.key}`, stat.count);
-        discCounts.add(stat.disc_count);
-        columns.set(column.key, column);
-    });
+// buildStatsTable turns /api/stats entries into the table's contents: `groups` is the top header
+// row, each entry spanning that many columns of `rows[0]` (the column header row); `rows` continues
+// with one row per disc count and a totals row, each ending in a row total.
+function buildStatsTable(stats) {
+    const columns = partialColumns(stats);
+    const discCounts = [...new Set(stats.map((s) => s.disc_count))].sort((a, b) => a - b);
 
-    const sortedDiscCounts = [...discCounts].sort((a, b) => a - b);
-    const sortedColumns = [...columns.values()].sort(compareColumns);
+    const groups = [{ label: '', span: 1 }, { label: 'Unlearned', span: 1 }];
+    if (columns.length > 0) groups.push({ label: 'Partially learned', span: columns.length });
+    groups.push({ label: 'Learned', span: 2 }, { label: '', span: 1 });
 
-    const rows = [];
+    const header = ['', '0', ...columns.map((c) => searchLabel(c.depth, c.confidence)), 'target', 'count', 'Total'];
+    const rows = [header];
 
-    const headerRow = [''];
-    sortedColumns.forEach((column) => headerRow.push(column.label));
-    headerRow.push('Total');
-    rows.push(headerRow);
+    // Counts per disc count, laid out as [unlearned, ...partials, learned]; the totals row then
+    // falls out of the same accumulators. The target column holds a label, so it never gets a total.
+    const learnedIndex = columns.length + 1;
+    const partialIndex = new Map(columns.map((c, i) => [c.key, i + 1]));
+    const columnTotals = new Array(columns.length + 2).fill(0);
 
-    const columnTotals = new Array(sortedColumns.length).fill(0);
-    sortedDiscCounts.forEach((discCount) => {
-        const row = [`${discCount} discs`];
-        let rowTotal = 0;
+    for (const discCount of discCounts) {
+        const cells = new Array(columns.length + 2).fill(0);
+        let target = '';
 
-        sortedColumns.forEach((column, colIndex) => {
-            const count = countsByKey.get(`${discCount}:${column.key}`) || 0;
-            row.push(count);
-            columnTotals[colIndex] += count;
-            rowTotal += count;
-        });
+        for (const stat of stats) {
+            if (stat.disc_count !== discCount) continue;
+            target = searchLabel(stat.target_depth, stat.target_confidence);
+            if (stat.bucket === BUCKET_UNLEARNED) {
+                cells[0] += stat.count;
+            } else if (stat.bucket === BUCKET_PARTIAL) {
+                cells[partialIndex.get(`${stat.depth}:${stat.confidence}`)] += stat.count;
+            } else {
+                cells[learnedIndex] += stat.count;
+            }
+        }
 
-        row.push(rowTotal);
-        rows.push(row);
-    });
+        cells.forEach((count, i) => { columnTotals[i] += count; });
+        const rowTotal = cells.reduce((sum, count) => sum + count, 0);
+        rows.push([`${discCount} discs`, ...cells.slice(0, learnedIndex), target, cells[learnedIndex], rowTotal]);
+    }
 
-    const totalsRow = ['Total'];
-    let grandTotal = 0;
-    columnTotals.forEach((total) => {
-        totalsRow.push(total);
-        grandTotal += total;
-    });
-    totalsRow.push(grandTotal);
-    rows.push(totalsRow);
+    const grandTotal = columnTotals.reduce((sum, count) => sum + count, 0);
+    rows.push(['Total', ...columnTotals.slice(0, learnedIndex), '', columnTotals[learnedIndex], grandTotal]);
 
-    return rows;
+    return { groups, rows };
 }
 
 async function loadStats() {
     const response = await fetch('/api/stats');
     const stats = await response.json();
 
-    renderTable(buildStatsRows(stats));
+    renderTable(buildStatsTable(stats));
 }
 
-function renderTable(rows) {
+function renderTable({ groups, rows }) {
     const table = document.getElementById('stats-table');
     table.innerHTML = '';
+
+    const groupRow = document.createElement('tr');
+    groups.forEach((group) => {
+        const th = document.createElement('th');
+        th.textContent = group.label;
+        th.colSpan = group.span;
+        if (group.label) th.className = 'group';
+        groupRow.appendChild(th);
+    });
+    table.appendChild(groupRow);
 
     rows.forEach((row, rowIndex) => {
         const tr = document.createElement('tr');
@@ -142,5 +140,5 @@ async function pollStats() {
 if (typeof module === 'undefined') {
     pollStats();
 } else {
-    module.exports = { buildStatsRows, columnFor };
+    module.exports = { buildStatsTable, partialColumns, searchLabel };
 }
