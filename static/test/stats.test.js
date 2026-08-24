@@ -23,6 +23,13 @@ function groupLabels(table) {
     return table.groups.map((g) => [g.label, g.span]);
 }
 
+// The group row is rendered with colSpan, so a total that disagrees with the column count silently
+// shears the table.
+function assertSpansCoverColumns(table) {
+    const span = table.groups.reduce((sum, g) => sum + g.span, 0);
+    assert.equal(span, table.rows[0].length, 'group spans cover exactly the columns');
+}
+
 test('searchLabel: names a search by its depth and confidence', () => {
     assert.equal(searchLabel(32, 73), '32 @ 73%');
     assert.equal(searchLabel(41, 73), '41 @ 73%');
@@ -51,6 +58,7 @@ test('buildStatsTable: three groups, with one column per partial search between 
 
     assert.deepEqual(groupLabels(table), [['', 1], ['Unlearned', 1], ['Partially learned', 2], ['Learned', 2], ['', 1]]);
     assert.deepEqual(table.rows[0], ['', '0', '16 @ 73%', '32 @ 73%', 'target', 'count', 'Total']);
+    assertSpansCoverColumns(table);
     assert.deepEqual(table.rows[1], ['12 discs', 1, 2, 3, '40 @ 73%', 4, 10]);
 });
 
@@ -94,4 +102,5 @@ test('buildStatsTable: no entries yields the two header rows and an empty total'
 
     assert.deepEqual(groupLabels(table), [['', 1], ['Unlearned', 1], ['Learned', 2], ['', 1]]);
     assert.deepEqual(table.rows, [['', '0', 'target', 'count', 'Total'], ['Total', 0, '', 0, 0]]);
+    assertSpansCoverColumns(table);
 });
