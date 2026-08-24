@@ -722,18 +722,15 @@ class OthelloGame {
         return !e || e.source === 'wasm';
     }
 
-    // hasUnresolvedEvaluations reports whether board's children or grandchildren are missing an
-    // on-book evaluation -- i.e. one requestServerAnalysis can ask the server to compute. Off-book
-    // boards are excluded: those are handled by queueLocalEvaluations' wasm chain, which needs no
-    // polling since each worker result drives its own re-render.
+    // hasUnresolvedEvaluations reports whether board's children are missing an on-book evaluation --
+    // i.e. one requestServerAnalysis can ask the server to compute. Off-book boards are excluded:
+    // those are handled by queueLocalEvaluations' wasm chain, which needs no polling since each
+    // worker result drives its own re-render. Grandchildren are excluded too: nothing asks the
+    // server for those any more (see requestGrandchildrenEvaluations), so counting them would keep
+    // the poll running until its timeout.
     hasUnresolvedEvaluations(board) {
-        const seen = new Set();
-        for (const child of board.getChildren()) {
-            seen.add(child.normalize().toString());
-            for (const grandchild of child.getChildren()) seen.add(grandchild.normalize().toString());
-        }
-        const missing = [...seen].filter((b) => this.needsServerEvaluation(b));
-        const [onBook] = this.splitOffBook(missing);
+        const children = [...new Set(board.getChildren().map((child) => child.normalize().toString()))];
+        const [onBook] = this.splitOffBook(children.filter((b) => this.needsServerEvaluation(b)));
         return onBook.length > 0;
     }
 
@@ -944,30 +941,21 @@ class OthelloGame {
         this.queueLocalEvaluations(children);
     }
 
-    // Prefetch evaluations for grandchildren so they are cached before the user clicks a move.
-    //
-    // Unlike requestMissingEvaluations, on-book grandchildren are not handed to the wasm chain:
-    // there are an order of magnitude more of them than children and none of them is on screen,
-    // while the server can answer for them in one batched request. Off-book grandchildren still go
-    // local, since for those the server is not an option at all -- queued as prefetch, so the
-    // ~100 invisible searches never delay a visible one. Whichever grandchildren the user actually
-    // navigates to become children, and requestMissingEvaluations re-queues them at full priority,
-    // resuming from whatever level the prefetch reached.
+    // Prefetch evaluations for off-book grandchildren so they are cached before the user clicks a
+    // move. Only off-book ones: there are an order of magnitude more grandchildren than children
+    // and none of them is on screen, so sending the on-book ones to the server made every
+    // analyze_request payload enormous for results nobody was looking at. For off-book positions
+    // the server is not an option at all, so those still go to the local wasm chain -- queued as
+    // prefetch, so the ~100 invisible searches never delay a visible one. Whichever grandchildren
+    // the user actually navigates to become children, and requestMissingEvaluations then asks the
+    // server and re-queues them at full priority, resuming from whatever level the prefetch reached.
     requestGrandchildrenEvaluations(board) {
         if (!this.evalMode) return;
         const seen = new Set();
-        const missing = [];
         for (const child of board.getChildren()) {
-            for (const grandchild of child.getChildren()) {
-                const key = grandchild.normalize().toString();
-                if (!seen.has(key) && this.needsServerEvaluation(key)) {
-                    seen.add(key);
-                    missing.push(key);
-                }
-            }
+            for (const grandchild of child.getChildren()) seen.add(grandchild.normalize().toString());
         }
-        const [onBook, offBook] = this.splitOffBook(missing);
-        this.requestServerAnalysis(onBook);
+        const [, offBook] = this.splitOffBook([...seen]);
         this.queueLocalEvaluations(offBook, { prefetch: true });
     }
 

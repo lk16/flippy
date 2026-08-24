@@ -1,9 +1,9 @@
-// Tests for normal (non-PGN) play's evaluation wiring: requestMissingEvaluations/
-// requestGrandchildrenEvaluations must ask the server to actually analyze on-book positions it
-// has never seen (analyze_request), not just look up whatever it already has saved
-// (evaluation_request) -- otherwise a position outside the pre-explored book never gets evaluated,
-// since nothing else ever enqueues it. Off-book positions still go to the local wasm chain and
-// need no server request or polling at all.
+// Tests for normal (non-PGN) play's evaluation wiring: requestMissingEvaluations must ask the
+// server to actually analyze on-book children it has never seen (analyze_request), not just look up
+// whatever it already has saved (evaluation_request) -- otherwise a position outside the
+// pre-explored book never gets evaluated, since nothing else ever enqueues it. Off-book positions
+// still go to the local wasm chain and need no server request or polling at all. Grandchildren go
+// nowhere near the server: there are an order of magnitude more of them and none is on screen.
 //
 // The children of the current board additionally *always* go to the local wasm chain while the
 // server hasn't answered for them, on-book or not: that is what puts a score under every legal
@@ -64,14 +64,13 @@ test('requestMissingEvaluations: sends both evaluation_request and analyze_reque
   assert.equal(anReq.level, game.levelConfig.priorityLevel);
 });
 
-test('requestGrandchildrenEvaluations: also sends analyze_request for prefetched grandchildren', () => {
+test('requestGrandchildrenEvaluations: sends nothing to the server', () => {
   const game = buildNormalGame();
   game.wsClient = recordingWsClient();
 
   game.requestGrandchildrenEvaluations(game.board);
 
-  const anReq = game.wsClient.sent.find((m) => m.event === 'analyze_request');
-  assert.ok(anReq, 'analyze_request was sent for grandchildren');
+  assert.deepEqual(game.wsClient.sent, [], 'grandchildren are off screen; their payloads dwarfed the children\'s');
 });
 
 test('requestMissingEvaluations: off-book children skip server requests entirely (wasm handles them)', () => {
@@ -142,19 +141,16 @@ test('requestMissingEvaluations: does not re-request boards that already have an
   assert.equal(game.wsClient.sent.length, 0, 'nothing requested once every child already has an evaluation');
 });
 
-test('hasUnresolvedEvaluations: true when an on-book child/grandchild lacks an evaluation, false once resolved', () => {
+// Grandchildren are deliberately not counted: nothing asks the server for them, so waiting on them
+// would keep the poll running to its timeout on every board.
+test('hasUnresolvedEvaluations: true when an on-book child lacks an evaluation, false once resolved', () => {
   const game = buildNormalGame();
   assert.ok(game.hasUnresolvedEvaluations(game.board), 'fresh board has no evaluations yet');
 
-  const seen = new Set();
-  for (const child of game.board.getChildren()) {
-    seen.add(child.normalize().toString());
-    for (const grandchild of child.getChildren()) seen.add(grandchild.normalize().toString());
-  }
-  for (const key of seen) {
+  for (const key of childStrings(game.board)) {
     game.evaluations.set(key, { board: key, score: 0, source: 'edax', level: 10 });
   }
-  assert.equal(game.hasUnresolvedEvaluations(game.board), false, 'resolved once every child/grandchild has an evaluation');
+  assert.equal(game.hasUnresolvedEvaluations(game.board), false, 'resolved once every child has an evaluation');
 });
 
 test('hasUnresolvedEvaluations: off-book boards never count as unresolved (no server-side wait to poll for)', () => {

@@ -245,7 +245,10 @@ test('diverging requests evaluations for the explored board\'s children (for the
   }
 });
 
-test('diverging also prefetches grandchild evaluations, like normal play', () => {
+// Like normal play, diverging asks the server about the explored board and its children only.
+// Grandchildren are an order of magnitude more numerous and none of them is on screen, so sending
+// them made every analyze_request payload enormous for results nobody was waiting on.
+test('diverging does not send grandchild evaluations to the server', () => {
   const game = recordingGame();
   game.evaluations.clear(); // recordingGame builds with complete: true; start from nothing known
   game.pgnCurrentPly = 0;
@@ -253,18 +256,22 @@ test('diverging also prefetches grandchild evaluations, like normal play', () =>
   const explored = game.pgnBoards[0].doMove(m1);
   game.pgnOnSquareClick(m1);
 
+  const childStrings = new Set(explored.getChildren().map((c) => c.normalize().toString()));
   const grandchildStrings = new Set();
   for (const child of explored.getChildren()) {
     for (const grandchild of child.getChildren()) {
-      grandchildStrings.add(grandchild.normalize().toString());
+      const s = grandchild.normalize().toString();
+      if (!childStrings.has(s)) grandchildStrings.add(s);
     }
   }
-  assert.ok(grandchildStrings.size > 0, 'the explored board has grandchildren to prefetch');
+  assert.ok(grandchildStrings.size > 0, 'the explored board has grandchildren that are not also children');
 
-  const evRequests = game.wsClient.sent.filter((m) => m.event === 'evaluation_request');
-  const requested = new Set(evRequests.flatMap((m) => m.boards));
+  const requested = new Set(game.wsClient.sent.flatMap((m) => m.boards));
   for (const s of grandchildStrings) {
-    assert.ok(requested.has(s), `grandchild ${s} was requested for prefetch`);
+    assert.ok(!requested.has(s), `grandchild ${s} was not requested from the server`);
+  }
+  for (const s of childStrings) {
+    assert.ok(requested.has(s), `child ${s} is still requested from the server`);
   }
 });
 
