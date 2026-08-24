@@ -619,3 +619,19 @@ func TestStatEntries_CarriesTheRowsTarget(t *testing.T) {
 	require.Equal(t, confidence, entries[0].TargetConfidence)
 	require.Equal(t, statBucketUnlearned, entries[0].Bucket)
 }
+
+// TestHandleLevelConfig covers the contract static/board.js reads: the tier table plus the parity
+// bumps, which together have to reproduce EffectiveTargetLevel for every disc count.
+func TestHandleLevelConfig(t *testing.T) {
+	s := testServer(t)
+
+	w := doRequest(t, s, http.MethodGet, "/api/level-config", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp levelConfigResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, PriorityLevel, resp.PriorityLevel)
+	require.Equal(t, book.MaxSavableDiscs, resp.MaxSavableDiscs)
+	require.Equal(t, TargetLevelTiers(), resp.TargetLevels)
+	require.Equal(t, ParityBumpDiscs(), resp.ParityBumpDiscs)
+}
