@@ -25,7 +25,7 @@ func TestServer_ClaimJob_PicksLowestDiscCountThenLevel(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, position12, job.Position)
-	require.Equal(t, TargetLevel(12), job.Level)
+	require.Equal(t, UnlearnedLevel(12), job.Level)
 }
 
 func TestServer_ClaimJob_SkipsAlreadyClaimedBoards(t *testing.T) {
@@ -82,7 +82,7 @@ func TestServer_ClaimJob_LeafBoardsDoNotStarveDeeperCandidates(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, position13, job.Position)
-	require.Equal(t, TargetLevel(13), job.Level)
+	require.Equal(t, UnlearnedLevel(13), job.Level)
 }
 
 // TestServer_ClaimJob_BuffersTheRestOfTheRefill covers the point of the buffer: one claim's DB scan
@@ -310,9 +310,9 @@ func TestTargetLevelTiers_MatchEffectiveTargetLevel(t *testing.T) {
 	}
 }
 
-// TestIsBookQuality covers the level floor handleSubmitJobResult applies to every submission:
-// only a search at least as deep as the position's target level -- or one that already ran the game
-// out -- may reach the DB.
+// TestIsBookQuality covers the level floor handleSubmitJobResult applies to every submission: only
+// a search at least as deep as the shallowest job tier -- or one that already ran the game out --
+// may reach the DB.
 func TestIsBookQuality(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -320,15 +320,16 @@ func TestIsBookQuality(t *testing.T) {
 		level     int
 		want      bool
 	}{
-		{"below target", 14, PriorityLevel, false},
-		{"one rung below target", 14, TargetLevel(14) - 2, false},
+		{"below the unlearned tier", 14, UnlearnedLevel(14) - 1, false},
+		{"at the unlearned tier", 14, UnlearnedLevel(14), true},
+		{"between the tiers", 14, TargetLevel(14) - 2, true},
 		{"at target", 14, TargetLevel(14), true},
 		{"above target", 14, TargetLevel(14) + 2, true},
 		{"at target, deepest tier", 30, TargetLevel(30), true},
 		// 52 discs is past MaxSavableDiscs, so the disc-count check keeps it out of the DB anyway,
 		// but it is the shape the IsFinal clause exists for: a shallow search that is still the
 		// game-theoretic result, which no deeper level could improve on.
-		{"below target but final", 52, 12, true},
+		{"below the unlearned tier but final", 52, 12, true},
 	}
 
 	for _, tt := range tests {
@@ -342,4 +343,31 @@ func TestIsBookQuality(t *testing.T) {
 func TestTargetLevelTiers_ReturnsACopy(t *testing.T) {
 	TargetLevelTiers()[0].Level = 1
 	require.Equal(t, 40, TargetLevel(4))
+}
+
+// TestServer_ClaimJob_LevelPerTier covers what separates the second job tier from the third: an
+// unlearned row is searched at UnlearnedLevel, a row that already has a score at its target.
+func TestServer_ClaimJob_LevelPerTier(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	unlearned := testPosition(t, 14)
+	belowTarget := testPosition(t, 16)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{unlearned, belowTarget}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, belowTarget, db.Evaluation{
+		Level: UnlearnedLevel(16), Score: 0,
+	}))
+
+	// Unlearned first, whatever the disc counts (see db.ListLearnable's ordering).
+	job, ok, err := s.claimJob(ctx, "worker-1")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, unlearned, job.Position)
+	require.Equal(t, UnlearnedLevel(14), job.Level)
+
+	job, ok, err = s.claimJob(ctx, "worker-2")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, belowTarget, job.Position)
+	require.Equal(t, TargetLevel(16), job.Level)
 }

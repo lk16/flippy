@@ -161,7 +161,7 @@ const { OthelloPosition, OthelloGame, LOCAL_EVAL_LEVELS, localEvalLevelsFor } = 
 
 // Mirrors GET /api/level-config (internal/api/handlers.go handleLevelConfig).
 const DEFAULT_LEVEL_CONFIG = {
-  priorityLevel: 10,
+  priorityLevel: 16,
   maxSavableDiscs: 30,
   targetLevels: [
     { maxDiscs: 13, level: 40 },
@@ -186,7 +186,6 @@ function buildGame(boardStrings, { complete = true } = {}) {
   // Mirror analyzePGN(): a PGN line starts with black to move and every ply hands the turn over.
   game.pgnBoards = boardStrings.map((s, ply) => OthelloPosition.fromString(s, ply % 2 === 0));
   game.evaluations = new Map();
-  game.pendingLevelRequests = new Map();
   game.pgnCurrentPly = 0;
   game.pgnAlternativeMoves = [];
   game.flipped = false;
@@ -250,7 +249,6 @@ function buildNormalGame(board = new OthelloPosition()) {
   game.evalPollTimer = null;
   game.evalPollStart = 0;
   game.levelConfig = { ...DEFAULT_LEVEL_CONFIG };
-  game.pendingLevelRequests = new Map();
   game._pendingLocalEvals = new Map();
   game._localEvalRenderPending = false;
   game._localEvalBoardKey = null;

@@ -629,8 +629,9 @@ func (s *Server) enqueuePriority(ctx context.Context, position string, level int
 }
 
 // dequeuePriority pops the oldest entry (FIFO), removing it from the pending set; ok is false when
-// the queue is empty. Entries whose requesting connection has closed are discarded: nobody is
-// waiting for the result.
+// the queue is empty. Nobody is waiting on an entry whose requesting connection has closed, so it
+// leaves the queue -- but the position is worth learning anyway, so it is promoted into the book
+// instead of being thrown away.
 func (s *Server) dequeuePriority(ctx context.Context) (priorityEntry, bool, error) {
 	for {
 		data, err := s.redis.RPop(ctx, priorityQueueKey).Result()
@@ -650,11 +651,42 @@ func (s *Server) dequeuePriority(ctx context.Context) (priorityEntry, bool, erro
 		_ = s.redis.SRem(ctx, priorityPendingKey, entry.Position).Err()
 
 		if entry.ConnID != "" && !s.connLive(ctx, entry.ConnID) {
+			s.promoteToBook(ctx, entry.Position)
 			continue
 		}
 
 		return entry, true, nil
 	}
+}
+
+// promoteToBook adds position to the book as an unlearned row, so a priority request whose
+// requester disconnected is picked up by the second job tier rather than dropped. Reports whether a
+// row was actually created: an out-of-range disc count is refused (see
+// Repository.AddPositionsInserted) and a position the book already holds needs no promotion.
+func (s *Server) promoteToBook(ctx context.Context, position string) bool {
+	parsed, err := othello.ParsePosition(position)
+	if err != nil {
+		return false
+	}
+
+	normalized, err := othello.NewNormalizedPosition(parsed)
+	if err != nil {
+		return false
+	}
+
+	discCount := normalized.CountDiscs()
+	if !isSavableDiscCount(discCount) {
+		return false
+	}
+
+	inserted, err := s.repo.AddPositionsInserted(ctx, []othello.NormalizedPosition{normalized})
+	if err != nil {
+		log.Printf("failed to promote dropped priority position %s: %v", position, err)
+		return false
+	}
+
+	s.bookStatsRecordInsert(ctx, discCount, inserted)
+	return inserted > 0
 }
 
 // setPriorityClaim marks position's claim as priority-originated.

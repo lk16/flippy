@@ -296,6 +296,28 @@ func testLearnableQuery(minDiscs, deeperLevel, limit int) LearnableQuery {
 	}
 }
 
+// TestRepository_ListLearnable_OrdersUnlearnedFirst covers the top-level split: an unlearned
+// position outranks every partially learned one, whatever their disc counts, so a shallow row at a
+// low disc count doesn't keep a never-searched deeper one waiting.
+func TestRepository_ListLearnable_OrdersUnlearnedFirst(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	learned12 := testPosition(t, 12)
+	unlearned20 := testPosition(t, 20)
+	unlearned13 := testPosition(t, 13)
+
+	require.NoError(t, repo.AddPositions(ctx,
+		[]othello.NormalizedPosition{learned12, unlearned20, unlearned13}))
+	require.NoError(t, repo.SaveEvaluation(ctx, learned12, Evaluation{Level: 10, Score: 0}))
+
+	results, err := repo.ListLearnable(ctx, testLearnableQuery(12, 24, 10))
+	require.NoError(t, err)
+	require.Equal(t,
+		[]othello.NormalizedPosition{unlearned13, unlearned20, learned12},
+		[]othello.NormalizedPosition{results[0].Position, results[1].Position, results[2].Position})
+}
+
 func TestRepository_ListLearnable_OrdersByDiscCountThenLevel(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
@@ -312,6 +334,7 @@ func TestRepository_ListLearnable_OrdersByDiscCountThenLevel(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 3)
 
+	// position12 is the only unlearned one, so it comes first; the other two follow by level.
 	require.Equal(t, position12, results[0].Position)
 	require.Equal(t, position13, results[1].Position)
 	require.Equal(t, position13Other, results[2].Position)

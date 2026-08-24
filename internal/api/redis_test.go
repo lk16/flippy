@@ -468,9 +468,10 @@ func TestClaimJob_PriorityDeduplicates(t *testing.T) {
 	require.Len(t, drainPriority(t, s), 1)
 }
 
-// TestDequeuePriority_DropsEntriesFromDeadConnections verifies that an entry queued by a since-
-// closed websocket connection is discarded at dequeue and removed from the pending set.
-func TestDequeuePriority_DropsEntriesFromDeadConnections(t *testing.T) {
+// TestDequeuePriority_PromotesEntriesFromDeadConnections verifies that an entry queued by a since-
+// closed websocket connection leaves the queue and the pending set, but is added to the book as an
+// unlearned row rather than thrown away: nobody is waiting for it, yet the work is still wanted.
+func TestDequeuePriority_PromotesEntriesFromDeadConnections(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
@@ -488,6 +489,69 @@ func TestDequeuePriority_DropsEntriesFromDeadConnections(t *testing.T) {
 	isMember, err := s.redis.SIsMember(ctx, priorityPendingKey, position.String()).Result()
 	require.NoError(t, err)
 	require.False(t, isMember)
+
+	// Now in the book, unlearned, so the second job tier hands it out.
+	eval, err := s.repo.GetPosition(ctx, position.Position())
+	require.NoError(t, err)
+	require.Equal(t, db.Evaluation{}, eval)
+
+	job, ok, err := s.claimJob(ctx, "worker-1")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, position, job.Position)
+	require.Equal(t, UnlearnedLevel(14), job.Level)
+}
+
+// TestDequeuePriority_DoesNotPromoteOutOfRangeDiscCounts covers the one case a dropped entry stays
+// dropped: no row may exist for it, so there is nothing to promote it into.
+func TestDequeuePriority_DoesNotPromoteOutOfRangeDiscCounts(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	connID, err := s.registerConn(ctx)
+	require.NoError(t, err)
+	position := testPosition(t, book.MaxSavableDiscs+5)
+	require.NoError(t, s.enqueuePriority(ctx, position.String(), PriorityLevel, connID))
+	s.unregisterConn(ctx, connID)
+
+	_, ok, err := s.dequeuePriority(ctx)
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	_, err = s.repo.GetPosition(ctx, position.Position())
+	require.ErrorIs(t, err, db.ErrPositionNotFound)
+}
+
+// TestPromoteToBook_LeavesAnExistingRowAlone covers the other non-promotion: a position the book
+// already holds needs no row, and its evaluation must survive the request that dropped.
+func TestPromoteToBook_LeavesAnExistingRowAlone(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	position := testPosition(t, 14)
+	saved := db.Evaluation{Level: TargetLevel(14), Score: 3}
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, position, saved))
+
+	require.False(t, s.promoteToBook(ctx, position.String()))
+
+	eval, err := s.repo.GetPosition(ctx, position.Position())
+	require.NoError(t, err)
+	require.Equal(t, saved, eval)
+}
+
+// TestPromoteToBook_IgnoresUnusablePositions covers the entries a corrupted queue can hold.
+func TestPromoteToBook_IgnoresUnusablePositions(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	require.False(t, s.promoteToBook(ctx, "not-a-position"))
+
+	// Parseable but not normalized, so it would not match the claim key it was queued under.
+	unnormalized, err := othello.NewStartPosition().DoMove(19)
+	require.NoError(t, err)
+	require.False(t, unnormalized.IsNormalized())
+	require.False(t, s.promoteToBook(ctx, unnormalized.String()))
 }
 
 // TestDequeuePriority_KeepsEntriesFromLiveConnections verifies that entries whose connection is
@@ -636,18 +700,17 @@ func TestHandleSubmitJobResult_PriorityLowDiscNoRowAddsAndSaves(t *testing.T) {
 	require.Equal(t, db.Evaluation{Level: target, Score: -4}, eval)
 }
 
-// TestHandleSubmitJobResult_PriorityBelowTargetNotPersisted verifies the level floor: a priority
-// result shallower than the position's target level leaves the existing row unevaluated, so the
-// intermediate rungs of the frontend's level ladder never land in the book.
-func TestHandleSubmitJobResult_PriorityBelowTargetNotPersisted(t *testing.T) {
+// TestHandleSubmitJobResult_PriorityBelowFloorNotPersisted verifies the level floor: a priority
+// result shallower than any job tier hands out leaves the existing row unevaluated, so a client
+// asking for a token search never lands one in the book.
+func TestHandleSubmitJobResult_PriorityBelowFloorNotPersisted(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
 	position := testPosition(t, 14)
 	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
-	require.Less(t, PriorityLevel, TargetLevel(position.CountDiscs()))
 
-	require.Equal(t, 200, submitPriorityResult(t, s, position, PriorityLevel, 6).Code)
+	require.Equal(t, 200, submitPriorityResult(t, s, position, UnlearnedLevel(14)-1, 6).Code)
 
 	eval, err := s.repo.GetPosition(ctx, position.Position())
 	require.NoError(t, err)
@@ -660,17 +723,18 @@ func TestHandleSubmitJobResult_PriorityBelowTargetNotPersisted(t *testing.T) {
 	require.Equal(t, 6, cached.Score)
 }
 
-// TestHandleSubmitJobResult_PriorityBelowTargetSchedulesBoardForLearning verifies that a
-// below-target priority result on an unknown savable position creates a row with an empty evaluation,
-// so ListLearnable picks the position up later — without seeding the book with the shallow score.
-func TestHandleSubmitJobResult_PriorityBelowTargetSchedulesBoardForLearning(t *testing.T) {
+// TestHandleSubmitJobResult_PriorityBelowFloorSchedulesBoardForLearning verifies that a priority
+// result too shallow to keep, on an unknown savable position, still creates a row with an empty
+// evaluation, so ListLearnable picks the position up later — without seeding the book with the
+// shallow score.
+func TestHandleSubmitJobResult_PriorityBelowFloorSchedulesBoardForLearning(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
 	position := testPosition(t, 14)
 	// Do NOT call AddPositions; the position has no row.
 
-	require.Equal(t, 200, submitPriorityResult(t, s, position, PriorityLevel, 6).Code)
+	require.Equal(t, 200, submitPriorityResult(t, s, position, UnlearnedLevel(14)-1, 6).Code)
 
 	eval, err := s.repo.GetPosition(ctx, position.Position())
 	require.NoError(t, err)
@@ -688,7 +752,7 @@ func TestHandleSubmitJobResult_PriorityBelowTargetDoesNotDowngradeExistingRow(t 
 	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 	require.NoError(t, s.repo.SaveEvaluation(ctx, position, db.Evaluation{Level: target, Score: 5}))
 
-	require.Equal(t, 200, submitPriorityResult(t, s, position, PriorityLevel, 6).Code)
+	require.Equal(t, 200, submitPriorityResult(t, s, position, UnlearnedLevel(14), 6).Code)
 
 	eval, err := s.repo.GetPosition(ctx, position.Position())
 	require.NoError(t, err)

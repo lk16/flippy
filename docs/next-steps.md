@@ -16,7 +16,7 @@ is required — pick items up when a real need appears.
   read-only API are open. Old had Basic Auth on the admin pages.
 - **Stricter evaluation validation**: submitted results check
   level/score bounds, but nothing rejects a too-shallow one — it is the
-  DB write that is gated on the board's target level (`isBookQuality`),
+  DB write that is gated on the shallowest job tier (`isBookQuality`),
   not the request. Depth and confidence are checked against the level
   table but only warned about (`checkReportedSearchParams`), never
   rejected.
@@ -172,17 +172,10 @@ need a deeper search than they did before.
 
 ## Frontend
 
-- **PGN review's server-side level ladder mostly produces results nobody
-  keeps.** `pgnSendRequests` asks at `PriorityLevel` and
-  `pgnRequestLevelUps` climbs +2 per round, so a board is searched a dozen
-  times on its way to `TargetLevel` — and only that last search earns a
-  DB row (`isBookQuality`). The ladder existed to get *something* on
-  screen fast, which `pgnQueueLineEvaluations`' local wasm searches now do
-  without a worker; asking the server for the target level directly would
-  drop the discarded rounds. Note `pgnSendRequests` also skips
-  `splitOffBook`, so boards past `MaxSavableDiscs` (30) are sent to the
-  server too, which evaluates them into the ephemeral cache and never the
-  DB — worker time no book ever keeps.
+- **PGN review's line-wide request skips `splitOffBook`**, so boards past
+  `MaxSavableDiscs` (30) are sent to the server too, which evaluates them
+  into the ephemeral cache and never the DB — worker time no book ever
+  keeps. Normal-mode play splits; PGN review does not.
 
 ## Build artifacts
 

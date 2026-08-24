@@ -59,7 +59,7 @@ func TestHandleGetJob_ReturnsJob(t *testing.T) {
 	var resp jobResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Equal(t, position.String(), resp.Position)
-	require.Equal(t, TargetLevel(12), resp.Level)
+	require.Equal(t, UnlearnedLevel(12), resp.Level, "an unlearned row is the second tier, not the third")
 }
 
 func TestHandleGetJob_RepeatedRequestsReturnDistinctJobs(t *testing.T) {
@@ -225,10 +225,10 @@ func TestHandleSubmitJobResult_BoardNotFound(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
-// TestHandleSubmitJobResult_NonPriorityBelowTargetNotPersisted covers the API-wide book-quality
-// floor: a below-target result is accepted (cached ephemerally, claim released) but never saved,
-// even on the non-priority path.
-func TestHandleSubmitJobResult_NonPriorityBelowTargetNotPersisted(t *testing.T) {
+// TestHandleSubmitJobResult_NonPriorityBelowFloorNotPersisted covers the API-wide book-quality
+// floor: a result shallower than any job tier hands out is accepted (cached ephemerally, claim
+// released) but never saved, even on the non-priority path.
+func TestHandleSubmitJobResult_NonPriorityBelowFloorNotPersisted(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 	position := testPosition(t, 12)
@@ -238,8 +238,8 @@ func TestHandleSubmitJobResult_NonPriorityBelowTargetNotPersisted(t *testing.T) 
 	require.NoError(t, err)
 	require.True(t, claimed)
 
-	require.Less(t, 24, TargetLevel(12))
-	reqBody := jobResultRequest{WorkerID: "w1", Position: position.String(), Level: 24, Score: 4}
+	shallow := UnlearnedLevel(12) - 1
+	reqBody := jobResultRequest{WorkerID: "w1", Position: position.String(), Level: shallow, Score: 4}
 	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", reqBody)
 	require.Equal(t, http.StatusOK, w.Code)
 

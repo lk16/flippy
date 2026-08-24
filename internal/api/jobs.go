@@ -30,9 +30,10 @@ type Job struct {
 	Level    int
 }
 
-// claimJob atomically claims one position for workerID: the oldest claimable priority-queue position
-// (from interactive analysis requests) if any, else the lowest disc-count/level learnable position.
-// ok is false when nothing is claimable.
+// claimJob atomically claims one position for workerID, highest tier first: a position requested
+// from the frontend (the priority queue), then an unlearned book position, then one below its
+// target level. The first two are searched at UnlearnedLevel, the third at its target. ok is false
+// when nothing is claimable.
 func (s *Server) claimJob(ctx context.Context, workerID string) (job Job, ok bool, err error) {
 	// Drain the priority queue before falling back to the candidate buffer.
 	for {
@@ -78,9 +79,11 @@ func (s *Server) claimJob(ctx context.Context, workerID string) (job Job, ok boo
 	return s.claimBufferedJob(ctx, workerID)
 }
 
-// claimBufferedJob claims one candidate from the shared buffer, refilling it when empty. Entries
-// are re-checked against the DB because a sweep may have buffered them well before this pop: the
-// position can have been learned, or claimed through the priority queue, in between.
+// claimBufferedJob claims one candidate from the shared buffer, refilling it when empty, and picks
+// the level from what the row already holds: UnlearnedLevel for a never-searched position, its
+// target for one below target. Entries are re-checked against the DB because a sweep may have
+// buffered them well before this pop: the position can have been learned, or claimed through the
+// priority queue, in between.
 func (s *Server) claimBufferedJob(ctx context.Context, workerID string) (job Job, ok bool, err error) {
 	for range jobClaimAttempts {
 		position, found, err := s.popJobCandidate(ctx)
@@ -103,7 +106,8 @@ func (s *Server) claimBufferedJob(ctx context.Context, workerID string) (job Job
 			continue
 		}
 
-		target := TargetLevel(position.CountDiscs())
+		discCount := position.CountDiscs()
+		target := TargetLevel(discCount)
 
 		eval, err := s.repo.GetPosition(ctx, position.Position())
 		if errors.Is(err, db.ErrPositionNotFound) {
@@ -124,7 +128,12 @@ func (s *Server) claimBufferedJob(ctx context.Context, workerID string) (job Job
 			continue
 		}
 
-		return Job{Position: position, Level: target}, true, nil
+		level := target
+		if !eval.IsLearned() {
+			level = UnlearnedLevel(discCount)
+		}
+
+		return Job{Position: position, Level: level}, true, nil
 	}
 
 	return Job{}, false, nil
@@ -188,7 +197,15 @@ func ParityBumpDiscs() []int {
 	return discCounts
 }
 
-// PriorityLevel is the level of the first interactive analysis request: light, so the worker
-// responds quickly; the frontend then climbs by 2 per round toward EffectiveTargetLevel. Aligned per
-// position by edax.AlignLevel before it becomes a search level.
-const PriorityLevel = 10
+// PriorityLevel is the level an interactive analysis request and an unlearned book row are searched
+// at -- the top two of the three job tiers. Light, so a worker answers quickly, but deep enough that
+// the result is worth a row; the position is re-searched at its target level afterwards, as a
+// below-target row. Aligned per position by UnlearnedLevel before it becomes a search level.
+const PriorityLevel = 16
+
+// UnlearnedLevel returns the level a position with discCount discs is first searched at:
+// PriorityLevel, parity-aligned. So an interactive request and the book row it leaves behind
+// describe the same search.
+func UnlearnedLevel(discCount int) int {
+	return edax.AlignLevel(discCount, PriorityLevel)
+}

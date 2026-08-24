@@ -90,10 +90,11 @@ func isSavableDiscCount(discCount int) bool {
 }
 
 // isBookQuality reports whether an evaluation is deep enough for the boards table: at least the
-// position's target level, or a search that ran the game out, which no deeper search can improve on.
-// Enforced on every submission so interactive analysis's shallow rungs never enter the book.
+// level the job tiers hand an unlearned position out at, or a search that ran the game out, which no
+// deeper search can improve on. Enforced on every submission, so a client asking for something
+// shallower than any tier gets an answer but never a row.
 func isBookQuality(discCount, level int) bool {
-	return level >= TargetLevel(discCount) || edax.IsFinal(discCount, level)
+	return level >= UnlearnedLevel(discCount) || edax.IsFinal(discCount, level)
 }
 
 // handleSubmitJobResult handles POST /api/jobs/result: stores a worker's evaluation and releases its claim.
