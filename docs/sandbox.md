@@ -38,6 +38,26 @@ repo): set these before any cargo/rustup commands:
     export CARGO_HOME="$(echo /home/*/.cargo)"    # host crate cache
     export RUSTUP_HOME="$(echo /home/*/.rustup)"  # host toolchains + targets
 
+PATH is the one variable `/etc/sandbox-persistent.sh` cannot carry across
+Bash tool calls: Claude Code's shell snapshot sets PATH *after* sourcing
+that file, so an `export PATH=…` appended there is silently overwritten and
+the next call still can't find `migrate`/`golangci-lint`/`cargo`. Either
+prefix PATH in every command, or symlink the binaries once:
+
+    sudo ln -sf /home/*/.local/bin/{migrate,golangci-lint,gotestsum} /usr/local/bin/
+    sudo ln -sf /home/*/.cargo/bin/{cargo,rustc,rustup,rustfmt,cargo-fmt,cargo-clippy} /usr/local/bin/
+
+The other variables above (GOMODCACHE, GOPROXY, CARGO_HOME, …) do persist.
+
+`./test.sh` tears its compose stack down with `--volumes` on exit, so its
+Postgres starts empty — but only if you let it own the stack. If you bring
+`docker-compose.test.yml` up by hand to iterate with `go test` (worth doing:
+`./test.sh` also rebuilds the wasm crate every run), anything you commit
+into that database survives into the next `./test.sh`, whose `up -d --wait`
+reuses the running containers. Seeding it (`loader seed`) makes ~25 api
+tests fail on rows they never inserted. `docker compose -f
+docker-compose.test.yml down --volumes` before a real run.
+
 crates.io and static.rust-lang.org are not on the network allowlist, so
 `cargo build` here only works against crates already cached in
 CARGO_HOME/registry, and `rustup target add` can't fetch a new target
