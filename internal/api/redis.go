@@ -287,6 +287,11 @@ func (s *Server) claimableCandidates(
 		keys = append(keys, claimKey(candidate.Position.String()))
 	}
 
+	if noMoves := len(candidates) - len(withMoves); noMoves > 0 {
+		// Rows nothing will ever learn: worth saying out loud, since they stay in the book.
+		log.Printf("job buffer: skipped %d candidates with no legal move", noMoves)
+	}
+
 	pipe := s.redis.Pipeline()
 	exists := make([]*redis.IntCmd, len(keys))
 	for i, key := range keys {
@@ -579,7 +584,7 @@ func (s *Server) getBookStats(ctx context.Context) (entries []statEntry, ok bool
 
 // jobFloor returns the lowest disc count the book_stats hash still shows learnable positions for
 // (search params below target; depth 0 counts), falling back to book.LeafDiscs when the hash is
-// missing. May be stale by one refresh; it is only a lower bound for the candidate scans.
+// missing. May be stale by one refresh; it is only a lower bound for the partially learned sweep.
 func (s *Server) jobFloor(ctx context.Context) int {
 	entries, ok, err := s.getBookStats(ctx)
 	if err != nil || !ok {
