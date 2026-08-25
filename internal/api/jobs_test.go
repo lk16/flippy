@@ -103,6 +103,32 @@ func TestServer_ClaimJob_BuffersTheRestOfTheRefill(t *testing.T) {
 	require.Equal(t, int64(len(positions)-1), buffered)
 }
 
+// TestServer_ClaimJob_RefillBuffersAFullBatch covers the buffer's capacity: one refill buffers a
+// full jobCandidateBatch of candidates when the book holds more than that.
+func TestServer_ClaimJob_RefillBuffersAFullBatch(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	// Over-generate: a refill drops positions with no legal move, so only ones with moves count
+	// towards filling the buffer.
+	var positions []othello.NormalizedPosition
+	for _, position := range testDistinctPositions(t, 12, jobCandidateBatch+10) {
+		if position.HasMoves() {
+			positions = append(positions, position)
+		}
+	}
+	require.GreaterOrEqual(t, len(positions), jobCandidateBatch+1)
+	require.NoError(t, s.repo.AddPositions(ctx, positions[:jobCandidateBatch+1]))
+
+	_, ok, err := s.claimJob(ctx, "worker-1")
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	buffered, err := s.redis.LLen(ctx, jobBufferKey).Result()
+	require.NoError(t, err)
+	require.Equal(t, int64(jobCandidateBatch-1), buffered)
+}
+
 // TestServer_ClaimJob_WrapsSweepAfterAClaimExpires covers the recycling the cursor has to preserve:
 // the sweep has already passed a position whose claim later expires, so only wrapping re-offers it.
 func TestServer_ClaimJob_WrapsSweepAfterAClaimExpires(t *testing.T) {

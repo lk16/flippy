@@ -16,7 +16,7 @@ import (
 // jobCandidateBatch is how many candidate positions one refill of the shared buffer reads. Workers
 // pop from that buffer instead of each scanning the same ordering, so this sets how many claims a
 // single DB query serves, not how many workers can be served at once.
-const jobCandidateBatch = 300
+const jobCandidateBatch = 2000
 
 // jobClaimAttempts bounds how many buffered candidates one claim walks past before giving up and
 // letting the worker retry. Only entries stale enough to be unusable are walked past, so this need
