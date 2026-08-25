@@ -16,8 +16,10 @@ import (
 // jobClaimAttempts bounds how many buffered candidates one claim walks past before giving up and
 // letting the worker retry. Only entries stale enough to be unusable are walked past, so this need
 // only absorb a burst of them, and the loop must end: a refill can return candidates that every
-// pass then rejects.
-const jobClaimAttempts = 16
+// pass then rejects. Generous, because giving up costs the worker a full poll interval of idling,
+// while each entry walked past costs one LPOP and one indexed lookup -- and the deeper the buffer is
+// kept, the longer an entry can sit in it turning stale.
+const jobClaimAttempts = 64
 
 // Job is a position a worker should evaluate, and the level to search it at.
 type Job struct {
