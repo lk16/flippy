@@ -176,9 +176,8 @@ type PositionEvaluation struct {
 	Evaluation Evaluation
 }
 
-// LearnableCursor is a point in ListLearnable's ordering. Level is what says which of the two
-// segments the cursor is in -- unlearned means Level == 0 -- so nothing has to be encoded for it.
-// The zero value sorts before every row, so it starts a scan at the beginning.
+// LearnableCursor is a point in ListPartiallyLearned's ordering. The zero value sorts before every
+// row, so it starts a scan at the beginning.
 type LearnableCursor struct {
 	DiscCount int
 	Level     int
@@ -194,9 +193,43 @@ func (pe PositionEvaluation) Cursor() LearnableCursor {
 	}
 }
 
-// LearnableQuery bounds a ListLearnable scan: positions in [MinDiscs, MaxDiscs] below their target
-// level, which is LeafLevel at LeafDiscs and DeeperLevel above it. MinDiscs may be raised above
-// LeafDiscs without changing which count is leaf. After resumes a scan, and Limit caps the rows.
+// UnlearnedQuery bounds a ListUnlearned scan: never-searched positions in [MinDiscs, MaxDiscs],
+// at most Limit of them.
+type UnlearnedQuery struct {
+	MinDiscs int
+	MaxDiscs int
+	Limit    int
+}
+
+// ListUnlearned returns up to q.Limit never-searched positions, by disc count then position; their
+// Evaluation is the zero value. There is no cursor: a row leaves the set as soon as it is searched,
+// so starting every scan at the beginning is what lets a row added later be picked up right away.
+func (r *Repository) ListUnlearned(ctx context.Context, q UnlearnedQuery) ([]PositionEvaluation, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT position, level, score
+		 FROM boards
+		 WHERE level = 0 AND disc_count BETWEEN $1 AND $2
+		 ORDER BY disc_count, position
+		 LIMIT $3`,
+		q.MinDiscs, q.MaxDiscs, q.Limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list unlearned positions: %w", err)
+	}
+	defer rows.Close()
+
+	results, err := scanPositionEvaluations(rows)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list unlearned positions: %w", err)
+	}
+
+	return results, nil
+}
+
+// LearnableQuery bounds a ListPartiallyLearned scan: positions in [MinDiscs, MaxDiscs] below their
+// target level, which is LeafLevel at LeafDiscs and DeeperLevel above it. MinDiscs may be raised
+// above LeafDiscs without changing which count is leaf. After resumes a scan, and Limit caps the
+// rows.
 type LearnableQuery struct {
 	MinDiscs    int
 	MaxDiscs    int
@@ -207,32 +240,33 @@ type LearnableQuery struct {
 	Limit       int
 }
 
-// ListLearnable returns up to q.Limit learnable positions matching q: every unlearned position
-// first, then the partially learned ones, each segment by disc count, then level, then position.
-// Unlearned first is global, not per disc count, so a 12-disc row that already has a score doesn't
-// outrank a 20-disc one with none. Filtering in SQL keeps learned LeafDiscs rows from starving the
+// ListPartiallyLearned returns up to q.Limit searched-but-below-target positions matching q, by
+// disc count, then level, then position. Ordering by level orders by the search it stands for:
+// (depth, confidence) never decreases as level rises within a disc count (see
+// TestSearchParamsRiseWithLevel). Filtering in SQL keeps learned LeafDiscs rows from starving the
 // rest.
-func (r *Repository) ListLearnable(ctx context.Context, q LearnableQuery) ([]PositionEvaluation, error) {
+func (r *Repository) ListPartiallyLearned(ctx context.Context, q LearnableQuery) ([]PositionEvaluation, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT position, level, score
 		 FROM boards
 		 WHERE disc_count BETWEEN $1 AND $2
+		   AND level > 0
 		   AND level < CASE WHEN disc_count = $3 THEN $4::smallint ELSE $5::smallint END
-		   AND ((level > 0), disc_count, level, position) > ($6::boolean, $7::smallint, $8::smallint, $9::bytea)
-		 ORDER BY (level > 0), disc_count, level, position
-		 LIMIT $10`,
+		   AND (disc_count, level, position) > ($6::smallint, $7::smallint, $8::bytea)
+		 ORDER BY disc_count, level, position
+		 LIMIT $9`,
 		q.MinDiscs, q.MaxDiscs, q.LeafDiscs, q.LeafLevel, q.DeeperLevel,
-		q.After.Level > 0, q.After.DiscCount, q.After.Level, q.After.Position.Position().Bytes(),
+		q.After.DiscCount, q.After.Level, q.After.Position.Position().Bytes(),
 		q.Limit,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list learnable positions: %w", err)
+		return nil, fmt.Errorf("failed to list partially learned positions: %w", err)
 	}
 	defer rows.Close()
 
 	results, err := scanPositionEvaluations(rows)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list learnable positions: %w", err)
+		return nil, fmt.Errorf("failed to list partially learned positions: %w", err)
 	}
 
 	return results, nil

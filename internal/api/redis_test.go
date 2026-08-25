@@ -872,12 +872,119 @@ func TestDecodeJobCursor_MalformedStartsOver(t *testing.T) {
 	}
 }
 
+// testPartiallyLearnedPosition returns a position with a row searched below its target level, so
+// the sweep in refillFromPartiallyLearned is the only tier that offers it.
+func testPartiallyLearnedPosition(t *testing.T, s *Server, discs int) othello.NormalizedPosition {
+	t.Helper()
+	ctx := context.Background()
+
+	position := testPosition(t, discs)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, position, db.Evaluation{Level: UnlearnedLevel(discs), Score: 0}))
+
+	return position
+}
+
+// bufferedPositions returns the shared buffer's contents, oldest first.
+func bufferedPositions(t *testing.T, s *Server) []string {
+	t.Helper()
+
+	positions, err := s.redis.LRange(context.Background(), jobBufferKey, 0, -1).Result()
+	require.NoError(t, err)
+	return positions
+}
+
+// TestServer_RefillJobBuffer_BuffersUnlearnedBeforePartiallyLearned covers the tier order between
+// the two book tiers: a never-searched row is offered before any below-target one, and the sweep
+// cursor doesn't move while that is still true.
+func TestServer_RefillJobBuffer_BuffersUnlearnedBeforePartiallyLearned(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	testPartiallyLearnedPosition(t, s, 12)
+	unlearned := testPosition(t, 13)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{unlearned}))
+
+	buffered, err := s.refillJobBuffer(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, buffered)
+	require.Equal(t, []string{unlearned.String()}, bufferedPositions(t, s))
+	require.Equal(t, int64(0), s.redis.Exists(ctx, jobCursorKey).Val())
+}
+
+// TestServer_RefillJobBuffer_FindsUnlearnedAddedAfterTheSweepMovedOn is why the unlearned scan has
+// no cursor: the partially learned sweep is millions of rows long, so a row promoted into the book
+// while it is running would otherwise wait for it to wrap.
+func TestServer_RefillJobBuffer_FindsUnlearnedAddedAfterTheSweepMovedOn(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	testPartiallyLearnedPosition(t, s, 12)
+
+	buffered, err := s.refillJobBuffer(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, buffered)
+	require.NotEqual(t, db.LearnableCursor{}, decodeJobCursor(s.redis.Get(ctx, jobCursorKey).Val()))
+
+	unlearned := testPosition(t, 13)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{unlearned}))
+
+	buffered, err = s.refillJobBuffer(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, buffered)
+	require.Equal(t, unlearned.String(), bufferedPositions(t, s)[1])
+}
+
+// TestServer_RefillJobBuffer_SkipsUnlearnedNobodyCanClaim covers the two candidates that would
+// otherwise head every unlearned scan for good: one another worker holds, and one edax can't search.
+func TestServer_RefillJobBuffer_SkipsUnlearnedNobodyCanClaim(t *testing.T) {
+	s, tx := testServerWithTx(t)
+	ctx := context.Background()
+
+	claimed := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{claimed}))
+	require.NoError(t, s.redis.Set(ctx, claimKey(claimed.String()), "worker-1", claimTTL).Err())
+
+	noMoves := testNoMovesPosition(t, 13)
+	_, err := tx.Exec(ctx,
+		`INSERT INTO boards (position, disc_count) VALUES ($1, $2)`,
+		noMoves.Position().Bytes(), noMoves.CountDiscs())
+	require.NoError(t, err)
+
+	partial := testPartiallyLearnedPosition(t, s, 14)
+
+	buffered, err := s.refillJobBuffer(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, buffered)
+	require.Equal(t, []string{partial.String()}, bufferedPositions(t, s))
+}
+
+// testNoMovesPosition returns a normalized position with discs discs whose mover has no legal move:
+// with no opponent discs on the board there is nothing to flip.
+func testNoMovesPosition(t *testing.T, discs int) othello.NormalizedPosition {
+	t.Helper()
+
+	var player uint64
+	for i := range uint(discs) {
+		player |= 1 << i
+	}
+
+	position, err := othello.NewPosition(player, 0)
+	require.NoError(t, err)
+	require.False(t, position.HasMoves())
+
+	return position.Normalize()
+}
+
 func TestServer_RefillJobBuffer_AdvancesCursorThenWraps(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	positions := testDistinctPositions(t, 12, 3)
-	require.NoError(t, s.repo.AddPositions(ctx, positions))
+	positions := []othello.NormalizedPosition{
+		testPartiallyLearnedPosition(t, s, 12),
+		testPartiallyLearnedPosition(t, s, 13),
+		testPartiallyLearnedPosition(t, s, 14),
+	}
 
 	buffered, err := s.refillJobBuffer(ctx)
 	require.NoError(t, err)
@@ -887,7 +994,7 @@ func TestServer_RefillJobBuffer_AdvancesCursorThenWraps(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, db.LearnableCursor{}, decodeJobCursor(encoded))
 
-	// The sweep is exhausted, so this one wraps and offers the still-unlearned positions again.
+	// The sweep is exhausted, so this one wraps and offers the still-below-target positions again.
 	buffered, err = s.refillJobBuffer(ctx)
 	require.NoError(t, err)
 	require.Equal(t, len(positions), buffered)

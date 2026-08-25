@@ -149,7 +149,7 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case !isBookQuality(discCount, req.Level):
 		// Below book quality: accepted but never persisted; the ephemeral cache is the only record.
-		// A savable priority position still gets an empty-evaluation row so ListLearnable finds it
+		// A savable priority position still gets an empty-evaluation row so the unlearned scan finds it
 		// later (AddPositions never downgrades an existing row).
 		if isPriority && isSavableDiscCount(discCount) {
 			if inserted, err := s.repo.AddPositionsInserted(r.Context(), []othello.NormalizedPosition{normalized}); err != nil {
@@ -184,7 +184,7 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 		}
 		// Too many discs: the ephemeral cache is the only record.
 	default:
-		// ErrPositionNotFound is a real bug here: every ListLearnable position already has a row.
+		// ErrPositionNotFound is a real bug here: every candidate position already has a row.
 		outcome, err := s.repo.SaveEvaluationOutcome(r.Context(), normalized, eval)
 		if err != nil {
 			if errors.Is(err, db.ErrPositionNotFound) {
