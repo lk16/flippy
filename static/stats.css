@@ -13,6 +13,12 @@
     text-align: right;
 }
 
+/* Both header rows: a group label centers over the columns it spans, and a column label over its
+   own column. The first column holds the row labels, which stay as base.css left-aligns them. */
+#stats-table th:not(:first-child) {
+    text-align: center;
+}
+
 #stats-table td:first-child {
     text-align: right;
     font-weight: bold;

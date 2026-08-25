@@ -144,6 +144,24 @@ func TestSearchParams_ConfidenceIsAnEdaxPercentage(t *testing.T) {
 	}
 }
 
+// TestSearchParamsRiseWithLevel checks that (depth, confidence) never decreases as level rises at a
+// fixed disc count. The job sweep leans on this: it orders below-target rows by level, which is
+// only an ordering by the search each row got because of this property (see
+// db.Repository.ListPartiallyLearned). Note that confidence alone is not monotone -- at 25+ empties
+// level 10 gives 10@100% and level 11 gives 11@73% -- the pair is.
+func TestSearchParamsRiseWithLevel(t *testing.T) {
+	for discCount := range boardSquares + 1 {
+		prevDepth, prevConfidence := -1, -1
+		for level := range MaxLevel + 1 {
+			depth, confidence := SearchParams(discCount, level)
+			require.True(t, depth > prevDepth || (depth == prevDepth && confidence >= prevConfidence),
+				"discs=%d level=%d gives %d@%d%%, below level %d's %d@%d%%",
+				discCount, level, depth, confidence, level-1, prevDepth, prevConfidence)
+			prevDepth, prevConfidence = depth, confidence
+		}
+	}
+}
+
 func TestIsFinal(t *testing.T) {
 	tests := []struct {
 		discCount int

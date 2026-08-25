@@ -296,10 +296,15 @@ func testLearnableQuery(minDiscs, deeperLevel, limit int) LearnableQuery {
 	}
 }
 
-// TestRepository_ListLearnable_OrdersUnlearnedFirst covers the top-level split: an unlearned
-// position outranks every partially learned one, whatever their disc counts, so a shallow row at a
-// low disc count doesn't keep a never-searched deeper one waiting.
-func TestRepository_ListLearnable_OrdersUnlearnedFirst(t *testing.T) {
+// testUnlearnedQuery returns the query the ListUnlearned tests share, varying only the fields a
+// given case is about.
+func testUnlearnedQuery(minDiscs, limit int) UnlearnedQuery {
+	return UnlearnedQuery{MinDiscs: minDiscs, MaxDiscs: 30, Limit: limit}
+}
+
+// TestRepository_ListUnlearned_SkipsSearchedPositions covers the split between the two scans: a row
+// belongs to exactly one of them, whatever level it holds.
+func TestRepository_ListUnlearned_SkipsSearchedPositions(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
@@ -311,14 +316,102 @@ func TestRepository_ListLearnable_OrdersUnlearnedFirst(t *testing.T) {
 		[]othello.NormalizedPosition{learned12, unlearned20, unlearned13}))
 	require.NoError(t, repo.SaveEvaluation(ctx, learned12, Evaluation{Level: 10, Score: 0}))
 
-	results, err := repo.ListLearnable(ctx, testLearnableQuery(12, 24, 10))
+	results, err := repo.ListUnlearned(ctx, testUnlearnedQuery(12, 10))
 	require.NoError(t, err)
 	require.Equal(t,
-		[]othello.NormalizedPosition{unlearned13, unlearned20, learned12},
-		[]othello.NormalizedPosition{results[0].Position, results[1].Position, results[2].Position})
+		[]othello.NormalizedPosition{unlearned13, unlearned20},
+		[]othello.NormalizedPosition{results[0].Position, results[1].Position})
 }
 
-func TestRepository_ListLearnable_OrdersByDiscCountThenLevel(t *testing.T) {
+// TestRepository_ListUnlearned_OrdersByDiscCount covers the tier's ordering, which the position
+// tiebreak must not disturb: the batch is the shallowest unlearned positions in the book, whatever
+// order their rows were inserted in.
+func TestRepository_ListUnlearned_OrdersByDiscCount(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	position20 := testPosition(t, 20)
+	position12s := testDistinctPositions(t, 12, 2)
+	position13 := testPosition(t, 13)
+
+	// Inserted deepest first, so a scan that returns insertion order fails here.
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{
+		position20, position13, position12s[0], position12s[1],
+	}))
+
+	results, err := repo.ListUnlearned(ctx, testUnlearnedQuery(12, 10))
+	require.NoError(t, err)
+	require.Equal(t, []int{12, 12, 13, 20}, discCounts(results))
+
+	// The limit cuts the deep end off, not the shallow one.
+	results, err = repo.ListUnlearned(ctx, testUnlearnedQuery(12, 3))
+	require.NoError(t, err)
+	require.Equal(t, []int{12, 12, 13}, discCounts(results))
+}
+
+// discCounts returns the disc count of each position, for asserting a scan's ordering.
+func discCounts(results []PositionEvaluation) []int {
+	counts := make([]int, len(results))
+	for i, result := range results {
+		counts[i] = result.Position.CountDiscs()
+	}
+	return counts
+}
+
+func TestRepository_ListUnlearned_FiltersByDiscCountRange(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	position12 := testPosition(t, 12)
+	position20 := testPosition(t, 20)
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position12, position20}))
+
+	results, err := repo.ListUnlearned(ctx, testUnlearnedQuery(13, 10))
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, position20, results[0].Position)
+}
+
+func TestRepository_ListUnlearned_RespectsLimit(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	require.NoError(t, repo.AddPositions(ctx, othello.PrecomputedPositions12()[:5]))
+
+	results, err := repo.ListUnlearned(ctx, testUnlearnedQuery(12, 3))
+	require.NoError(t, err)
+	require.Len(t, results, 3)
+}
+
+// TestRepository_ListUnlearned_RescanFindsRowsAddedSince is the point of scanning without a cursor:
+// a row added after an earlier scan is picked up by the next one.
+func TestRepository_ListUnlearned_RescanFindsRowsAddedSince(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	positions := testDistinctPositions(t, 13, 2)
+	require.NoError(t, repo.AddPositions(ctx, positions[:1]))
+
+	results, err := repo.ListUnlearned(ctx, testUnlearnedQuery(12, 10))
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	require.NoError(t, repo.AddPositions(ctx, positions[1:]))
+
+	results, err = repo.ListUnlearned(ctx, testUnlearnedQuery(12, 10))
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+}
+
+func TestRepository_ListUnlearned_Empty(t *testing.T) {
+	repo := testRepository(t)
+
+	results, err := repo.ListUnlearned(context.Background(), testUnlearnedQuery(12, 10))
+	require.NoError(t, err)
+	require.Empty(t, results)
+}
+
+func TestRepository_ListPartiallyLearned_OrdersByDiscCountThenLevel(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
@@ -327,110 +420,125 @@ func TestRepository_ListLearnable_OrdersByDiscCountThenLevel(t *testing.T) {
 	position13, position13Other := position13s[0], position13s[1]
 
 	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position12, position13, position13Other}))
+	require.NoError(t, repo.SaveEvaluation(ctx, position12, Evaluation{Level: 20, Score: 0}))
 	require.NoError(t, repo.SaveEvaluation(ctx, position13, Evaluation{Level: 10, Score: 0}))
 	require.NoError(t, repo.SaveEvaluation(ctx, position13Other, Evaluation{Level: 20, Score: 0}))
 
-	results, err := repo.ListLearnable(ctx, testLearnableQuery(12, 24, 10))
+	results, err := repo.ListPartiallyLearned(ctx, testLearnableQuery(12, 24, 10))
 	require.NoError(t, err)
 	require.Len(t, results, 3)
 
-	// position12 is the only unlearned one, so it comes first; the other two follow by level.
 	require.Equal(t, position12, results[0].Position)
 	require.Equal(t, position13, results[1].Position)
 	require.Equal(t, position13Other, results[2].Position)
 }
 
-// TestRepository_ListLearnable_LeafLevelDoesNotStarveDeeperCandidates covers the level cutoff's
-// purpose: once every minDiscs position reaches leafLevel, a batch without the filter would consist
-// entirely of those (they sort first), starving deeper positions.
-func TestRepository_ListLearnable_LeafLevelDoesNotStarveDeeperCandidates(t *testing.T) {
+// TestRepository_ListPartiallyLearned_SkipsUnlearnedPositions keeps the tiers apart: an unlearned
+// row is the other scan's, and returning it here would hand it out at its target level instead of
+// the shallow first search.
+func TestRepository_ListPartiallyLearned_SkipsUnlearnedPositions(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	leafBoards := testDistinctPositions(t, 12, 5)
-	require.NoError(t, repo.AddPositions(ctx, leafBoards))
-	for _, position := range leafBoards {
-		require.NoError(t, repo.SaveEvaluation(ctx, position, Evaluation{Level: 24, Score: 0}))
-	}
+	positions := testDistinctPositions(t, 12, 2)
+	require.NoError(t, repo.AddPositions(ctx, positions))
+	require.NoError(t, repo.SaveEvaluation(ctx, positions[1], Evaluation{Level: 10, Score: 0}))
 
+	results, err := repo.ListPartiallyLearned(ctx, testLearnableQuery(12, 24, 10))
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, positions[1], results[0].Position)
+}
+
+// addPartiallyLearned inserts positions and searches each at level, putting them in the segment
+// ListPartiallyLearned scans.
+func addPartiallyLearned(t *testing.T, repo *Repository, positions []othello.NormalizedPosition, level int) {
+	t.Helper()
+	ctx := context.Background()
+
+	require.NoError(t, repo.AddPositions(ctx, positions))
+	for _, position := range positions {
+		require.NoError(t, repo.SaveEvaluation(ctx, position, Evaluation{Level: level, Score: 0}))
+	}
+}
+
+// TestRepository_ListPartiallyLearned_LeafLevelDoesNotStarveDeeperCandidates covers the level
+// cutoff's purpose: once every minDiscs position reaches leafLevel, a batch without the filter would
+// consist entirely of those (they sort first), starving deeper positions.
+func TestRepository_ListPartiallyLearned_LeafLevelDoesNotStarveDeeperCandidates(t *testing.T) {
+	repo := testRepository(t)
+
+	addPartiallyLearned(t, repo, testDistinctPositions(t, 12, 5), 24)
 	position13 := testPosition(t, 13)
-	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position13}))
+	addPartiallyLearned(t, repo, []othello.NormalizedPosition{position13}, 10)
 
 	// A batch smaller than the number of fully-learned leaves: without the
 	// level filter, this would return only leaves and miss position13 entirely.
-	results, err := repo.ListLearnable(ctx, testLearnableQuery(12, 16, 3))
+	results, err := repo.ListPartiallyLearned(context.Background(), testLearnableQuery(12, 16, 3))
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	require.Equal(t, position13, results[0].Position)
 }
 
-// TestRepository_ListLearnable_MinDiscsAboveLeafDiscsKeepsLeafThreshold covers a caller raising minDiscs
-// above leafDiscs (e.g. a cached "already fully learned up to here" floor): the leaf-level threshold
-// must still apply only to leafDiscs, not to whatever minDiscs happens to be.
-func TestRepository_ListLearnable_MinDiscsAboveLeafDiscsKeepsLeafThreshold(t *testing.T) {
+// TestRepository_ListPartiallyLearned_MinDiscsAboveLeafDiscsKeepsLeafThreshold covers a caller
+// raising minDiscs above leafDiscs (e.g. a cached "already fully learned up to here" floor): the
+// leaf-level threshold must still apply only to leafDiscs, not to whatever minDiscs happens to be.
+func TestRepository_ListPartiallyLearned_MinDiscsAboveLeafDiscsKeepsLeafThreshold(t *testing.T) {
 	repo := testRepository(t)
-	ctx := context.Background()
 
-	position13 := testPosition(t, 13)
-	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position13}))
 	// Above deeperLevel (16) but below leafLevel (24): distinguishes the two thresholds.
-	require.NoError(t, repo.SaveEvaluation(ctx, position13, Evaluation{Level: 20, Score: 0}))
+	addPartiallyLearned(t, repo, []othello.NormalizedPosition{testPosition(t, 13)}, 20)
 
 	// position13 must be judged against deeperLevel (16), not leafLevel (24): a bug binding the leaf
 	// check to minDiscs instead of leafDiscs would wrongly return position13 as needing level 24.
-	results, err := repo.ListLearnable(ctx, testLearnableQuery(13, 16, 10))
+	results, err := repo.ListPartiallyLearned(context.Background(), testLearnableQuery(13, 16, 10))
 	require.NoError(t, err)
 	require.Empty(t, results)
 }
 
-func TestRepository_ListLearnable_FiltersByDiscCountRange(t *testing.T) {
+func TestRepository_ListPartiallyLearned_FiltersByDiscCountRange(t *testing.T) {
 	repo := testRepository(t)
-	ctx := context.Background()
 
-	position12 := testPosition(t, 12)
-	position35 := testPosition(t, 35)
+	position12, position20 := testPosition(t, 12), testPosition(t, 20)
+	addPartiallyLearned(t, repo, []othello.NormalizedPosition{position12, position20}, 10)
 
-	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position12, position35}))
-
-	results, err := repo.ListLearnable(ctx, testLearnableQuery(12, 24, 10))
+	results, err := repo.ListPartiallyLearned(context.Background(), testLearnableQuery(13, 24, 10))
 	require.NoError(t, err)
 	require.Len(t, results, 1)
-	require.Equal(t, position12, results[0].Position)
+	require.Equal(t, position20, results[0].Position)
 }
 
-func TestRepository_ListLearnable_RespectsLimit(t *testing.T) {
+func TestRepository_ListPartiallyLearned_RespectsLimit(t *testing.T) {
 	repo := testRepository(t)
-	ctx := context.Background()
 
-	positions := othello.PrecomputedPositions12()[:5]
-	require.NoError(t, repo.AddPositions(ctx, positions))
+	addPartiallyLearned(t, repo, othello.PrecomputedPositions12()[:5], 10)
 
-	results, err := repo.ListLearnable(ctx, testLearnableQuery(12, 24, 3))
+	results, err := repo.ListPartiallyLearned(context.Background(), testLearnableQuery(12, 24, 3))
 	require.NoError(t, err)
 	require.Len(t, results, 3)
 }
 
-func TestRepository_ListLearnable_Empty(t *testing.T) {
+func TestRepository_ListPartiallyLearned_Empty(t *testing.T) {
 	repo := testRepository(t)
 
-	results, err := repo.ListLearnable(context.Background(), testLearnableQuery(12, 24, 10))
+	results, err := repo.ListPartiallyLearned(context.Background(), testLearnableQuery(12, 24, 10))
 	require.NoError(t, err)
 	require.Empty(t, results)
 }
 
-// TestRepository_ListLearnable_AfterResumesWhereTheLastScanStopped walks the whole learnable set one
-// row at a time, which is what a cursor sweep does across refills.
-func TestRepository_ListLearnable_AfterResumesWhereTheLastScanStopped(t *testing.T) {
+// TestRepository_ListPartiallyLearned_AfterResumesWhereTheLastScanStopped walks the whole segment
+// one row at a time, which is what a cursor sweep does across refills.
+func TestRepository_ListPartiallyLearned_AfterResumesWhereTheLastScanStopped(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
 	positions := othello.PrecomputedPositions12()[:5]
-	require.NoError(t, repo.AddPositions(ctx, positions))
+	addPartiallyLearned(t, repo, positions, 10)
 
 	query := testLearnableQuery(12, 24, 1)
 	var seen []othello.NormalizedPosition
 	for range len(positions) {
-		results, err := repo.ListLearnable(ctx, query)
+		results, err := repo.ListPartiallyLearned(ctx, query)
 		require.NoError(t, err)
 		require.Len(t, results, 1)
 
@@ -441,46 +549,43 @@ func TestRepository_ListLearnable_AfterResumesWhereTheLastScanStopped(t *testing
 	require.ElementsMatch(t, positions, seen)
 
 	// The sweep is exhausted: the caller takes this as its cue to wrap.
-	results, err := repo.ListLearnable(ctx, query)
+	results, err := repo.ListPartiallyLearned(ctx, query)
 	require.NoError(t, err)
 	require.Empty(t, results)
 }
 
-// TestRepository_ListLearnable_AfterOrdersRowsSharingDiscCountAndLevel covers the tiebreak a cursor
-// needs: without position in the ordering, rows equal on (disc_count, level) could repeat or be
-// skipped across scans.
-func TestRepository_ListLearnable_AfterOrdersRowsSharingDiscCountAndLevel(t *testing.T) {
+// TestRepository_ListPartiallyLearned_AfterOrdersRowsSharingDiscCountAndLevel covers the tiebreak a
+// cursor needs: without position in the ordering, rows equal on (disc_count, level) could repeat or
+// be skipped across scans.
+func TestRepository_ListPartiallyLearned_AfterOrdersRowsSharingDiscCountAndLevel(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
 
-	positions := othello.PrecomputedPositions12()[:3]
-	require.NoError(t, repo.AddPositions(ctx, positions))
+	addPartiallyLearned(t, repo, othello.PrecomputedPositions12()[:3], 10)
 
-	all, err := repo.ListLearnable(ctx, testLearnableQuery(12, 24, 10))
+	all, err := repo.ListPartiallyLearned(ctx, testLearnableQuery(12, 24, 10))
 	require.NoError(t, err)
 	require.Len(t, all, 3)
 
 	query := testLearnableQuery(12, 24, 10)
 	query.After = all[0].Cursor()
 
-	rest, err := repo.ListLearnable(ctx, query)
+	rest, err := repo.ListPartiallyLearned(ctx, query)
 	require.NoError(t, err)
 	require.Equal(t, []PositionEvaluation{all[1], all[2]}, rest)
 }
 
-// TestRepository_ListLearnable_ZeroCursorStartsAtTheBeginning pins the zero value's meaning, which
-// the refill path relies on to start and to wrap a sweep.
-func TestRepository_ListLearnable_ZeroCursorStartsAtTheBeginning(t *testing.T) {
+// TestRepository_ListPartiallyLearned_ZeroCursorStartsAtTheBeginning pins the zero value's meaning,
+// which the refill path relies on to start and to wrap a sweep.
+func TestRepository_ListPartiallyLearned_ZeroCursorStartsAtTheBeginning(t *testing.T) {
 	repo := testRepository(t)
-	ctx := context.Background()
 
-	positions := othello.PrecomputedPositions12()[:3]
-	require.NoError(t, repo.AddPositions(ctx, positions))
+	addPartiallyLearned(t, repo, othello.PrecomputedPositions12()[:3], 10)
 
 	query := testLearnableQuery(12, 24, 10)
 	query.After = LearnableCursor{}
 
-	results, err := repo.ListLearnable(ctx, query)
+	results, err := repo.ListPartiallyLearned(context.Background(), query)
 	require.NoError(t, err)
 	require.Len(t, results, 3)
 }

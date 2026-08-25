@@ -64,8 +64,8 @@ const (
 )
 
 // The shared job candidate buffer: workers pop from jobBufferKey, and jobCursorKey records how far
-// through the learnable ordering the current sweep has buffered. Both are derived state — a refill
-// from an empty cursor rebuilds them.
+// through the partially learned rows the current sweep has buffered (unlearned rows are rescanned
+// from the start instead). Both are derived state — a refill from an empty cursor rebuilds them.
 const (
 	jobBufferKey     = "job:buffer"
 	jobCursorKey     = "job:cursor"
@@ -73,7 +73,7 @@ const (
 )
 
 // jobRefillLockTTL bounds how long a replica that died mid-refill blocks other replicas from
-// refilling; it only needs to outlast one ListLearnable query.
+// refilling; it only needs to outlast the queries one refill runs.
 const jobRefillLockTTL = 30 * time.Second
 
 // claimKey is the redis key holding the worker ID that currently holds position's job, if any.
@@ -161,9 +161,10 @@ func (s *Server) popJobCandidate(ctx context.Context) (othello.NormalizedPositio
 	return othello.NormalizedPosition{}, false, nil
 }
 
-// refillJobBuffer buffers the next candidates from the cursor, wrapping to the start of the ordering
-// once the sweep runs out so positions whose claims expired come round again. It reports how many
-// candidates it buffered; zero means another replica is refilling or nothing is learnable.
+// refillJobBuffer buffers the next batch of candidates, unlearned positions before partially
+// learned ones. It reports how many candidates it buffered; zero means another replica is refilling
+// or nothing is learnable. A batch is handed out before the next refill looks at the book again, so
+// a position that becomes unlearnable, or an unlearned row added meanwhile, waits at most one batch.
 func (s *Server) refillJobBuffer(ctx context.Context) (int, error) {
 	won, err := s.redis.SetNX(ctx, jobRefillLockKey, s.replicaID, jobRefillLockTTL).Result()
 	if err != nil {
@@ -174,14 +175,58 @@ func (s *Server) refillJobBuffer(ctx context.Context) (int, error) {
 	}
 	defer s.releaseJobRefillLock(ctx)
 
+	buffered, err := s.refillFromUnlearned(ctx)
+	if err != nil || buffered > 0 {
+		return buffered, err
+	}
+
+	return s.refillFromPartiallyLearned(ctx, s.jobFloor(ctx))
+}
+
+// refillFromUnlearned buffers never-searched positions, the second job tier. It rescans from the
+// start of the book every time rather than following a cursor, so a row added after an earlier
+// refill does not have to wait for the partially-learned sweep to come round; the job floor is
+// skipped for the same reason, and costs nothing here because the index this scan runs on holds
+// only unlearned rows. Candidates no worker can take are dropped here instead: they sort first on
+// every scan, so buffering them would hand out the same unusable batch until they are learned,
+// which for a position edax can't search is never.
+func (s *Server) refillFromUnlearned(ctx context.Context) (int, error) {
+	candidates, err := s.repo.ListUnlearned(ctx, db.UnlearnedQuery{
+		MinDiscs: book.LeafDiscs,
+		MaxDiscs: book.MaxSavableDiscs,
+		Limit:    jobCandidateBatch,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to list unlearned positions: %w", err)
+	}
+
+	claimable, claimed, err := s.claimableCandidates(ctx, candidates)
+	if err != nil {
+		return 0, err
+	}
+	if len(claimable) == 0 {
+		return 0, nil
+	}
+
+	if err := s.bufferCandidates(ctx, claimable); err != nil {
+		return 0, err
+	}
+
+	log.Printf("job buffer: %d unlearned candidates, %d already claimed", len(claimable), claimed)
+
+	return len(claimable), nil
+}
+
+// refillFromPartiallyLearned buffers below-target positions from the sweep cursor, the third job
+// tier, wrapping to the start of the ordering once the sweep runs out so positions whose claims
+// expired come round again.
+func (s *Server) refillFromPartiallyLearned(ctx context.Context, floor int) (int, error) {
 	cursor, err := s.readJobCursor(ctx)
 	if err != nil {
 		return 0, err
 	}
 
-	floor := s.jobFloor(ctx)
-
-	candidates, err := s.listLearnableFrom(ctx, floor, cursor)
+	candidates, err := s.listPartiallyLearnedFrom(ctx, floor, cursor)
 	if err != nil {
 		return 0, err
 	}
@@ -190,7 +235,7 @@ func (s *Server) refillJobBuffer(ctx context.Context) (int, error) {
 	if len(candidates) == 0 && cursor != (db.LearnableCursor{}) {
 		cursor = db.LearnableCursor{}
 		wrapped = true
-		if candidates, err = s.listLearnableFrom(ctx, floor, cursor); err != nil {
+		if candidates, err = s.listPartiallyLearnedFrom(ctx, floor, cursor); err != nil {
 			return 0, err
 		}
 	}
@@ -204,35 +249,97 @@ func (s *Server) refillJobBuffer(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
-	encoded := make([]any, len(candidates))
-	for i, candidate := range candidates {
-		encoded[i] = candidate.Position.String()
-	}
-
 	next := candidates[len(candidates)-1].Cursor()
 
-	pipe := s.redis.TxPipeline()
-	pipe.RPush(ctx, jobBufferKey, encoded...)
-	pipe.Set(ctx, jobCursorKey, encodeJobCursor(next), 0)
-	if _, err := pipe.Exec(ctx); err != nil {
-		return 0, fmt.Errorf("failed to buffer job candidates: %w", err)
+	if err := s.bufferCandidates(ctx, candidates, func(pipe redis.Pipeliner) {
+		pipe.Set(ctx, jobCursorKey, encodeJobCursor(next), 0)
+	}); err != nil {
+		return 0, err
 	}
 
 	wrapNote := ""
 	if wrapped {
 		wrapNote = " (wrapped)"
 	}
-	log.Printf("job buffer: %d candidates from %d discs up, cursor now %d discs/level %d%s",
+	log.Printf("job buffer: %d partially learned candidates from %d discs up, cursor now %d discs/level %d%s",
 		len(candidates), floor, next.DiscCount, next.Level, wrapNote)
 
 	return len(candidates), nil
 }
 
-// listLearnableFrom reads the candidates following cursor, from minDiscs up.
-func (s *Server) listLearnableFrom(
+// claimableCandidates returns the candidates a worker could take right now -- edax crashes on a
+// position with no legal move, and another worker already holds the claim on the rest -- along with
+// how many were dropped for being claimed.
+func (s *Server) claimableCandidates(
+	ctx context.Context, candidates []db.PositionEvaluation,
+) (claimable []db.PositionEvaluation, claimed int, err error) {
+	if len(candidates) == 0 {
+		return nil, 0, nil
+	}
+
+	withMoves := make([]db.PositionEvaluation, 0, len(candidates))
+	keys := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if !candidate.Position.HasMoves() {
+			continue
+		}
+		withMoves = append(withMoves, candidate)
+		keys = append(keys, claimKey(candidate.Position.String()))
+	}
+
+	if noMoves := len(candidates) - len(withMoves); noMoves > 0 {
+		// Rows nothing will ever learn: worth saying out loud, since they stay in the book.
+		log.Printf("job buffer: skipped %d candidates with no legal move", noMoves)
+	}
+
+	pipe := s.redis.Pipeline()
+	exists := make([]*redis.IntCmd, len(keys))
+	for i, key := range keys {
+		exists[i] = pipe.Exists(ctx, key)
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		return nil, 0, fmt.Errorf("failed to check candidate claims: %w", err)
+	}
+
+	claimable = make([]db.PositionEvaluation, 0, len(withMoves))
+	for i, candidate := range withMoves {
+		if exists[i].Val() > 0 {
+			claimed++
+			continue
+		}
+		claimable = append(claimable, candidate)
+	}
+
+	return claimable, claimed, nil
+}
+
+// bufferCandidates appends candidates to the shared buffer, running extra in the same transaction
+// so a cursor advance and the candidates it covers land together.
+func (s *Server) bufferCandidates(
+	ctx context.Context, candidates []db.PositionEvaluation, extra ...func(redis.Pipeliner),
+) error {
+	encoded := make([]any, len(candidates))
+	for i, candidate := range candidates {
+		encoded[i] = candidate.Position.String()
+	}
+
+	pipe := s.redis.TxPipeline()
+	pipe.RPush(ctx, jobBufferKey, encoded...)
+	for _, fn := range extra {
+		fn(pipe)
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("failed to buffer job candidates: %w", err)
+	}
+
+	return nil
+}
+
+// listPartiallyLearnedFrom reads the candidates following cursor, from minDiscs up.
+func (s *Server) listPartiallyLearnedFrom(
 	ctx context.Context, minDiscs int, cursor db.LearnableCursor,
 ) ([]db.PositionEvaluation, error) {
-	candidates, err := s.repo.ListLearnable(ctx, db.LearnableQuery{
+	candidates, err := s.repo.ListPartiallyLearned(ctx, db.LearnableQuery{
 		MinDiscs:    minDiscs,
 		MaxDiscs:    book.MaxSavableDiscs,
 		LeafDiscs:   book.LeafDiscs,
@@ -477,7 +584,7 @@ func (s *Server) getBookStats(ctx context.Context) (entries []statEntry, ok bool
 
 // jobFloor returns the lowest disc count the book_stats hash still shows learnable positions for
 // (search params below target; depth 0 counts), falling back to book.LeafDiscs when the hash is
-// missing. May be stale by one refresh; it is only a lower bound for the ListLearnable scan.
+// missing. May be stale by one refresh; it is only a lower bound for the partially learned sweep.
 func (s *Server) jobFloor(ctx context.Context) int {
 	entries, ok, err := s.getBookStats(ctx)
 	if err != nil || !ok {

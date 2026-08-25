@@ -61,7 +61,7 @@ func TestServer_ClaimJob_SkipsFullyLearnedBoards(t *testing.T) {
 	require.False(t, ok)
 }
 
-// Covers the starvation bug ListLearnable's level cutoff prevents: fully learned leaves sort
+// Covers the starvation bug ListPartiallyLearned's level cutoff prevents: fully learned leaves sort
 // ahead of deeper unlearned positions and would otherwise fill the whole candidate batch.
 func TestServer_ClaimJob_LeafBoardsDoNotStarveDeeperCandidates(t *testing.T) {
 	s := testServer(t)
@@ -210,8 +210,8 @@ func TestServer_ClaimJob_NoBoardsAvailable(t *testing.T) {
 }
 
 // TestServer_ClaimJob_StaleFloorSkipsNewlyAddedLowerBoards documents the accepted trade-off of
-// deriving the floor from the periodically rebuilt book_stats hash: positions added below the floor
-// after the last rebuild are invisible to claimJob until the next rebuild.
+// deriving the floor from the periodically rebuilt book_stats hash: below-target positions added
+// below the floor after the last rebuild are invisible to claimJob until the next rebuild.
 func TestServer_ClaimJob_StaleFloorSkipsNewlyAddedLowerBoards(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
@@ -223,17 +223,47 @@ func TestServer_ClaimJob_StaleFloorSkipsNewlyAddedLowerBoards(t *testing.T) {
 	}))
 	position13 := testPosition(t, 13)
 	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position13}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, position13, db.Evaluation{Level: UnlearnedLevel(13), Score: 0}))
 
 	// The rebuilt floor is 13: every 12-disc position known to the hash is fully learned.
 	require.NoError(t, s.rebuildBookStats(ctx))
 
-	// A 12-disc position added after the rebuild stays invisible until the next one.
+	// A below-target 12-disc position added after the rebuild stays invisible until the next one.
 	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position12s[1]}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, position12s[1], db.Evaluation{Level: UnlearnedLevel(12), Score: 0}))
 
 	job, ok, err := s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, position13, job.Position)
+}
+
+// TestServer_ClaimJob_StaleFloorStillFindsUnlearnedBoards is the other half: the unlearned tier
+// ignores the floor, so a never-searched row below it is claimed right away rather than waiting for
+// the next book_stats rebuild.
+func TestServer_ClaimJob_StaleFloorStillFindsUnlearnedBoards(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	position12s := testDistinctPositions(t, 12, 2)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position12s[0]}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, position12s[0], db.Evaluation{
+		Level: TargetLevel(12), Score: 0,
+	}))
+	position13 := testPosition(t, 13)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position13}))
+	require.NoError(t, s.repo.SaveEvaluation(ctx, position13, db.Evaluation{Level: UnlearnedLevel(13), Score: 0}))
+
+	// The rebuilt floor is 13: every 12-disc position known to the hash is fully learned.
+	require.NoError(t, s.rebuildBookStats(ctx))
+
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position12s[1]}))
+
+	job, ok, err := s.claimJob(ctx, "worker-1")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, position12s[1], job.Position)
+	require.Equal(t, UnlearnedLevel(12), job.Level)
 }
 
 // TestTargetLevel covers the tier boundaries and the parity alignment on top of them: a
@@ -358,7 +388,7 @@ func TestServer_ClaimJob_LevelPerTier(t *testing.T) {
 		Level: UnlearnedLevel(16), Score: 0,
 	}))
 
-	// Unlearned first, whatever the disc counts (see db.ListLearnable's ordering).
+	// Unlearned first, whatever the disc counts (see refillJobBuffer's tier order).
 	job, ok, err := s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
 	require.True(t, ok)
