@@ -61,7 +61,7 @@ func TestServer_ClaimJob_SkipsFullyLearnedBoards(t *testing.T) {
 	require.False(t, ok)
 }
 
-// Covers the starvation bug ListLearnable's level cutoff prevents: fully learned leaves sort
+// Covers the starvation bug ListPartiallyLearned's level cutoff prevents: fully learned leaves sort
 // ahead of deeper unlearned positions and would otherwise fill the whole candidate batch.
 func TestServer_ClaimJob_LeafBoardsDoNotStarveDeeperCandidates(t *testing.T) {
 	s := testServer(t)
@@ -358,7 +358,7 @@ func TestServer_ClaimJob_LevelPerTier(t *testing.T) {
 		Level: UnlearnedLevel(16), Score: 0,
 	}))
 
-	// Unlearned first, whatever the disc counts (see db.ListLearnable's ordering).
+	// Unlearned first, whatever the disc counts (see refillJobBuffer's tier order).
 	job, ok, err := s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
 	require.True(t, ok)

@@ -398,12 +398,12 @@ func drainPriority(t *testing.T, s *Server) []priorityEntry {
 }
 
 // TestClaimJob_PriorityDrainedFirst verifies that priority-queue positions are returned before
-// any ListLearnable candidates.
+// any book candidates.
 func TestClaimJob_PriorityDrainedFirst(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	// Put a learnable position in the DB so ListLearnable has something to offer.
+	// Put a learnable position in the DB so the buffer has something to offer.
 	dbBoard := testPosition(t, 12)
 	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{dbBoard}))
 
@@ -725,7 +725,7 @@ func TestHandleSubmitJobResult_PriorityBelowFloorNotPersisted(t *testing.T) {
 
 // TestHandleSubmitJobResult_PriorityBelowFloorSchedulesBoardForLearning verifies that a priority
 // result too shallow to keep, on an unknown savable position, still creates a row with an empty
-// evaluation, so ListLearnable picks the position up later — without seeding the book with the
+// evaluation, so the unlearned scan picks the position up later — without seeding the book with the
 // shallow score.
 func TestHandleSubmitJobResult_PriorityBelowFloorSchedulesBoardForLearning(t *testing.T) {
 	s := testServer(t)
