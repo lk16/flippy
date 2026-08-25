@@ -175,25 +175,24 @@ func (s *Server) refillJobBuffer(ctx context.Context) (int, error) {
 	}
 	defer s.releaseJobRefillLock(ctx)
 
-	floor := s.jobFloor(ctx)
-
-	buffered, err := s.refillFromUnlearned(ctx, floor)
+	buffered, err := s.refillFromUnlearned(ctx)
 	if err != nil || buffered > 0 {
 		return buffered, err
 	}
 
-	return s.refillFromPartiallyLearned(ctx, floor)
+	return s.refillFromPartiallyLearned(ctx, s.jobFloor(ctx))
 }
 
 // refillFromUnlearned buffers never-searched positions, the second job tier. It rescans from the
 // start of the book every time rather than following a cursor, so a row added after an earlier
-// refill does not have to wait for the partially-learned sweep to come round. Candidates no worker
-// can take are dropped here instead: they sort first on every scan, so buffering them would hand
-// out the same unusable batch until they are learned, which for a position edax can't search is
-// never.
-func (s *Server) refillFromUnlearned(ctx context.Context, floor int) (int, error) {
+// refill does not have to wait for the partially-learned sweep to come round; the job floor is
+// skipped for the same reason, and costs nothing here because the index this scan runs on holds
+// only unlearned rows. Candidates no worker can take are dropped here instead: they sort first on
+// every scan, so buffering them would hand out the same unusable batch until they are learned,
+// which for a position edax can't search is never.
+func (s *Server) refillFromUnlearned(ctx context.Context) (int, error) {
 	candidates, err := s.repo.ListUnlearned(ctx, db.UnlearnedQuery{
-		MinDiscs: floor,
+		MinDiscs: book.LeafDiscs,
 		MaxDiscs: book.MaxSavableDiscs,
 		Limit:    jobCandidateBatch,
 	})
@@ -213,8 +212,7 @@ func (s *Server) refillFromUnlearned(ctx context.Context, floor int) (int, error
 		return 0, err
 	}
 
-	log.Printf("job buffer: %d unlearned candidates from %d discs up, %d already claimed",
-		len(claimable), floor, claimed)
+	log.Printf("job buffer: %d unlearned candidates, %d already claimed", len(claimable), claimed)
 
 	return len(claimable), nil
 }
