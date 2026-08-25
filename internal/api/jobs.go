@@ -13,16 +13,13 @@ import (
 	"github.com/lk16/flippy/internal/othello"
 )
 
-// jobCandidateBatch is how many candidate positions one refill of the shared buffer reads. Workers
-// pop from that buffer instead of each scanning the same ordering, so this sets how many claims a
-// single DB query serves, not how many workers can be served at once.
-const jobCandidateBatch = 2000
-
 // jobClaimAttempts bounds how many buffered candidates one claim walks past before giving up and
 // letting the worker retry. Only entries stale enough to be unusable are walked past, so this need
 // only absorb a burst of them, and the loop must end: a refill can return candidates that every
-// pass then rejects.
-const jobClaimAttempts = 16
+// pass then rejects. Generous, because giving up costs the worker a full poll interval of idling,
+// while each entry walked past costs one LPOP and one indexed lookup -- and the deeper the buffer is
+// kept, the longer an entry can sit in it turning stale.
+const jobClaimAttempts = 64
 
 // Job is a position a worker should evaluate, and the level to search it at.
 type Job struct {
@@ -97,7 +94,10 @@ func (s *Server) claimBufferedJob(ctx context.Context, workerID string) (job Job
 			return Job{}, false, err
 		}
 		if !found {
-			buffered, err := s.refillJobBuffer(ctx)
+			// RunJobBufferTopUp normally keeps the buffer well clear of empty, so this is a
+			// backstop: a cold start, or a burst that outran the top-up. It asks for one page
+			// rather than a full buffer, so the worker waits on a single query.
+			buffered, err := s.refillJobBuffer(ctx, jobCandidatePage)
 			if err != nil {
 				return Job{}, false, err
 			}
