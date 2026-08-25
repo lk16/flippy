@@ -323,6 +323,41 @@ func TestRepository_ListUnlearned_SkipsSearchedPositions(t *testing.T) {
 		[]othello.NormalizedPosition{results[0].Position, results[1].Position})
 }
 
+// TestRepository_ListUnlearned_OrdersByDiscCount covers the tier's ordering, which the position
+// tiebreak must not disturb: the batch is the shallowest unlearned positions in the book, whatever
+// order their rows were inserted in.
+func TestRepository_ListUnlearned_OrdersByDiscCount(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	position20 := testPosition(t, 20)
+	position12s := testDistinctPositions(t, 12, 2)
+	position13 := testPosition(t, 13)
+
+	// Inserted deepest first, so a scan that returns insertion order fails here.
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{
+		position20, position13, position12s[0], position12s[1],
+	}))
+
+	results, err := repo.ListUnlearned(ctx, testUnlearnedQuery(12, 10))
+	require.NoError(t, err)
+	require.Equal(t, []int{12, 12, 13, 20}, discCounts(results))
+
+	// The limit cuts the deep end off, not the shallow one.
+	results, err = repo.ListUnlearned(ctx, testUnlearnedQuery(12, 3))
+	require.NoError(t, err)
+	require.Equal(t, []int{12, 12, 13}, discCounts(results))
+}
+
+// discCounts returns the disc count of each position, for asserting a scan's ordering.
+func discCounts(results []PositionEvaluation) []int {
+	counts := make([]int, len(results))
+	for i, result := range results {
+		counts[i] = result.Position.CountDiscs()
+	}
+	return counts
+}
+
 func TestRepository_ListUnlearned_FiltersByDiscCountRange(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()

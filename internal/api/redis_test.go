@@ -912,6 +912,35 @@ func TestServer_RefillJobBuffer_BuffersUnlearnedBeforePartiallyLearned(t *testin
 	require.Equal(t, int64(0), s.redis.Exists(ctx, jobCursorKey).Val())
 }
 
+// TestServer_RefillJobBuffer_BuffersUnlearnedByDiscCount covers the tier's ordering surviving the
+// whole path: the scan's order has to reach the buffer, which workers pop from head first, so the
+// shallowest unlearned positions go out first even when the filter drops entries between the two.
+func TestServer_RefillJobBuffer_BuffersUnlearnedByDiscCount(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	position20 := testPosition(t, 20)
+	position12s := testDistinctPositions(t, 12, 2)
+	position13 := testPosition(t, 13)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{
+		position20, position13, position12s[0], position12s[1],
+	}))
+
+	// One of the two 12-disc positions is already being worked on, so the filter drops it.
+	claimed := position12s[0]
+	rest := position12s[1]
+	if rest.String() < claimed.String() {
+		claimed, rest = rest, claimed
+	}
+	require.NoError(t, s.redis.Set(ctx, claimKey(claimed.String()), "worker-1", claimTTL).Err())
+
+	buffered, err := s.refillJobBuffer(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 3, buffered)
+	require.Equal(t, []string{rest.String(), position13.String(), position20.String()},
+		bufferedPositions(t, s))
+}
+
 // TestServer_RefillJobBuffer_FindsUnlearnedAddedAfterTheSweepMovedOn is why the unlearned scan has
 // no cursor: the partially learned sweep is millions of rows long, so a row promoted into the book
 // while it is running would otherwise wait for it to wrap.

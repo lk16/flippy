@@ -201,9 +201,10 @@ type UnlearnedQuery struct {
 	Limit    int
 }
 
-// ListUnlearned returns up to q.Limit never-searched positions, by disc count then position; their
-// Evaluation is the zero value. There is no cursor: a row leaves the set as soon as it is searched,
-// so starting every scan at the beginning is what lets a row added later be picked up right away.
+// ListUnlearned returns up to q.Limit never-searched positions, shallowest first -- by disc count,
+// with position only as a tiebreak, so the limit cuts the deep end off a batch. Their Evaluation is
+// the zero value. There is no cursor: a row leaves the set as soon as it is searched, so starting
+// every scan at the beginning is what lets a row added later be picked up right away.
 func (r *Repository) ListUnlearned(ctx context.Context, q UnlearnedQuery) ([]PositionEvaluation, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT position, level, score
