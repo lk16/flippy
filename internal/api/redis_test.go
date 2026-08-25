@@ -949,7 +949,7 @@ func TestServer_RefillJobBuffer_BuffersUnlearnedBeforePartiallyLearned(t *testin
 	unlearned := testPosition(t, 13)
 	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{unlearned}))
 
-	buffered, err := s.refillJobBuffer(ctx)
+	buffered, err := s.refillJobBuffer(ctx, jobBufferSize)
 	require.NoError(t, err)
 	require.Equal(t, 1, buffered)
 	require.Equal(t, []string{encodeJobCandidate(tierUnlearned, unlearned)}, bufferedPositions(t, s))
@@ -978,7 +978,7 @@ func TestServer_RefillJobBuffer_BuffersUnlearnedByDiscCount(t *testing.T) {
 	}
 	require.NoError(t, s.redis.Set(ctx, claimKey(claimed.String()), "worker-1", claimTTL).Err())
 
-	buffered, err := s.refillJobBuffer(ctx)
+	buffered, err := s.refillJobBuffer(ctx, jobBufferSize)
 	require.NoError(t, err)
 	require.Equal(t, 3, buffered)
 	require.Equal(t, []string{
@@ -997,7 +997,7 @@ func TestServer_RefillJobBuffer_FindsUnlearnedAddedAfterTheSweepMovedOn(t *testi
 
 	testPartiallyLearnedPosition(t, s, 12)
 
-	buffered, err := s.refillJobBuffer(ctx)
+	buffered, err := s.refillJobBuffer(ctx, jobBufferSize)
 	require.NoError(t, err)
 	require.Equal(t, 1, buffered)
 	require.NotEqual(t, db.LearnableCursor{}, decodeJobCursor(s.redis.Get(ctx, jobCursorKey).Val()))
@@ -1005,7 +1005,7 @@ func TestServer_RefillJobBuffer_FindsUnlearnedAddedAfterTheSweepMovedOn(t *testi
 	unlearned := testPosition(t, 13)
 	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{unlearned}))
 
-	buffered, err = s.refillJobBuffer(ctx)
+	buffered, err = s.refillJobBuffer(ctx, jobBufferSize)
 	require.NoError(t, err)
 	require.Equal(t, 1, buffered)
 	require.Equal(t, encodeJobCandidate(tierUnlearned, unlearned), bufferedPositions(t, s)[1])
@@ -1026,7 +1026,7 @@ func TestServer_RefillJobBuffer_NoMoveRowsDoNotBlockPartiallyLearnedTier(t *test
 
 	partial := testPartiallyLearnedPosition(t, s, 14)
 
-	buffered, err := s.refillJobBuffer(ctx)
+	buffered, err := s.refillJobBuffer(ctx, jobBufferSize)
 	require.NoError(t, err)
 	require.Equal(t, 1, buffered)
 	require.Equal(t, []string{encodeJobCandidate(tierPartiallyLearned, partial)}, bufferedPositions(t, s))
@@ -1045,7 +1045,7 @@ func TestServer_RefillJobBuffer_ClaimedUnlearnedRowHoldsBackPartiallyLearnedTier
 
 	testPartiallyLearnedPosition(t, s, 14)
 
-	buffered, err := s.refillJobBuffer(ctx)
+	buffered, err := s.refillJobBuffer(ctx, jobBufferSize)
 	require.NoError(t, err)
 	require.Zero(t, buffered)
 	require.Empty(t, bufferedPositions(t, s))
@@ -1078,7 +1078,7 @@ func TestServer_RefillJobBuffer_AdvancesCursorThenWraps(t *testing.T) {
 		testPartiallyLearnedPosition(t, s, 14),
 	}
 
-	buffered, err := s.refillJobBuffer(ctx)
+	buffered, err := s.refillJobBuffer(ctx, jobBufferSize)
 	require.NoError(t, err)
 	require.Equal(t, len(positions), buffered)
 
@@ -1086,10 +1086,135 @@ func TestServer_RefillJobBuffer_AdvancesCursorThenWraps(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, db.LearnableCursor{}, decodeJobCursor(encoded))
 
+	// Hand the whole buffer out, as workers claiming those jobs would.
+	require.NoError(t, s.redis.Del(ctx, jobBufferKey).Err())
+
 	// The sweep is exhausted, so this one wraps and offers the still-below-target positions again.
-	buffered, err = s.refillJobBuffer(ctx)
+	buffered, err = s.refillJobBuffer(ctx, jobBufferSize)
 	require.NoError(t, err)
 	require.Equal(t, len(positions), buffered)
+}
+
+// TestServer_RefillJobBuffer_SkipsPositionsStillInTheBuffer covers what keeps a top-up from queueing
+// the same position twice: the unlearned scan restarts at the top of the book on every refill, and
+// the entries an earlier refill left behind are still waiting there.
+func TestServer_RefillJobBuffer_SkipsPositionsStillInTheBuffer(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	unlearned := testDistinctPositions(t, 12, 2)
+	require.NoError(t, s.repo.AddPositions(ctx, unlearned))
+
+	buffered, err := s.refillJobBuffer(ctx, jobBufferSize)
+	require.NoError(t, err)
+	require.Equal(t, 2, buffered)
+
+	before := bufferedPositions(t, s)
+
+	buffered, err = s.refillJobBuffer(ctx, jobBufferSize)
+	require.NoError(t, err)
+	require.Zero(t, buffered)
+	require.Equal(t, before, bufferedPositions(t, s))
+}
+
+// TestServer_RefillJobBuffer_BufferedUnlearnedRowsHoldBackPartiallyLearnedTier covers the tier order
+// across refills: an unlearned row waiting in the buffer is unfinished tier-two work just like a
+// claimed one, so a top-up must not start handing out below-target positions next to it.
+func TestServer_RefillJobBuffer_BufferedUnlearnedRowsHoldBackPartiallyLearnedTier(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	unlearned := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{unlearned}))
+	testPartiallyLearnedPosition(t, s, 14)
+
+	buffered, err := s.refillJobBuffer(ctx, jobBufferSize)
+	require.NoError(t, err)
+	require.Equal(t, 1, buffered)
+	require.Equal(t, []string{encodeJobCandidate(tierUnlearned, unlearned)}, bufferedPositions(t, s))
+
+	buffered, err = s.refillJobBuffer(ctx, jobBufferSize)
+	require.NoError(t, err)
+	require.Zero(t, buffered)
+	require.Equal(t, []string{encodeJobCandidate(tierUnlearned, unlearned)}, bufferedPositions(t, s))
+}
+
+// TestServer_RefillJobBuffer_PagesUpToWhatItWasAskedFor covers the paging one refill does: it keeps
+// querying until it has the candidates it was asked for, rather than stopping at one page.
+func TestServer_RefillJobBuffer_PagesUpToWhatItWasAskedFor(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	// Over-generate: a refill drops positions with no legal move, so only ones with moves count
+	// towards filling the buffer.
+	var positions []othello.NormalizedPosition
+	for _, position := range testDistinctPositions(t, 12, jobCandidatePage+20) {
+		if position.HasMoves() {
+			positions = append(positions, position)
+		}
+	}
+	want := jobCandidatePage + 10
+	require.GreaterOrEqual(t, len(positions), want)
+	require.NoError(t, s.repo.AddPositions(ctx, positions[:want]))
+
+	buffered, err := s.refillJobBuffer(ctx, want)
+	require.NoError(t, err)
+	require.Equal(t, want, buffered)
+	require.Len(t, bufferedPositions(t, s), want)
+}
+
+// TestServer_RefillJobBuffer_StopsAtWhatItWasAskedFor covers the other end of the same loop: a book
+// with more candidates than the buffer holds fills it exactly once, not past its size.
+func TestServer_RefillJobBuffer_StopsAtWhatItWasAskedFor(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	positions := testDistinctPositions(t, 12, 20)
+	require.NoError(t, s.repo.AddPositions(ctx, positions))
+
+	buffered, err := s.refillJobBuffer(ctx, 5)
+	require.NoError(t, err)
+	require.Equal(t, 5, buffered)
+	require.Len(t, bufferedPositions(t, s), 5)
+}
+
+// TestServer_TopUpJobBuffer_FillsAnEmptyBuffer covers the background top-up's job: the buffer is
+// stocked before any worker asks for a job.
+func TestServer_TopUpJobBuffer_FillsAnEmptyBuffer(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	positions := testDistinctPositions(t, 12, 3)
+	require.NoError(t, s.repo.AddPositions(ctx, positions))
+
+	require.True(t, s.topUpJobBuffer(ctx))
+	require.Len(t, bufferedPositions(t, s), len(positions))
+}
+
+// TestServer_TopUpJobBuffer_LeavesAStockedBufferAlone covers the poll's cost: above the low-water
+// mark it reads the depth and stops, so polling every few seconds costs one LLEN.
+func TestServer_TopUpJobBuffer_LeavesAStockedBufferAlone(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	// Entries no scan would produce (the book is empty), so a refill would be visible.
+	stocked := make([]any, 0, jobBufferLowWater+1)
+	for _, position := range testDistinctPositions(t, 12, jobBufferLowWater+1) {
+		stocked = append(stocked, encodeJobCandidate(tierUnlearned, position))
+	}
+	require.NoError(t, s.redis.RPush(ctx, jobBufferKey, stocked...).Err())
+
+	require.True(t, s.topUpJobBuffer(ctx))
+	require.Len(t, bufferedPositions(t, s), len(stocked))
+	require.Equal(t, int64(0), s.redis.Exists(ctx, jobRefillLockKey).Val())
+}
+
+// TestServer_TopUpJobBuffer_ReportsAnIdleBook covers the back-off: nothing claimable means the next
+// poll should wait longer rather than rescan the book every few seconds.
+func TestServer_TopUpJobBuffer_ReportsAnIdleBook(t *testing.T) {
+	s := testServer(t)
+
+	require.False(t, s.topUpJobBuffer(context.Background()))
 }
 
 func TestServer_RefillJobBuffer_ResetsCursorWhenNothingIsLearnable(t *testing.T) {
@@ -1103,7 +1228,7 @@ func TestServer_RefillJobBuffer_ResetsCursorWhenNothingIsLearnable(t *testing.T)
 		DiscCount: 12, Level: 24, Position: position,
 	}), 0).Err())
 
-	buffered, err := s.refillJobBuffer(ctx)
+	buffered, err := s.refillJobBuffer(ctx, jobBufferSize)
 	require.NoError(t, err)
 	require.Zero(t, buffered)
 
@@ -1117,7 +1242,7 @@ func TestServer_RefillJobBuffer_ReleasesItsOwnLock(t *testing.T) {
 	positions := testDistinctPositions(t, 12, 2)
 	require.NoError(t, s.repo.AddPositions(ctx, positions))
 
-	_, err := s.refillJobBuffer(ctx)
+	_, err := s.refillJobBuffer(ctx, jobBufferSize)
 	require.NoError(t, err)
 
 	require.Equal(t, int64(0), s.redis.Exists(ctx, jobRefillLockKey).Val())

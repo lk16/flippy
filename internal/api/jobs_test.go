@@ -67,7 +67,7 @@ func TestServer_ClaimJob_LeafBoardsDoNotStarveDeeperCandidates(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	leafBoards := testDistinctPositions(t, 12, jobCandidateBatch+1)
+	leafBoards := testDistinctPositions(t, 12, jobCandidatePage+1)
 	require.NoError(t, s.repo.AddPositions(ctx, leafBoards))
 	for _, position := range leafBoards {
 		require.NoError(t, s.repo.SaveEvaluation(ctx, position, db.Evaluation{
@@ -103,22 +103,23 @@ func TestServer_ClaimJob_BuffersTheRestOfTheRefill(t *testing.T) {
 	require.Equal(t, int64(len(positions)-1), buffered)
 }
 
-// TestServer_ClaimJob_RefillBuffersAFullBatch covers the buffer's capacity: one refill buffers a
-// full jobCandidateBatch of candidates when the book holds more than that.
-func TestServer_ClaimJob_RefillBuffersAFullBatch(t *testing.T) {
+// TestServer_ClaimJob_RefillBuffersAFullPage covers what a claim-triggered refill leaves behind: a
+// full jobCandidatePage of candidates when the book holds more than that, so the worker waits on one
+// query and the claims after it wait on none.
+func TestServer_ClaimJob_RefillBuffersAFullPage(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
 	// Over-generate: a refill drops positions with no legal move, so only ones with moves count
 	// towards filling the buffer.
 	var positions []othello.NormalizedPosition
-	for _, position := range testDistinctPositions(t, 12, jobCandidateBatch+10) {
+	for _, position := range testDistinctPositions(t, 12, jobCandidatePage+10) {
 		if position.HasMoves() {
 			positions = append(positions, position)
 		}
 	}
-	require.GreaterOrEqual(t, len(positions), jobCandidateBatch+1)
-	require.NoError(t, s.repo.AddPositions(ctx, positions[:jobCandidateBatch+1]))
+	require.GreaterOrEqual(t, len(positions), jobCandidatePage+1)
+	require.NoError(t, s.repo.AddPositions(ctx, positions[:jobCandidatePage+1]))
 
 	_, ok, err := s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
@@ -126,7 +127,7 @@ func TestServer_ClaimJob_RefillBuffersAFullBatch(t *testing.T) {
 
 	buffered, err := s.redis.LLen(ctx, jobBufferKey).Result()
 	require.NoError(t, err)
-	require.Equal(t, int64(jobCandidateBatch-1), buffered)
+	require.Equal(t, int64(jobCandidatePage-1), buffered)
 }
 
 // TestServer_ClaimJob_WrapsSweepAfterAClaimExpires covers the recycling the cursor has to preserve:
@@ -502,7 +503,7 @@ func TestServer_ClaimJob_PagesPastClaimedUnlearnedRows(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	claimedRows := testDistinctPositions(t, 12, jobCandidateBatch)
+	claimedRows := testDistinctPositions(t, 12, jobCandidatePage)
 	require.NoError(t, s.repo.AddPositions(ctx, claimedRows))
 	for _, position := range claimedRows {
 		require.NoError(t, s.redis.Set(ctx, claimKey(position.String()), "other-worker", claimTTL).Err())
