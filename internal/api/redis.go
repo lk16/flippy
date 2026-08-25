@@ -336,47 +336,60 @@ func (s *Server) pendingCandidates(ctx context.Context) (map[othello.NormalizedP
 	return pending, nil
 }
 
-// unlearnedRefillPages bounds how many pages in a row one unlearned refill reads without finding
-// anything to buffer, so a book headed by thousands of unusable rows can't turn one refill into a
-// full index scan. Hitting the bound reports the tier as busy rather than exhausted: holding the
-// partially learned sweep back is the safe direction, and the next refill retries.
-const unlearnedRefillPages = 10
+// refillSlackPages is how many pages beyond the ones a refill needs it may read before giving up,
+// covering rows it cannot buffer: edax can't search them, another worker holds them, or they are
+// already waiting in the buffer. Without it, a book headed by thousands of unusable rows would turn
+// one refill into a full index scan.
+const refillSlackPages = 10
+
+// refillPageBudget is the most pages one tier's refill reads to buffer want candidates: the pages
+// they fit in, plus slack for ones that yield nothing.
+func refillPageBudget(want int) int {
+	return (want+jobCandidatePage-1)/jobCandidatePage + refillSlackPages
+}
 
 // refillFromUnlearned buffers up to want never-searched positions, the second job tier. Every refill
 // rescans from the start of the book rather than persisting a cursor, so a row added after an
 // earlier refill does not have to wait for the partially-learned sweep to come round; the job floor
 // is skipped for the same reason, and costs nothing here because the index this scan runs on holds
-// only unlearned rows. It pages until it has want of them, skipping candidates no worker can take
-// right now -- buffering those would hand out unusable entries -- and gives up after
-// unlearnedRefillPages pages that yield nothing. exhausted is true only when nothing in the tier
-// could ever be buffered again as it stands: rows edax can't search (no legal move) stay unlearned
-// forever and so don't count, but a claimed or already-buffered row does, since it comes back if
-// the claim expires or the worker rejects it.
+// only unlearned rows. It pages until it has want of them -- a page may overshoot, which only leaves
+// the buffer a little deeper than asked for -- skipping candidates no worker can take right now,
+// since buffering those would hand out unusable entries. Running out of page budget reports the tier
+// as busy rather than exhausted: holding the partially learned sweep back is the safe direction, and
+// the next refill retries. exhausted is true only when nothing in the tier could ever be buffered
+// again as it stands: rows edax can't search (no legal move) stay unlearned forever and so don't
+// count, but a claimed or already-buffered row does, since it comes back if the claim expires or the
+// worker rejects it.
 func (s *Server) refillFromUnlearned(
 	ctx context.Context, want int, pending map[othello.NormalizedPosition]struct{},
 ) (buffered int, exhausted bool, err error) {
 	var cursor db.UnlearnedCursor
-	spokenFor, barren := 0, 0
+	spokenFor, budget := 0, refillPageBudget(want)
 
 	for buffered < want {
-		limit := min(jobCandidatePage, want-buffered)
+		if budget == 0 {
+			log.Printf("job buffer: %d unlearned candidates in %d pages; treating the tier as busy",
+				buffered, refillPageBudget(want))
+			return buffered, false, nil
+		}
+		budget--
 
 		candidates, err := s.repo.ListUnlearned(ctx, db.UnlearnedQuery{
 			MinDiscs: book.LeafDiscs,
 			MaxDiscs: book.MaxSavableDiscs,
 			After:    cursor,
-			Limit:    limit,
+			Limit:    jobCandidatePage,
 		})
 		if err != nil {
 			return buffered, false, fmt.Errorf("failed to list unlearned positions: %w", err)
 		}
 		if len(candidates) == 0 {
-			return buffered, buffered == 0 && spokenFor == 0, nil
+			break
 		}
 
 		last := candidates[len(candidates)-1].Position
 		cursor = db.UnlearnedCursor{DiscCount: last.CountDiscs(), Position: last}
-		lastPage := len(candidates) < limit
+		lastPage := len(candidates) < jobCandidatePage
 
 		claimable, pageSpokenFor, err := s.claimableCandidates(ctx, candidates, pending)
 		if err != nil {
@@ -384,15 +397,7 @@ func (s *Server) refillFromUnlearned(
 		}
 		spokenFor += pageSpokenFor
 
-		if len(claimable) == 0 {
-			barren++
-			if barren >= unlearnedRefillPages {
-				log.Printf("job buffer: no claimable unlearned candidate in %d pages; treating the tier as busy",
-					unlearnedRefillPages)
-				return buffered, false, nil
-			}
-		} else {
-			barren = 0
+		if len(claimable) > 0 {
 			if err := s.bufferCandidates(ctx, tierUnlearned, claimable, pending); err != nil {
 				return buffered, false, err
 			}
@@ -424,12 +429,13 @@ func (s *Server) refillFromPartiallyLearned(
 	}
 
 	buffered, wrapped, sawCandidates := 0, false, false
+	budget := refillPageBudget(want)
 	var next db.LearnableCursor
 
-	for buffered < want {
-		limit := min(jobCandidatePage, want-buffered)
+	for buffered < want && budget > 0 {
+		budget--
 
-		candidates, err := s.listPartiallyLearnedFrom(ctx, floor, cursor, limit)
+		candidates, err := s.listPartiallyLearnedFrom(ctx, floor, cursor, jobCandidatePage)
 		if err != nil {
 			return buffered, err
 		}
@@ -445,7 +451,7 @@ func (s *Server) refillFromPartiallyLearned(
 
 		sawCandidates = true
 		cursor = candidates[len(candidates)-1].Cursor()
-		lastPage := len(candidates) < limit
+		lastPage := len(candidates) < jobCandidatePage
 
 		// The cursor moves only with the candidates it covers, in one transaction: a page that
 		// buffers nothing leaves it where it was, so nothing is skipped unbuffered.

@@ -1164,18 +1164,20 @@ func TestServer_RefillJobBuffer_PagesUpToWhatItWasAskedFor(t *testing.T) {
 }
 
 // TestServer_RefillJobBuffer_StopsAtWhatItWasAskedFor covers the other end of the same loop: a book
-// with more candidates than the buffer holds fills it exactly once, not past its size.
+// with far more candidates than the refill was asked for costs one page, not a scan of the book. The
+// page it reads is bought whole, so the buffer ends up a little deeper than asked for.
 func TestServer_RefillJobBuffer_StopsAtWhatItWasAskedFor(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	positions := testDistinctPositions(t, 12, 20)
+	positions := testDistinctPositions(t, 12, 2*jobCandidatePage)
 	require.NoError(t, s.repo.AddPositions(ctx, positions))
 
 	buffered, err := s.refillJobBuffer(ctx, 5)
 	require.NoError(t, err)
-	require.Equal(t, 5, buffered)
-	require.Len(t, bufferedPositions(t, s), 5)
+	require.Positive(t, buffered)
+	require.LessOrEqual(t, buffered, jobCandidatePage)
+	require.Len(t, bufferedPositions(t, s), buffered)
 }
 
 // TestServer_TopUpJobBuffer_FillsAnEmptyBuffer covers the background top-up's job: the buffer is
