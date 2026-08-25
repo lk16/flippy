@@ -258,6 +258,16 @@ func (s *Server) handleReleaseJob(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// handleRebuildRedis handles POST /api/redis/rebuild: flushes every Redis value and rebuilds the
+// derived ones, for a rollout that changed how values are encoded.
+func (s *Server) handleRebuildRedis(w http.ResponseWriter, r *http.Request) {
+	if err := s.flushAndRebuildRedis(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // lookupEvaluation returns position's evaluation from the DB, minimax cache, or ephemeral analysis
 // cache; ok is false if none has a real (learned) result.
 func (s *Server) lookupEvaluation(ctx context.Context, position othello.Position) (evaluationResponse, bool, error) {
