@@ -43,12 +43,17 @@ stored in Postgres, and browsed via a web frontend.
   (`migrations/`), one-shot operator SQL in `scripts/`
 - Redis — job claims, worker heartbeats, priority queue, ephemeral
   analysis results, the shared job candidate buffer workers pop from
-  (`job:buffer`, entries tagged with the tier that buffered them,
+  (`job:buffer`, entries tagged with the tier that buffered them, kept
+  5000 deep by a background top-up on the server — every replica polls
+  the depth, one refills when it falls to a fifth of that, so a claim
+  pops a candidate instead of waiting on the scan that finds one;
   refilled by one replica at a time: unlearned positions first,
   rescanned from the start of the book every time and only exhausted —
-  no unlearned row left that could ever be claimed — opens the
-  partially-learned sweep, from the cursor in `job:cursor`, which wraps
-  when that segment runs out), and the
+  no unlearned row left that could ever be claimed, buffered or not —
+  opens the partially-learned sweep, from the cursor in `job:cursor`,
+  which wraps when that segment runs out; both scans skip what is
+  already buffered, since neither ordering knows it queued a position
+  before), and the
   `book_stats` hash (serves `GET /api/stats`
   and derives the job floor; updated incrementally on every save, with a
   slow full resync from the DB to correct drift). Everything in Redis is
