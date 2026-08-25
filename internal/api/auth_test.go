@@ -33,6 +33,7 @@ func TestRequireWorkerToken(t *testing.T) {
 		{http.MethodPost, "/api/jobs/result"},
 		{http.MethodPost, "/api/jobs/release"},
 		{http.MethodPost, "/api/workers/heartbeat"},
+		{http.MethodPost, "/api/redis/rebuild"},
 	}
 
 	for _, endpoint := range workerEndpoints {

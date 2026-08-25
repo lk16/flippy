@@ -568,6 +568,18 @@ func (s *Server) rebuildBookStats(ctx context.Context) error {
 	return nil
 }
 
+// flushAndRebuildRedis drops every Redis value and rebuilds the derived ones, for a rollout that
+// changed how values are encoded. Only book_stats needs an eager rebuild; everything else -- the
+// job buffer, claims, worker hashes, and the ephemeral caches -- repopulates on its own. Dropped
+// claims cost at most one duplicated evaluation per active worker.
+func (s *Server) flushAndRebuildRedis(ctx context.Context) error {
+	if err := s.redis.FlushDB(ctx).Err(); err != nil {
+		return fmt.Errorf("failed to flush redis: %w", err)
+	}
+	log.Printf("redis: flushed all values on request; rebuilding book stats")
+	return s.rebuildBookStats(ctx)
+}
+
 // bookStatsField returns the book_stats hash field for discCount-disc positions evaluated at
 // level; level 0 (unlearned) reports depth 0, confidence 0, matching statEntries.
 func bookStatsField(discCount, level int) string {

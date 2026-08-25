@@ -51,7 +51,10 @@ stored in Postgres, and browsed via a web frontend.
   when that segment runs out), and the
   `book_stats` hash (serves `GET /api/stats`
   and derives the job floor; updated incrementally on every save, with a
-  slow full resync from the DB to correct drift)
+  slow full resync from the DB to correct drift). Everything in Redis is
+  derived or ephemeral: `POST /api/redis/rebuild` (worker token) flushes
+  it all and rebuilds `book_stats`, for a rollout that changes value
+  encodings
 - edax — external binary; `EDAX_PATH` in `.env` (see `.env.sample`)
 - Frontend — Go `html/template` + vanilla JS/CSS in `static/`, no build step
 - Scripts: `local.sh` (dev stack: compose Postgres/Redis, migrate, seed,

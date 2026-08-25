@@ -58,6 +58,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/boards", s.handleGetBoard)
 	mux.HandleFunc("POST /api/workers/heartbeat", s.requireWorkerToken(s.handleHeartbeat))
 	mux.HandleFunc("GET /api/workers", s.handleListWorkers)
+	mux.HandleFunc("POST /api/redis/rebuild", s.requireWorkerToken(s.handleRebuildRedis))
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/level-config", s.handleLevelConfig)
 	mux.HandleFunc("POST /api/pgn", s.handlePGN)

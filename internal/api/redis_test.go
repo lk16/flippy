@@ -133,6 +133,50 @@ func TestServer_RebuildBookStats_EmptyDBClearsHash(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestServer_HandleRebuildRedis_FlushesStaleValuesAndRebuildsStats(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
+
+	// Stand in for values written before a rollout that changed their encoding.
+	require.NoError(t, s.redis.RPush(ctx, jobBufferKey, "legacy-entry").Err())
+	require.NoError(t, s.redis.Set(ctx, jobCursorKey, "legacy-cursor", 0).Err())
+	require.NoError(t, s.redis.Set(ctx, claimKey(position.String()), "worker-1", 0).Err())
+	require.NoError(t, s.redis.HSet(ctx, bookStatsKey, "legacy-field", 7).Err())
+
+	w := doRequest(t, s, http.MethodPost, "/api/redis/rebuild", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	stale, err := s.redis.Exists(ctx, jobBufferKey, jobCursorKey, claimKey(position.String())).Result()
+	require.NoError(t, err)
+	require.Zero(t, stale)
+
+	hasLegacyField, err := s.redis.HExists(ctx, bookStatsKey, "legacy-field").Result()
+	require.NoError(t, err)
+	require.False(t, hasLegacyField)
+
+	entries, ok, err := s.getBookStats(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, []statEntry{classifiedStat(12, 0, 0, 1)}, entries)
+}
+
+func TestServer_HandleRebuildRedis_EmptyBookLeavesNoStatsHash(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.redis.HSet(ctx, bookStatsKey, "0:0:12", 1).Err())
+
+	w := doRequest(t, s, http.MethodPost, "/api/redis/rebuild", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	_, ok, err := s.getBookStats(ctx)
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
 func TestServer_BookStats_IncrementalSave(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
