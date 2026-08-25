@@ -135,7 +135,7 @@ func TestServer_ClaimJob_SkipsCandidateLearnedSinceItWasBuffered(t *testing.T) {
 
 	position := testPosition(t, 12)
 	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
-	require.NoError(t, s.redis.RPush(ctx, jobBufferKey, position.String()).Err())
+	require.NoError(t, s.redis.RPush(ctx, jobBufferKey, encodeJobCandidate(tierPartiallyLearned, position)).Err())
 	require.NoError(t, s.repo.SaveEvaluation(ctx, position, db.Evaluation{
 		Level: TargetLevel(12), Score: 0,
 	}))
@@ -152,7 +152,7 @@ func TestServer_ClaimJob_SkipsCandidateWithoutARow(t *testing.T) {
 	ctx := context.Background()
 
 	position := testPosition(t, 12)
-	require.NoError(t, s.redis.RPush(ctx, jobBufferKey, position.String()).Err())
+	require.NoError(t, s.redis.RPush(ctx, jobBufferKey, encodeJobCandidate(tierUnlearned, position)).Err())
 
 	_, ok, err := s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
@@ -395,9 +395,100 @@ func TestServer_ClaimJob_LevelPerTier(t *testing.T) {
 	require.Equal(t, unlearned, job.Position)
 	require.Equal(t, UnlearnedLevel(14), job.Level)
 
+	// The partially learned tier only opens once worker-1's job is done, not merely claimed.
+	require.NoError(t, s.repo.SaveEvaluation(ctx, unlearned, db.Evaluation{
+		Level: TargetLevel(14), Score: 0,
+	}))
+	require.NoError(t, s.redis.Del(ctx, claimKey(unlearned.String())).Err())
+
 	job, ok, err = s.claimJob(ctx, "worker-2")
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, belowTarget, job.Position)
 	require.Equal(t, TargetLevel(16), job.Level)
+}
+
+// TestServer_ClaimJob_ClaimedUnlearnedRowHoldsBackPartiallyLearnedTier covers the tier boundary the
+// unlearned tier must finish crossing first: while an unlearned row is claimed but not yet learned,
+// no below-target row is handed out, so all level-0 work completes before any target-level work
+// starts.
+func TestServer_ClaimJob_ClaimedUnlearnedRowHoldsBackPartiallyLearnedTier(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	unlearned := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{unlearned}))
+	belowTarget := testPartiallyLearnedPosition(t, s, 14)
+
+	job, ok, err := s.claimJob(ctx, "worker-1")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, unlearned, job.Position)
+
+	// worker-1 is still evaluating the unlearned row: worker-2 waits rather than starting on the
+	// below-target one.
+	_, ok, err = s.claimJob(ctx, "worker-2")
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	// Once the unlearned row is learned and released, the below-target tier opens.
+	require.NoError(t, s.repo.SaveEvaluation(ctx, unlearned, db.Evaluation{
+		Level: TargetLevel(12), Score: 0,
+	}))
+	require.NoError(t, s.redis.Del(ctx, claimKey(unlearned.String())).Err())
+
+	job, ok, err = s.claimJob(ctx, "worker-2")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, belowTarget, job.Position)
+	require.Equal(t, TargetLevel(14), job.Level)
+}
+
+// TestServer_ClaimJob_UnlearnedEntryLearnedMeanwhileIsNotUpgraded covers the pop-side half of the
+// tier order: an entry the unlearned sweep buffered, then learned through the priority path before
+// any worker popped it, is dropped as stale rather than handed out as a target-level job ahead of
+// rows still at level 0.
+func TestServer_ClaimJob_UnlearnedEntryLearnedMeanwhileIsNotUpgraded(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	learnedMeanwhile := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{learnedMeanwhile}))
+	require.NoError(t, s.redis.RPush(ctx, jobBufferKey, encodeJobCandidate(tierUnlearned, learnedMeanwhile)).Err())
+	require.NoError(t, s.repo.SaveEvaluation(ctx, learnedMeanwhile, db.Evaluation{
+		Level: UnlearnedLevel(12), Score: 0,
+	}))
+
+	stillUnlearned := testPosition(t, 13)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{stillUnlearned}))
+
+	job, ok, err := s.claimJob(ctx, "worker-1")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, stillUnlearned, job.Position)
+	require.Equal(t, UnlearnedLevel(13), job.Level)
+}
+
+// TestServer_ClaimJob_PagesPastClaimedUnlearnedRows covers the refill's pagination: a first batch
+// made entirely of claimed rows no longer starts the partially learned sweep -- the scan pages on
+// and finds the claimable unlearned row behind them.
+func TestServer_ClaimJob_PagesPastClaimedUnlearnedRows(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	claimedRows := testDistinctPositions(t, 12, jobCandidateBatch)
+	require.NoError(t, s.repo.AddPositions(ctx, claimedRows))
+	for _, position := range claimedRows {
+		require.NoError(t, s.redis.Set(ctx, claimKey(position.String()), "other-worker", claimTTL).Err())
+	}
+
+	claimable := testPosition(t, 13)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{claimable}))
+	testPartiallyLearnedPosition(t, s, 14)
+
+	job, ok, err := s.claimJob(ctx, "worker-1")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, claimable, job.Position)
+	require.Equal(t, UnlearnedLevel(13), job.Level)
 }

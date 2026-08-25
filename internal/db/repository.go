@@ -193,26 +193,36 @@ func (pe PositionEvaluation) Cursor() LearnableCursor {
 	}
 }
 
+// UnlearnedCursor is a point in ListUnlearned's ordering. The zero value sorts before every row,
+// so it starts a scan at the beginning.
+type UnlearnedCursor struct {
+	DiscCount int
+	Position  othello.NormalizedPosition
+}
+
 // UnlearnedQuery bounds a ListUnlearned scan: never-searched positions in [MinDiscs, MaxDiscs],
-// at most Limit of them.
+// at most Limit of them, following After.
 type UnlearnedQuery struct {
 	MinDiscs int
 	MaxDiscs int
+	After    UnlearnedCursor
 	Limit    int
 }
 
-// ListUnlearned returns up to q.Limit never-searched positions, shallowest first -- by disc count,
-// with position only as a tiebreak, so the limit cuts the deep end off a batch. Their Evaluation is
-// the zero value. There is no cursor: a row leaves the set as soon as it is searched, so starting
-// every scan at the beginning is what lets a row added later be picked up right away.
+// ListUnlearned returns up to q.Limit never-searched positions after q.After, shallowest first --
+// by disc count, with position only as a tiebreak, so the limit cuts the deep end off a batch.
+// Their Evaluation is the zero value. The cursor exists so one refill can page past rows it cannot
+// use; it is never persisted across refills: a row leaves the set as soon as it is searched, so
+// starting every refill at the beginning is what lets a row added later be picked up right away.
 func (r *Repository) ListUnlearned(ctx context.Context, q UnlearnedQuery) ([]PositionEvaluation, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT position, level, score
 		 FROM boards
 		 WHERE level = 0 AND disc_count BETWEEN $1 AND $2
+		   AND (disc_count, position) > ($3::smallint, $4::bytea)
 		 ORDER BY disc_count, position
-		 LIMIT $3`,
-		q.MinDiscs, q.MaxDiscs, q.Limit,
+		 LIMIT $5`,
+		q.MinDiscs, q.MaxDiscs, q.After.DiscCount, q.After.Position.Position().Bytes(), q.Limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list unlearned positions: %w", err)

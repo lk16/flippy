@@ -130,41 +130,85 @@ func (s *Server) releaseClaim(ctx context.Context, position, workerID string) er
 	return nil
 }
 
-// popJobCandidate takes the next buffered candidate position, reporting false when the buffer is
-// empty. Popping is what keeps concurrent workers off each other's candidates: each entry goes to
-// exactly one of them.
-func (s *Server) popJobCandidate(ctx context.Context) (othello.NormalizedPosition, bool, error) {
-	// An unparseable entry means a corrupted buffer, so drop it and take the next: false has to
-	// mean drained, or the caller would refill a buffer that still holds candidates.
-	for range jobCandidateBatch {
-		encoded, err := s.redis.LPop(ctx, jobBufferKey).Result()
-		if err == redis.Nil {
-			return othello.NormalizedPosition{}, false, nil
-		}
-		if err != nil {
-			return othello.NormalizedPosition{}, false, fmt.Errorf("failed to pop job candidate: %w", err)
+// jobTier says which book tier buffered a job candidate, so the pop can hold the entry to the tier
+// that scanned it rather than re-deriving one from whatever the row holds by then.
+type jobTier int
+
+const (
+	tierUnlearned jobTier = iota
+	tierPartiallyLearned
+)
+
+// jobTierPrefixes maps each tier to the prefix its buffer entries carry.
+var jobTierPrefixes = map[jobTier]string{
+	tierUnlearned:        "u:",
+	tierPartiallyLearned: "p:",
+}
+
+// encodeJobCandidate renders one buffer entry: the tier's prefix, then the position.
+func encodeJobCandidate(tier jobTier, position othello.NormalizedPosition) string {
+	return jobTierPrefixes[tier] + position.String()
+}
+
+// decodeJobCandidate parses encodeJobCandidate's output; ok is false for anything else, including
+// entries from before tiers were tagged -- the buffer is derived state, so dropping those merely
+// costs a refill.
+func decodeJobCandidate(encoded string) (othello.NormalizedPosition, jobTier, bool) {
+	for tier, prefix := range jobTierPrefixes {
+		rest, found := strings.CutPrefix(encoded, prefix)
+		if !found {
+			continue
 		}
 
-		position, err := othello.ParsePosition(encoded)
+		position, err := othello.ParsePosition(rest)
 		if err != nil {
-			continue
+			return othello.NormalizedPosition{}, 0, false
 		}
 
 		normalized, err := othello.NewNormalizedPosition(position)
 		if err != nil {
+			return othello.NormalizedPosition{}, 0, false
+		}
+
+		return normalized, tier, true
+	}
+
+	return othello.NormalizedPosition{}, 0, false
+}
+
+// popJobCandidate takes the next buffered candidate position and the tier that buffered it,
+// reporting found false when the buffer is empty. Popping is what keeps concurrent workers off each
+// other's candidates: each entry goes to exactly one of them.
+func (s *Server) popJobCandidate(ctx context.Context) (othello.NormalizedPosition, jobTier, bool, error) {
+	// An undecodable entry means a corrupted buffer, so drop it and take the next: false has to
+	// mean drained, or the caller would refill a buffer that still holds candidates.
+	for range jobCandidateBatch {
+		encoded, err := s.redis.LPop(ctx, jobBufferKey).Result()
+		if err == redis.Nil {
+			return othello.NormalizedPosition{}, 0, false, nil
+		}
+		if err != nil {
+			return othello.NormalizedPosition{}, 0, false, fmt.Errorf("failed to pop job candidate: %w", err)
+		}
+
+		normalized, tier, ok := decodeJobCandidate(encoded)
+		if !ok {
 			continue
 		}
 
-		return normalized, true, nil
+		return normalized, tier, true, nil
 	}
 
-	return othello.NormalizedPosition{}, false, nil
+	return othello.NormalizedPosition{}, 0, false, nil
 }
 
 // refillJobBuffer buffers the next batch of candidates, unlearned positions before partially
 // learned ones. It reports how many candidates it buffered; zero means another replica is refilling
-// or nothing is learnable. A batch is handed out before the next refill looks at the book again, so
-// a position that becomes unlearnable, or an unlearned row added meanwhile, waits at most one batch.
+// or nothing is claimable right now. The partially learned tier only runs once the unlearned tier
+// is exhausted -- claimed unlearned rows count as unfinished tier-two work, so the sweep waits for
+// them rather than starting on below-target rows. A batch is handed out before the next refill
+// looks at the book again, so a position that becomes unlearnable, or an unlearned row added
+// meanwhile, waits at most one batch.
 func (s *Server) refillJobBuffer(ctx context.Context) (int, error) {
 	won, err := s.redis.SetNX(ctx, jobRefillLockKey, s.replicaID, jobRefillLockTTL).Result()
 	if err != nil {
@@ -175,46 +219,75 @@ func (s *Server) refillJobBuffer(ctx context.Context) (int, error) {
 	}
 	defer s.releaseJobRefillLock(ctx)
 
-	buffered, err := s.refillFromUnlearned(ctx)
+	buffered, exhausted, err := s.refillFromUnlearned(ctx)
 	if err != nil || buffered > 0 {
 		return buffered, err
+	}
+	if !exhausted {
+		return 0, nil
 	}
 
 	return s.refillFromPartiallyLearned(ctx, s.jobFloor(ctx))
 }
 
-// refillFromUnlearned buffers never-searched positions, the second job tier. It rescans from the
-// start of the book every time rather than following a cursor, so a row added after an earlier
+// unlearnedRefillPages bounds how many batches one unlearned refill pages past looking for a
+// claimable candidate, so a book headed by thousands of unusable rows can't turn one refill into a
+// full index scan. Hitting the bound reports the tier as busy rather than exhausted: holding the
+// partially learned sweep back is the safe direction, and the next refill retries.
+const unlearnedRefillPages = 10
+
+// refillFromUnlearned buffers never-searched positions, the second job tier. Every refill rescans
+// from the start of the book rather than persisting a cursor, so a row added after an earlier
 // refill does not have to wait for the partially-learned sweep to come round; the job floor is
 // skipped for the same reason, and costs nothing here because the index this scan runs on holds
-// only unlearned rows. Candidates no worker can take are dropped here instead: they sort first on
-// every scan, so buffering them would hand out the same unusable batch until they are learned,
-// which for a position edax can't search is never.
-func (s *Server) refillFromUnlearned(ctx context.Context) (int, error) {
-	candidates, err := s.repo.ListUnlearned(ctx, db.UnlearnedQuery{
-		MinDiscs: book.LeafDiscs,
-		MaxDiscs: book.MaxSavableDiscs,
-		Limit:    jobCandidateBatch,
-	})
-	if err != nil {
-		return 0, fmt.Errorf("failed to list unlearned positions: %w", err)
+// only unlearned rows. Within one refill it pages past candidates no worker can take right now --
+// buffering them would hand out an unusable batch -- until it finds claimable ones or runs out of
+// rows. exhausted is true only when nothing in the tier could ever be buffered again as it stands:
+// rows edax can't search (no legal move) stay unlearned forever and so don't count, but a row
+// another worker has claimed does, since its claim can expire.
+func (s *Server) refillFromUnlearned(ctx context.Context) (buffered int, exhausted bool, err error) {
+	var cursor db.UnlearnedCursor
+	sawClaimed := false
+
+	for range unlearnedRefillPages {
+		candidates, err := s.repo.ListUnlearned(ctx, db.UnlearnedQuery{
+			MinDiscs: book.LeafDiscs,
+			MaxDiscs: book.MaxSavableDiscs,
+			After:    cursor,
+			Limit:    jobCandidateBatch,
+		})
+		if err != nil {
+			return 0, false, fmt.Errorf("failed to list unlearned positions: %w", err)
+		}
+		if len(candidates) == 0 {
+			return 0, !sawClaimed, nil
+		}
+
+		claimable, claimed, err := s.claimableCandidates(ctx, candidates)
+		if err != nil {
+			return 0, false, err
+		}
+		sawClaimed = sawClaimed || claimed > 0
+
+		if len(claimable) > 0 {
+			if err := s.bufferCandidates(ctx, tierUnlearned, claimable); err != nil {
+				return 0, false, err
+			}
+			log.Printf("job buffer: %d unlearned candidates, %d already claimed", len(claimable), claimed)
+			return len(claimable), false, nil
+		}
+
+		if len(candidates) < jobCandidateBatch {
+			return 0, !sawClaimed, nil
+		}
+
+		last := candidates[len(candidates)-1].Position
+		cursor = db.UnlearnedCursor{DiscCount: last.CountDiscs(), Position: last}
 	}
 
-	claimable, claimed, err := s.claimableCandidates(ctx, candidates)
-	if err != nil {
-		return 0, err
-	}
-	if len(claimable) == 0 {
-		return 0, nil
-	}
-
-	if err := s.bufferCandidates(ctx, claimable); err != nil {
-		return 0, err
-	}
-
-	log.Printf("job buffer: %d unlearned candidates, %d already claimed", len(claimable), claimed)
-
-	return len(claimable), nil
+	log.Printf("job buffer: no claimable unlearned candidate in %d pages; treating the tier as busy",
+		unlearnedRefillPages)
+	return 0, false, nil
 }
 
 // refillFromPartiallyLearned buffers below-target positions from the sweep cursor, the third job
@@ -251,7 +324,7 @@ func (s *Server) refillFromPartiallyLearned(ctx context.Context, floor int) (int
 
 	next := candidates[len(candidates)-1].Cursor()
 
-	if err := s.bufferCandidates(ctx, candidates, func(pipe redis.Pipeliner) {
+	if err := s.bufferCandidates(ctx, tierPartiallyLearned, candidates, func(pipe redis.Pipeliner) {
 		pipe.Set(ctx, jobCursorKey, encodeJobCursor(next), 0)
 	}); err != nil {
 		return 0, err
@@ -313,14 +386,15 @@ func (s *Server) claimableCandidates(
 	return claimable, claimed, nil
 }
 
-// bufferCandidates appends candidates to the shared buffer, running extra in the same transaction
-// so a cursor advance and the candidates it covers land together.
+// bufferCandidates appends candidates to the shared buffer tagged with the tier that scanned them,
+// running extra in the same transaction so a cursor advance and the candidates it covers land
+// together.
 func (s *Server) bufferCandidates(
-	ctx context.Context, candidates []db.PositionEvaluation, extra ...func(redis.Pipeliner),
+	ctx context.Context, tier jobTier, candidates []db.PositionEvaluation, extra ...func(redis.Pipeliner),
 ) error {
 	encoded := make([]any, len(candidates))
 	for i, candidate := range candidates {
-		encoded[i] = candidate.Position.String()
+		encoded[i] = encodeJobCandidate(tier, candidate.Position)
 	}
 
 	pipe := s.redis.TxPipeline()

@@ -908,7 +908,7 @@ func TestServer_RefillJobBuffer_BuffersUnlearnedBeforePartiallyLearned(t *testin
 	buffered, err := s.refillJobBuffer(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 1, buffered)
-	require.Equal(t, []string{unlearned.String()}, bufferedPositions(t, s))
+	require.Equal(t, []string{encodeJobCandidate(tierUnlearned, unlearned)}, bufferedPositions(t, s))
 	require.Equal(t, int64(0), s.redis.Exists(ctx, jobCursorKey).Val())
 }
 
@@ -937,8 +937,11 @@ func TestServer_RefillJobBuffer_BuffersUnlearnedByDiscCount(t *testing.T) {
 	buffered, err := s.refillJobBuffer(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 3, buffered)
-	require.Equal(t, []string{rest.String(), position13.String(), position20.String()},
-		bufferedPositions(t, s))
+	require.Equal(t, []string{
+		encodeJobCandidate(tierUnlearned, rest),
+		encodeJobCandidate(tierUnlearned, position13),
+		encodeJobCandidate(tierUnlearned, position20),
+	}, bufferedPositions(t, s))
 }
 
 // TestServer_RefillJobBuffer_FindsUnlearnedAddedAfterTheSweepMovedOn is why the unlearned scan has
@@ -961,18 +964,15 @@ func TestServer_RefillJobBuffer_FindsUnlearnedAddedAfterTheSweepMovedOn(t *testi
 	buffered, err = s.refillJobBuffer(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 1, buffered)
-	require.Equal(t, unlearned.String(), bufferedPositions(t, s)[1])
+	require.Equal(t, encodeJobCandidate(tierUnlearned, unlearned), bufferedPositions(t, s)[1])
 }
 
-// TestServer_RefillJobBuffer_SkipsUnlearnedNobodyCanClaim covers the two candidates that would
-// otherwise head every unlearned scan for good: one another worker holds, and one edax can't search.
-func TestServer_RefillJobBuffer_SkipsUnlearnedNobodyCanClaim(t *testing.T) {
+// TestServer_RefillJobBuffer_NoMoveRowsDoNotBlockPartiallyLearnedTier covers the candidate that
+// would otherwise head every unlearned scan for good: a row edax can't search stays at level 0
+// forever, so it neither gets buffered nor counts as unfinished tier-two work.
+func TestServer_RefillJobBuffer_NoMoveRowsDoNotBlockPartiallyLearnedTier(t *testing.T) {
 	s, tx := testServerWithTx(t)
 	ctx := context.Background()
-
-	claimed := testPosition(t, 12)
-	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{claimed}))
-	require.NoError(t, s.redis.Set(ctx, claimKey(claimed.String()), "worker-1", claimTTL).Err())
 
 	noMoves := testNoMovesPosition(t, 13)
 	_, err := tx.Exec(ctx,
@@ -985,7 +985,26 @@ func TestServer_RefillJobBuffer_SkipsUnlearnedNobodyCanClaim(t *testing.T) {
 	buffered, err := s.refillJobBuffer(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 1, buffered)
-	require.Equal(t, []string{partial.String()}, bufferedPositions(t, s))
+	require.Equal(t, []string{encodeJobCandidate(tierPartiallyLearned, partial)}, bufferedPositions(t, s))
+}
+
+// TestServer_RefillJobBuffer_ClaimedUnlearnedRowHoldsBackPartiallyLearnedTier covers the other
+// unusable candidate: a row another worker holds is unfinished tier-two work, so the refill buffers
+// nothing rather than starting the partially learned sweep early.
+func TestServer_RefillJobBuffer_ClaimedUnlearnedRowHoldsBackPartiallyLearnedTier(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	claimed := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{claimed}))
+	require.NoError(t, s.redis.Set(ctx, claimKey(claimed.String()), "worker-1", claimTTL).Err())
+
+	testPartiallyLearnedPosition(t, s, 14)
+
+	buffered, err := s.refillJobBuffer(ctx)
+	require.NoError(t, err)
+	require.Zero(t, buffered)
+	require.Empty(t, bufferedPositions(t, s))
 }
 
 // testNoMovesPosition returns a normalized position with discs discs whose mover has no legal move:
@@ -1060,25 +1079,59 @@ func TestServer_RefillJobBuffer_ReleasesItsOwnLock(t *testing.T) {
 	require.Equal(t, int64(0), s.redis.Exists(ctx, jobRefillLockKey).Val())
 }
 
-func TestServer_PopJobCandidate_SkipsUnparseableEntries(t *testing.T) {
+func TestServer_PopJobCandidate_SkipsUndecodableEntries(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
 	position := testPosition(t, 12)
-	require.NoError(t, s.redis.RPush(ctx, jobBufferKey, "not-a-position", position.String()).Err())
+	// A corrupted entry and a legacy untagged one are both dropped; only the tagged entry is served.
+	require.NoError(t, s.redis.RPush(ctx, jobBufferKey,
+		"not-a-position", position.String(), encodeJobCandidate(tierPartiallyLearned, position)).Err())
 
-	popped, found, err := s.popJobCandidate(ctx)
+	popped, tier, found, err := s.popJobCandidate(ctx)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, position, popped)
+	require.Equal(t, tierPartiallyLearned, tier)
 }
 
 func TestServer_PopJobCandidate_EmptyBuffer(t *testing.T) {
 	s := testServer(t)
 
-	_, found, err := s.popJobCandidate(context.Background())
+	_, _, found, err := s.popJobCandidate(context.Background())
 	require.NoError(t, err)
 	require.False(t, found)
+}
+
+func TestDecodeJobCandidate(t *testing.T) {
+	position := testPosition(t, 12)
+
+	tests := []struct {
+		name    string
+		encoded string
+		tier    jobTier
+		ok      bool
+	}{
+		{"unlearned", encodeJobCandidate(tierUnlearned, position), tierUnlearned, true},
+		{"partially learned", encodeJobCandidate(tierPartiallyLearned, position), tierPartiallyLearned, true},
+		{"legacy untagged", position.String(), 0, false},
+		{"unknown prefix", "x:" + position.String(), 0, false},
+		{"empty", "", 0, false},
+		{"tag without position", "u:", 0, false},
+		{"position unparseable", "u:not-a-position", 0, false},
+		{"position not normalized", "u:" + testNonNormalizedPosition(t).String(), 0, false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			decoded, tier, ok := decodeJobCandidate(test.encoded)
+			require.Equal(t, test.ok, ok)
+			if test.ok {
+				require.Equal(t, position, decoded)
+				require.Equal(t, test.tier, tier)
+			}
+		})
+	}
 }
 
 // testNonNormalizedPosition returns a position that is not in canonical form. The start position is

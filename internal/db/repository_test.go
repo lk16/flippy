@@ -411,6 +411,51 @@ func TestRepository_ListUnlearned_Empty(t *testing.T) {
 	require.Empty(t, results)
 }
 
+// TestRepository_ListUnlearned_AfterResumesWhereTheLastScanStopped covers the cursor one refill
+// pages with: the next batch starts strictly after the previous one's last row and nothing is
+// skipped or repeated across the seam.
+func TestRepository_ListUnlearned_AfterResumesWhereTheLastScanStopped(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	position12s := testDistinctPositions(t, 12, 2)
+	position13 := testPosition(t, 13)
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{
+		position12s[0], position12s[1], position13,
+	}))
+
+	firstPage, err := repo.ListUnlearned(ctx, testUnlearnedQuery(12, 2))
+	require.NoError(t, err)
+	require.Len(t, firstPage, 2)
+
+	last := firstPage[1].Position
+	query := testUnlearnedQuery(12, 2)
+	query.After = UnlearnedCursor{DiscCount: last.CountDiscs(), Position: last}
+
+	secondPage, err := repo.ListUnlearned(ctx, query)
+	require.NoError(t, err)
+	require.Len(t, secondPage, 1)
+	require.Equal(t, position13, secondPage[0].Position)
+}
+
+// TestRepository_ListUnlearned_ZeroCursorStartsAtTheBeginning pins the zero value's meaning: it
+// sorts before every row, so a query that doesn't page sees the whole tier.
+func TestRepository_ListUnlearned_ZeroCursorStartsAtTheBeginning(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	position12 := testPosition(t, 12)
+	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position12}))
+
+	query := testUnlearnedQuery(12, 10)
+	query.After = UnlearnedCursor{}
+
+	results, err := repo.ListUnlearned(ctx, query)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, position12, results[0].Position)
+}
+
 func TestRepository_ListPartiallyLearned_OrdersByDiscCountThenLevel(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()

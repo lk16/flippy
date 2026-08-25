@@ -43,9 +43,11 @@ stored in Postgres, and browsed via a web frontend.
   (`migrations/`), one-shot operator SQL in `scripts/`
 - Redis — job claims, worker heartbeats, priority queue, ephemeral
   analysis results, the shared job candidate buffer workers pop from
-  (`job:buffer`, refilled by one replica at a time: unlearned positions
-  first, rescanned from the start of the book every time, else the
-  partially-learned sweep from the cursor in `job:cursor`, which wraps
+  (`job:buffer`, entries tagged with the tier that buffered them,
+  refilled by one replica at a time: unlearned positions first,
+  rescanned from the start of the book every time and only exhausted —
+  no unlearned row left that could ever be claimed — opens the
+  partially-learned sweep, from the cursor in `job:cursor`, which wraps
   when that segment runs out), and the
   `book_stats` hash (serves `GET /api/stats`
   and derives the job floor; updated incrementally on every save, with a

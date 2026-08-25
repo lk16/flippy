@@ -80,17 +80,19 @@ func (s *Server) claimJob(ctx context.Context, workerID string) (job Job, ok boo
 }
 
 // claimBufferedJob claims one candidate from the shared buffer, refilling it when empty, and picks
-// the level from what the row already holds: UnlearnedLevel for a never-searched position, its
-// target for one below target. Entries are re-checked against the DB because a sweep may have
-// buffered them well before this pop: the position can have been learned, or claimed through the
-// priority queue, in between.
+// the level from the tier that buffered the entry: UnlearnedLevel for the unlearned tier, the
+// position's target for the partially learned one. Entries are re-checked against the DB because a
+// sweep may have buffered them well before this pop: the position can have been learned, or claimed
+// through the priority queue, in between. An entry whose row no longer matches its tier is stale --
+// in particular, an unlearned entry learned meanwhile is skipped rather than handed out as a
+// target-level job, which would jump the partially learned tier ahead of remaining unlearned rows.
 func (s *Server) claimBufferedJob(ctx context.Context, workerID string) (job Job, ok bool, err error) {
 	// Walked-past candidates, by why: another worker holds the claim, or the buffered entry no
 	// longer describes work. Logged only when there were any, so a clean claim stays silent.
 	var takenByOthers, stale int
 
 	for range jobClaimAttempts {
-		position, found, err := s.popJobCandidate(ctx)
+		position, tier, found, err := s.popJobCandidate(ctx)
 		if err != nil {
 			return Job{}, false, err
 		}
@@ -123,9 +125,21 @@ func (s *Server) claimBufferedJob(ctx context.Context, workerID string) (job Job
 		if err != nil {
 			return Job{}, false, fmt.Errorf("failed to check candidate position: %w", err)
 		}
-		if eval.Level >= target {
-			stale++
-			continue
+
+		var level int
+		switch tier {
+		case tierUnlearned:
+			if eval.IsLearned() {
+				stale++
+				continue
+			}
+			level = UnlearnedLevel(discCount)
+		default:
+			if !eval.IsLearned() || eval.Level >= target {
+				stale++
+				continue
+			}
+			level = target
 		}
 
 		claimed, err := s.tryClaim(ctx, position.String(), workerID)
@@ -135,11 +149,6 @@ func (s *Server) claimBufferedJob(ctx context.Context, workerID string) (job Job
 		if !claimed {
 			takenByOthers++
 			continue
-		}
-
-		level := target
-		if !eval.IsLearned() {
-			level = UnlearnedLevel(discCount)
 		}
 
 		logClaimAttempts(position.String(), takenByOthers, stale)
