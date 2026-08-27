@@ -25,8 +25,8 @@ type Server struct {
 	cache       *book.Cache
 	workerToken string
 
-	// replicaID names this replica in the stats-refresh lock, purely for debugging; under
-	// Kubernetes the hostname is the pod name.
+	// replicaID names this replica in the locks it takes, purely for debugging; under Kubernetes
+	// the hostname is the pod name.
 	replicaID string
 
 	// Cached dependency-ping outcome for /readyz (see pingDependencies).
@@ -58,7 +58,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/boards", s.handleGetBoard)
 	mux.HandleFunc("POST /api/workers/heartbeat", s.requireWorkerToken(s.handleHeartbeat))
 	mux.HandleFunc("GET /api/workers", s.handleListWorkers)
-	mux.HandleFunc("POST /api/redis/rebuild", s.requireWorkerToken(s.handleRebuildRedis))
+	mux.HandleFunc("POST /api/redis/flush", s.requireWorkerToken(s.handleFlushRedis))
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/level-config", s.handleLevelConfig)
 	mux.HandleFunc("POST /api/pgn", s.handlePGN)

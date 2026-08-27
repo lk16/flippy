@@ -101,152 +101,26 @@ func TestServer_ReleaseClaim_DoesNotRevokeAnotherWorkersClaim(t *testing.T) {
 	require.Equal(t, "worker-2", owner)
 }
 
-func TestServer_RebuildBookStats_ProducesExpectedFields(t *testing.T) {
-	s := testServer(t)
-	ctx := context.Background()
-
-	// One 12-disc position learned at level 20 (a 20@73% search), one unlearned (depth 0, confidence 0).
-	positions := testDistinctPositions(t, 12, 2)
-	require.NoError(t, s.repo.AddPositions(ctx, positions))
-	require.NoError(t, s.repo.SaveEvaluation(ctx, positions[0], db.Evaluation{Level: 20, Score: 2}))
-
-	require.NoError(t, s.rebuildBookStats(ctx))
-
-	values, err := s.redis.HGetAll(ctx, bookStatsKey).Result()
-	require.NoError(t, err)
-	require.Equal(t, map[string]string{
-		"0:0:12":   "1",
-		"20:73:12": "1",
-	}, values)
-}
-
-func TestServer_RebuildBookStats_EmptyDBClearsHash(t *testing.T) {
-	s := testServer(t)
-	ctx := context.Background()
-
-	require.NoError(t, s.redis.HSet(ctx, bookStatsKey, "0:0:12", 1).Err())
-
-	require.NoError(t, s.rebuildBookStats(ctx))
-
-	_, ok, err := s.getBookStats(ctx)
-	require.NoError(t, err)
-	require.False(t, ok)
-}
-
-func TestServer_HandleRebuildRedis_FlushesStaleValuesAndRebuildsStats(t *testing.T) {
+func TestServer_HandleFlushRedis_DropsStaleValues(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
 	position := testPosition(t, 12)
-	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 
 	// Stand in for values written before a rollout that changed their encoding.
 	require.NoError(t, s.redis.RPush(ctx, jobBufferKey, "legacy-entry").Err())
 	require.NoError(t, s.redis.Set(ctx, jobCursorKey, "legacy-cursor", 0).Err())
 	require.NoError(t, s.redis.Set(ctx, claimKey(position.String()), "worker-1", 0).Err())
-	require.NoError(t, s.redis.HSet(ctx, bookStatsKey, "legacy-field", 7).Err())
 
-	w := doRequest(t, s, http.MethodPost, "/api/redis/rebuild", nil)
+	w := doRequest(t, s, http.MethodPost, "/api/redis/flush", nil)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	stale, err := s.redis.Exists(ctx, jobBufferKey, jobCursorKey, claimKey(position.String())).Result()
 	require.NoError(t, err)
 	require.Zero(t, stale)
-
-	hasLegacyField, err := s.redis.HExists(ctx, bookStatsKey, "legacy-field").Result()
-	require.NoError(t, err)
-	require.False(t, hasLegacyField)
-
-	entries, ok, err := s.getBookStats(ctx)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, []statEntry{classifiedStat(12, 0, 0, 1)}, entries)
 }
 
-func TestServer_HandleRebuildRedis_EmptyBookLeavesNoStatsHash(t *testing.T) {
-	s := testServer(t)
-	ctx := context.Background()
-
-	require.NoError(t, s.redis.HSet(ctx, bookStatsKey, "0:0:12", 1).Err())
-
-	w := doRequest(t, s, http.MethodPost, "/api/redis/rebuild", nil)
-	require.Equal(t, http.StatusOK, w.Code)
-
-	_, ok, err := s.getBookStats(ctx)
-	require.NoError(t, err)
-	require.False(t, ok)
-}
-
-func TestServer_BookStats_IncrementalSave(t *testing.T) {
-	s := testServer(t)
-	ctx := context.Background()
-
-	position := testPosition(t, 12)
-	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
-	require.NoError(t, s.rebuildBookStats(ctx))
-
-	// A submitted target-level result moves the position's counter to the new cell without a
-	// rebuild; the decremented-to-zero unlearned cell is filtered out of reads.
-	level := TargetLevel(12)
-	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", jobResultRequest{
-		WorkerID: "w1", Position: position.String(), Level: level, Score: 2,
-	})
-	require.Equal(t, http.StatusOK, w.Code)
-
-	depth, confidence := edax.SearchParams(12, level)
-	entries, ok, err := s.getBookStats(ctx)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, []statEntry{classifiedStat(12, depth, confidence, 1)}, entries)
-}
-
-func TestServer_BookStats_NoPartialHashCreated(t *testing.T) {
-	s := testServer(t)
-	ctx := context.Background()
-
-	position := testPosition(t, 12)
-	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
-
-	// No hash exists yet; an incremental update must not create a nearly-empty one.
-	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", jobResultRequest{
-		WorkerID: "w1", Position: position.String(), Level: TargetLevel(12), Score: 2,
-	})
-	require.Equal(t, http.StatusOK, w.Code)
-
-	exists, err := s.redis.Exists(ctx, bookStatsKey).Result()
-	require.NoError(t, err)
-	require.Zero(t, exists)
-}
-
-func TestServer_GetBookStats_MissingHash(t *testing.T) {
-	s := testServer(t)
-
-	_, ok, err := s.getBookStats(context.Background())
-	require.NoError(t, err)
-	require.False(t, ok)
-}
-
-func TestServer_GetBookStats_ReturnsSortedEntries(t *testing.T) {
-	s := testServer(t)
-	ctx := context.Background()
-
-	require.NoError(t, s.redis.HSet(ctx, bookStatsKey,
-		"20:73:13", 3,
-		"0:0:12", 7,
-		"20:73:12", 2,
-	).Err())
-
-	entries, ok, err := s.getBookStats(ctx)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, []statEntry{
-		classifiedStat(12, 0, 0, 7),
-		classifiedStat(12, 20, 73, 2),
-		classifiedStat(13, 20, 73, 3),
-	}, entries)
-}
-
-func TestServer_JobFloor_FallsBackWhenHashMissing(t *testing.T) {
+func TestServer_JobFloor_EmptyBookStartsAtLeafDiscs(t *testing.T) {
 	s := testServer(t)
 	require.Equal(t, book.LeafDiscs, s.jobFloor(context.Background()))
 }
@@ -260,7 +134,6 @@ func TestServer_JobFloor_PicksLowestLearnableDiscCount(t *testing.T) {
 	position13 := testPosition(t, 13)
 	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position12, position13}))
 	require.NoError(t, s.repo.SaveEvaluation(ctx, position12, db.Evaluation{Level: TargetLevel(12), Score: 0}))
-	require.NoError(t, s.rebuildBookStats(ctx))
 
 	require.Equal(t, 13, s.jobFloor(ctx))
 }
@@ -273,19 +146,21 @@ func TestServer_JobFloor_BelowTargetSearchCountsAsLearnable(t *testing.T) {
 	position12 := testPosition(t, 12)
 	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position12}))
 	require.NoError(t, s.repo.SaveEvaluation(ctx, position12, db.Evaluation{Level: 20, Score: 0}))
-	require.NoError(t, s.rebuildBookStats(ctx))
 
 	require.Equal(t, 12, s.jobFloor(ctx))
 }
 
 func TestServer_JobFloor_IgnoresDiscCountsOutsideSavableRange(t *testing.T) {
-	s := testServer(t)
+	s, tx := testServerWithTx(t)
 	ctx := context.Background()
 
-	// The hash is written directly: AddPositions refuses out-of-range rows, but an older book's
-	// leftovers can still show up in a resync, and they must not drag the floor to a disc count no
-	// job is ever handed out for.
-	require.NoError(t, s.redis.HSet(ctx, bookStatsKey, "0:0:35", 4, "0:0:5", 2).Err())
+	// The rows are written directly: AddPositions refuses out-of-range disc counts, but an older
+	// book's leftovers are still counted, and they must not drag the floor to a disc count no job is
+	// ever handed out for.
+	_, err := tx.Exec(ctx,
+		`INSERT INTO boards (position, disc_count)
+		 VALUES (decode(repeat('01', 16), 'hex'), 35), (decode(repeat('02', 16), 'hex'), 5)`)
+	require.NoError(t, err)
 
 	require.Equal(t, book.MaxSavableDiscs, s.jobFloor(ctx))
 }
@@ -860,31 +735,6 @@ func TestConnLiveness_RedisBacked(t *testing.T) {
 
 	s.unregisterConn(ctx, connID)
 	require.False(t, s.connLive(ctx, connID))
-}
-
-func TestRefreshBookStatsIfElected(t *testing.T) {
-	s := testServer(t)
-	ctx := context.Background()
-
-	position := testPosition(t, 12)
-	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
-
-	// First election wins the lock and rebuilds the hash.
-	s.refreshBookStatsIfElected(ctx)
-	_, ok, err := s.getBookStats(ctx)
-	require.NoError(t, err)
-	require.True(t, ok)
-
-	owner, err := s.redis.Get(ctx, bookStatsLockKey).Result()
-	require.NoError(t, err)
-	require.Equal(t, s.replicaID, owner)
-
-	// While the lock is held, a tick on any replica refreshes nothing.
-	require.NoError(t, s.redis.Del(ctx, bookStatsKey).Err())
-	s.refreshBookStatsIfElected(ctx)
-	_, ok, err = s.getBookStats(ctx)
-	require.NoError(t, err)
-	require.False(t, ok)
 }
 
 func TestJobCursorEncoding_RoundTrip(t *testing.T) {

@@ -236,10 +236,9 @@ func TestServer_ClaimJob_NoBoardsAvailable(t *testing.T) {
 	require.False(t, ok)
 }
 
-// TestServer_ClaimJob_StaleFloorSkipsNewlyAddedLowerBoards documents the accepted trade-off of
-// deriving the floor from the periodically rebuilt book_stats hash: below-target positions added
-// below the floor after the last rebuild are invisible to claimJob until the next rebuild.
-func TestServer_ClaimJob_StaleFloorSkipsNewlyAddedLowerBoards(t *testing.T) {
+// TestServer_ClaimJob_FloorFollowsNewlyAddedLowerBoards checks the floor tracks the book exactly:
+// a below-target position added under the current floor is claimable right away, not after a resync.
+func TestServer_ClaimJob_FloorFollowsNewlyAddedLowerBoards(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
@@ -252,23 +251,22 @@ func TestServer_ClaimJob_StaleFloorSkipsNewlyAddedLowerBoards(t *testing.T) {
 	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position13}))
 	require.NoError(t, s.repo.SaveEvaluation(ctx, position13, db.Evaluation{Level: UnlearnedLevel(13), Score: 0}))
 
-	// The rebuilt floor is 13: every 12-disc position known to the hash is fully learned.
-	require.NoError(t, s.rebuildBookStats(ctx))
+	// The floor is 13 while every 12-disc position in the book is fully learned.
+	require.Equal(t, 13, s.jobFloor(ctx))
 
-	// A below-target 12-disc position added after the rebuild stays invisible until the next one.
+	// Adding a below-target 12-disc position drops the floor back to 12, and it is claimed first.
 	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position12s[1]}))
 	require.NoError(t, s.repo.SaveEvaluation(ctx, position12s[1], db.Evaluation{Level: UnlearnedLevel(12), Score: 0}))
 
 	job, ok, err := s.claimJob(ctx, "worker-1")
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, position13, job.Position)
+	require.Equal(t, position12s[1], job.Position)
 }
 
-// TestServer_ClaimJob_StaleFloorStillFindsUnlearnedBoards is the other half: the unlearned tier
-// ignores the floor, so a never-searched row below it is claimed right away rather than waiting for
-// the next book_stats rebuild.
-func TestServer_ClaimJob_StaleFloorStillFindsUnlearnedBoards(t *testing.T) {
+// TestServer_ClaimJob_UnlearnedTierIgnoresTheFloor is the other half: a never-searched row below
+// the floor is claimed by the first tier, which doesn't consult the floor at all.
+func TestServer_ClaimJob_UnlearnedTierIgnoresTheFloor(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
@@ -281,8 +279,8 @@ func TestServer_ClaimJob_StaleFloorStillFindsUnlearnedBoards(t *testing.T) {
 	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position13}))
 	require.NoError(t, s.repo.SaveEvaluation(ctx, position13, db.Evaluation{Level: UnlearnedLevel(13), Score: 0}))
 
-	// The rebuilt floor is 13: every 12-disc position known to the hash is fully learned.
-	require.NoError(t, s.rebuildBookStats(ctx))
+	// The floor is 13: every 12-disc position in the book is fully learned.
+	require.Equal(t, 13, s.jobFloor(ctx))
 
 	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position12s[1]}))
 

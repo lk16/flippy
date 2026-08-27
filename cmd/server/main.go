@@ -107,7 +107,6 @@ func main() {
 	// The invalidation loop also runs the initial cache build, in the background so the listener
 	// (and /healthz) is up during it; /readyz reports 503 until the first build succeeds.
 	go apiServer.RunCacheInvalidation(ctx)
-	go apiServer.RunBookStatsRefresh(ctx)
 	// Keeps the shared job buffer stocked, so claiming a job never waits on the scan that finds one.
 	go apiServer.RunJobBufferTopUp(ctx)
 
