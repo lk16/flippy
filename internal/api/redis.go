@@ -14,7 +14,6 @@ import (
 
 	"github.com/lk16/flippy/internal/book"
 	"github.com/lk16/flippy/internal/db"
-	"github.com/lk16/flippy/internal/edax"
 	"github.com/lk16/flippy/internal/othello"
 )
 
@@ -36,24 +35,6 @@ func NewRedisClient(ctx context.Context, url string) (*redis.Client, error) {
 
 // claimTTL is how long a job claim or worker hash survives without a refresh.
 const claimTTL = 5 * time.Minute
-
-// bookStatsKey is the Redis hash of position counts per "<depth>:<confidence>:<discs>" field.
-// Saves handled by the server adjust it incrementally (see bookStatsRecordSave); the periodic full
-// rebuild only corrects drift, because the underlying GROUP BY is slow at millions of rows.
-const bookStatsKey = "book_stats"
-
-// bookStatsRefreshInterval is how often the book_stats hash is fully resynced from the DB,
-// correcting drift from loader writes (which bypass the server), Redis restarts, and increments
-// racing the swap. In between, the incremental counters keep the hash current.
-const bookStatsRefreshInterval = 15 * time.Minute
-
-// bookStatsLockKey elects the one replica that runs a stats resync, so the heavy GROUP BY runs
-// once per interval cluster-wide.
-const bookStatsLockKey = "book_stats:lock"
-
-// bookStatsLockTTL is slightly shorter than the refresh interval, so the next tick elects a fresh
-// runner while a died-mid-hold replica's lock still expires on its own.
-const bookStatsLockTTL = bookStatsRefreshInterval - 5*time.Second
 
 // Redis field names within a worker's hash (see workerKey).
 const (
@@ -671,193 +652,30 @@ func decodeJobCursor(encoded string) db.LearnableCursor {
 	return db.LearnableCursor{DiscCount: discCount, Level: level, Position: normalized}
 }
 
-// RunBookStatsRefresh attempts a book_stats resync immediately and then every
-// bookStatsRefreshInterval, until ctx is canceled; each attempt runs only on the replica that
-// wins that interval's lock.
-func (s *Server) RunBookStatsRefresh(ctx context.Context) {
-	s.refreshBookStatsIfElected(ctx)
-
-	ticker := time.NewTicker(bookStatsRefreshInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			s.refreshBookStatsIfElected(ctx)
-		}
-	}
-}
-
-// refreshBookStatsIfElected rebuilds the book_stats hash only if this replica wins the refresh
-// lock; losing the SET means another replica covered this interval. No leader election needed: a
-// dead holder's lock expires and any replica picks it up on its next tick.
-func (s *Server) refreshBookStatsIfElected(ctx context.Context) {
-	won, err := s.redis.SetNX(ctx, bookStatsLockKey, s.replicaID, bookStatsLockTTL).Result()
-	if err != nil {
-		log.Printf("failed to acquire book stats refresh lock: %v", err)
-		return
-	}
-	if !won {
-		return
-	}
-
-	if err := s.rebuildBookStats(ctx); err != nil {
-		log.Printf("failed to rebuild book stats: %v", err)
-	}
-}
-
-// rebuildBookStats queries the DB and replaces the book_stats hash, writing into a temp key and
-// atomically swapping it in with RENAME so readers never see a partial hash.
-func (s *Server) rebuildBookStats(ctx context.Context) error {
-	start := time.Now()
-
-	stats, err := s.repo.Stats(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to query stats: %w", err)
-	}
-
-	rows := 0
-	for _, stat := range stats {
-		rows += stat.Count
-	}
-
-	entries := statEntries(stats)
-	log.Printf("book stats: resynced %d rows into %d cells in %s", rows, len(entries), time.Since(start).Round(time.Millisecond))
-	if len(entries) == 0 {
-		// RENAME fails on a missing source key; an absent hash already means "fall back to the DB".
-		if err := s.redis.Del(ctx, bookStatsKey).Err(); err != nil {
-			return fmt.Errorf("failed to clear book stats: %w", err)
-		}
-		return nil
-	}
-
-	fields := make([]any, 0, 2*len(entries))
-	for _, e := range entries {
-		fields = append(fields, fmt.Sprintf("%d:%d:%d", e.Depth, e.Confidence, e.DiscCount), e.Count)
-	}
-
-	tempKey := bookStatsKey + ":rebuild"
-	pipe := s.redis.TxPipeline()
-	pipe.Del(ctx, tempKey)
-	pipe.HSet(ctx, tempKey, fields...)
-	pipe.Rename(ctx, tempKey, bookStatsKey)
-	if _, err := pipe.Exec(ctx); err != nil {
-		return fmt.Errorf("failed to rebuild book stats: %w", err)
-	}
-
-	return nil
-}
-
-// flushAndRebuildRedis drops every Redis value and rebuilds the derived ones, for a rollout that
-// changed how values are encoded. Only book_stats needs an eager rebuild; everything else -- the
-// job buffer, claims, worker hashes, and the ephemeral caches -- repopulates on its own. Dropped
-// claims cost at most one duplicated evaluation per active worker.
-func (s *Server) flushAndRebuildRedis(ctx context.Context) error {
+// flushRedis drops every Redis value, for a rollout that changed how values are encoded. Nothing
+// needs rebuilding: the job buffer, claims, worker hashes, and the ephemeral caches all repopulate
+// on their own. Dropped claims cost at most one duplicated evaluation per active worker.
+func (s *Server) flushRedis(ctx context.Context) error {
 	if err := s.redis.FlushDB(ctx).Err(); err != nil {
 		return fmt.Errorf("failed to flush redis: %w", err)
 	}
-	log.Printf("redis: flushed all values on request; rebuilding book stats")
-	return s.rebuildBookStats(ctx)
+	log.Printf("redis: flushed all values on request")
+	return nil
 }
 
-// bookStatsField returns the book_stats hash field for discCount-disc positions evaluated at
-// level; level 0 (unlearned) reports depth 0, confidence 0, matching statEntries.
-func bookStatsField(discCount, level int) string {
-	depth, confidence := 0, 0
-	if level > 0 {
-		depth, confidence = edax.SearchParams(discCount, level)
-	}
-	return fmt.Sprintf("%d:%d:%d", depth, confidence, discCount)
-}
-
-// bookStatsDeltaScript applies HINCRBY deltas ((field, delta) pairs in ARGV) to the book_stats
-// hash, but only when it already exists: creating it here would present a nearly-empty hash as
-// authoritative until the next full resync.
-var bookStatsDeltaScript = redis.NewScript(`
-if redis.call('EXISTS', KEYS[1]) == 0 then
-	return 0
-end
-for i = 1, #ARGV, 2 do
-	redis.call('HINCRBY', KEYS[1], ARGV[i], ARGV[i + 1])
-end
-return 1`)
-
-// applyBookStatsDeltas adjusts book_stats counters by (field, delta) pairs in one atomic script
-// call. Best-effort: on error the hash merely drifts until the next full resync, so log rather
-// than fail the caller's request.
-func (s *Server) applyBookStatsDeltas(ctx context.Context, fieldDeltas ...any) {
-	if err := bookStatsDeltaScript.Run(ctx, s.redis, []string{bookStatsKey}, fieldDeltas...).Err(); err != nil {
-		log.Printf("failed to update book stats incrementally: %v", err)
-	}
-}
-
-// bookStatsRecordInsert counts freshly inserted unlearned rows with discCount discs.
-func (s *Server) bookStatsRecordInsert(ctx context.Context, discCount, inserted int) {
-	if inserted == 0 {
-		return
-	}
-	s.applyBookStatsDeltas(ctx, bookStatsField(discCount, 0), inserted)
-}
-
-// bookStatsRecordSave moves one discCount-disc position from outcome.OldLevel's stats cell to
-// newLevel's, when the save updated the row and the levels map to different cells.
-func (s *Server) bookStatsRecordSave(ctx context.Context, discCount int, outcome db.SaveOutcome, newLevel int) {
-	if !outcome.Updated {
-		return
-	}
-
-	oldField := bookStatsField(discCount, outcome.OldLevel)
-	newField := bookStatsField(discCount, newLevel)
-	if oldField == newField {
-		return
-	}
-
-	s.applyBookStatsDeltas(ctx, oldField, -1, newField, 1)
-}
-
-// getBookStats reads the book_stats hash, sorted like statEntries; ok is false when the hash is
-// missing (Redis flushed, first boot race) and the caller should fall back to the DB.
-func (s *Server) getBookStats(ctx context.Context) (entries []statEntry, ok bool, err error) {
-	values, err := s.redis.HGetAll(ctx, bookStatsKey).Result()
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to get book stats: %w", err)
-	}
-	if len(values) == 0 {
-		return nil, false, nil
-	}
-
-	entries = make([]statEntry, 0, len(values))
-	for field, value := range values {
-		var e statEntry
-		if _, err := fmt.Sscanf(field, "%d:%d:%d", &e.Depth, &e.Confidence, &e.DiscCount); err != nil {
-			continue
-		}
-		count, err := strconv.Atoi(value)
-		if err != nil {
-			continue
-		}
-		if count <= 0 {
-			// A cell decremented to zero lingers in the hash until the next full resync.
-			continue
-		}
-		e.Count = count
-		entries = append(entries, e.classified())
-	}
-
-	sortStatEntries(entries)
-	return entries, true, nil
-}
-
-// jobFloor returns the lowest disc count the book_stats hash still shows learnable positions for
-// (search params below target; depth 0 counts), falling back to book.LeafDiscs when the hash is
-// missing. May be stale by one refresh; it is only a lower bound for the partially learned sweep.
+// jobFloor returns the lowest disc count the book still holds learnable positions for (search
+// params below target; depth 0 counts), falling back to book.LeafDiscs for an empty book or counts
+// that can't be read. It is only a lower bound for the partially learned sweep.
 func (s *Server) jobFloor(ctx context.Context) int {
-	entries, ok, err := s.getBookStats(ctx)
-	if err != nil || !ok {
+	stats, err := s.repo.Stats(ctx)
+	if err != nil {
+		log.Printf("failed to read book stats for the job floor: %v", err)
 		return book.LeafDiscs
 	}
+	if len(stats) == 0 {
+		return book.LeafDiscs
+	}
+	entries := statEntries(stats)
 
 	floor := book.MaxSavableDiscs
 	found := false
@@ -1101,8 +919,7 @@ func (s *Server) promoteToBook(ctx context.Context, position string) bool {
 		return false
 	}
 
-	discCount := normalized.CountDiscs()
-	if !isSavableDiscCount(discCount) {
+	if !isSavableDiscCount(normalized.CountDiscs()) {
 		return false
 	}
 
@@ -1112,7 +929,6 @@ func (s *Server) promoteToBook(ctx context.Context, position string) bool {
 		return false
 	}
 
-	s.bookStatsRecordInsert(ctx, discCount, inserted)
 	return inserted > 0
 }
 

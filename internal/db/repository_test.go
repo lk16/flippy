@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
@@ -35,6 +36,31 @@ func testRepository(t *testing.T) *Repository {
 	})
 
 	return NewRepository(tx)
+}
+
+// testRepositoryWithTx is testRepository, also handing back the transaction it runs in, for tests
+// that need SQL Repository itself doesn't offer.
+func testRepositoryWithTx(t *testing.T) (*Repository, pgx.Tx) {
+	t.Helper()
+
+	url := os.Getenv("FLIPPY_POSTGRES_URL")
+	if url == "" {
+		t.Skip("FLIPPY_POSTGRES_URL not set; skipping test requiring Postgres")
+	}
+
+	ctx := context.Background()
+
+	pool, err := pgxpool.New(ctx, url)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = tx.Rollback(ctx)
+	})
+
+	return NewRepository(tx), tx
 }
 
 var testPosition = othellotest.Position
@@ -221,30 +247,6 @@ func TestRepository_SaveEvaluation_Updates(t *testing.T) {
 	got, err := repo.GetPosition(ctx, position.Position())
 	require.NoError(t, err)
 	require.Equal(t, want, got)
-}
-
-func TestRepository_SaveEvaluationOutcome(t *testing.T) {
-	repo := testRepository(t)
-	ctx := context.Background()
-	position := testPosition(t, 12)
-
-	require.NoError(t, repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
-
-	outcome, err := repo.SaveEvaluationOutcome(ctx, position, Evaluation{Level: 20, Score: 4})
-	require.NoError(t, err)
-	require.Equal(t, SaveOutcome{Updated: true, OldLevel: 0}, outcome)
-
-	outcome, err = repo.SaveEvaluationOutcome(ctx, position, Evaluation{Level: 24, Score: 2})
-	require.NoError(t, err)
-	require.Equal(t, SaveOutcome{Updated: true, OldLevel: 20}, outcome)
-
-	// Non-improving level: row untouched, reported as such.
-	outcome, err = repo.SaveEvaluationOutcome(ctx, position, Evaluation{Level: 24, Score: 6})
-	require.NoError(t, err)
-	require.Equal(t, SaveOutcome{Updated: false, OldLevel: 24}, outcome)
-
-	_, err = repo.SaveEvaluationOutcome(ctx, testPosition(t, 13), Evaluation{Level: 20})
-	require.ErrorIs(t, err, ErrPositionNotFound)
 }
 
 // TestRepository_SaveEvaluation_LowerLevelIsNoOp checks that a shallower search never overwrites a
@@ -695,4 +697,67 @@ func TestRepository_Stats(t *testing.T) {
 	require.Contains(t, stats, LevelStat{DiscCount: 12, Level: 0, Count: 1})
 	require.Contains(t, stats, LevelStat{DiscCount: 12, Level: 20, Count: 1})
 	require.Contains(t, stats, LevelStat{DiscCount: 13, Level: 0, Count: 1})
+}
+
+// TestRepository_Stats_CountsFollowEveryWrite checks the board_stats triggers: the counts a save
+// moves, the cells a non-improving save leaves alone, and the row a delete takes back out. Nothing
+// resyncs them, so a missed write would stay wrong forever.
+func TestRepository_Stats_CountsFollowEveryWrite(t *testing.T) {
+	repo, tx := testRepositoryWithTx(t)
+	ctx := context.Background()
+
+	positions := testDistinctPositions(t, 12, 3)
+	require.NoError(t, repo.AddPositions(ctx, positions))
+	require.Equal(t, []LevelStat{{DiscCount: 12, Level: 0, Count: 3}}, mustStats(t, repo))
+
+	// A save moves one position out of the unlearned cell and into its new level's.
+	require.NoError(t, repo.SaveEvaluation(ctx, positions[0], Evaluation{Level: 20, Score: 4}))
+	require.Equal(t, []LevelStat{
+		{DiscCount: 12, Level: 0, Count: 2},
+		{DiscCount: 12, Level: 20, Count: 1},
+	}, mustStats(t, repo))
+
+	// A save that only improves the score leaves the row in the same cell.
+	require.NoError(t, repo.SaveEvaluation(ctx, positions[0], Evaluation{Level: 20, Score: -4}))
+	require.Equal(t, []LevelStat{
+		{DiscCount: 12, Level: 0, Count: 2},
+		{DiscCount: 12, Level: 20, Count: 1},
+	}, mustStats(t, repo))
+
+	// A cell emptied again drops out of Stats rather than reporting zero.
+	require.NoError(t, repo.SaveEvaluation(ctx, positions[0], Evaluation{Level: 24, Score: 4}))
+	_, err := tx.Exec(ctx, `DELETE FROM boards WHERE level = 0`)
+	require.NoError(t, err)
+	require.Equal(t, []LevelStat{{DiscCount: 12, Level: 24, Count: 1}}, mustStats(t, repo))
+}
+
+// TestRepository_Stats_CountsBulkInsertsOnce checks the statement-level triggers aggregate a
+// multi-row insert instead of counting only the first row.
+func TestRepository_Stats_CountsBulkInsertsOnce(t *testing.T) {
+	repo := testRepository(t)
+	ctx := context.Background()
+
+	positions := append(testDistinctPositions(t, 12, 4), testDistinctPositions(t, 13, 2)...)
+	require.NoError(t, repo.AddPositions(context.Background(), positions))
+
+	require.Equal(t, []LevelStat{
+		{DiscCount: 12, Level: 0, Count: 4},
+		{DiscCount: 13, Level: 0, Count: 2},
+	}, mustStats(t, repo))
+
+	// Re-adding the same positions inserts nothing, so the counts must not move either.
+	require.NoError(t, repo.AddPositions(ctx, positions))
+	require.Equal(t, []LevelStat{
+		{DiscCount: 12, Level: 0, Count: 4},
+		{DiscCount: 13, Level: 0, Count: 2},
+	}, mustStats(t, repo))
+}
+
+// mustStats returns repo's stats, failing the test on error.
+func mustStats(t *testing.T, repo *Repository) []LevelStat {
+	t.Helper()
+
+	stats, err := repo.Stats(context.Background())
+	require.NoError(t, err)
+	return stats
 }

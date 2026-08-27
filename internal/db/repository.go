@@ -123,51 +123,34 @@ func (r *Repository) GetPosition(ctx context.Context, position othello.Position)
 	return eval, nil
 }
 
-// SaveOutcome reports what SaveEvaluationOutcome did: whether the row was updated, and the level
-// it held beforehand (0 for unlearned).
-type SaveOutcome struct {
-	Updated  bool
-	OldLevel int
-}
-
 // SaveEvaluation updates an existing position's evaluation, but only if its level improves on
 // what's stored; a non-improving result is a silent no-op. Never inserts a row:
-// ErrPositionNotFound if none exists. Use SaveEvaluationOutcome instead when the effect matters.
+// ErrPositionNotFound if none exists.
 func (r *Repository) SaveEvaluation(ctx context.Context, position othello.NormalizedPosition, eval Evaluation) error {
-	_, err := r.SaveEvaluationOutcome(ctx, position, eval)
-	return err
-}
-
-// SaveEvaluationOutcome is SaveEvaluation, also reporting whether the row was updated and the
-// level it held before, so callers can maintain per-level counters incrementally.
-func (r *Repository) SaveEvaluationOutcome(
-	ctx context.Context, position othello.NormalizedPosition, eval Evaluation,
-) (SaveOutcome, error) {
 	encoded := position.Position().Bytes()
 
-	// The old CTE reads the statement's snapshot, i.e. the pre-update level; zero rows from it
-	// means the position has no row at all.
-	var outcome SaveOutcome
+	// The UPDATE runs even though the outer query doesn't read the CTE -- Postgres executes a
+	// data-modifying WITH exactly once regardless. The outer query reads the statement's snapshot,
+	// so it answers "did the row exist", not "did the update hit it".
+	var found int
 	err := r.db.QueryRow(ctx,
-		`WITH old AS (
-			SELECT level FROM boards WHERE position = $3
-		 ), updated AS (
+		`WITH updated AS (
 			UPDATE boards
 			SET level = $1, score = $2
 			WHERE position = $3 AND $1::smallint > level
 			RETURNING position
 		 )
-		 SELECT old.level, EXISTS (SELECT 1 FROM updated) FROM old`,
+		 SELECT count(*) FROM boards WHERE position = $3`,
 		eval.Level, eval.Score, encoded,
-	).Scan(&outcome.OldLevel, &outcome.Updated)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return SaveOutcome{}, ErrPositionNotFound
-	}
+	).Scan(&found)
 	if err != nil {
-		return SaveOutcome{}, fmt.Errorf("failed to save evaluation: %w", err)
+		return fmt.Errorf("failed to save evaluation: %w", err)
+	}
+	if found == 0 {
+		return ErrPositionNotFound
 	}
 
-	return outcome, nil
+	return nil
 }
 
 // PositionEvaluation pairs a NormalizedPosition with its current evaluation.
@@ -340,12 +323,14 @@ type LevelStat struct {
 	Count     int
 }
 
-// Stats returns position counts per (disc count, level) pair, omitting empty pairs.
+// Stats returns position counts per (disc count, level) pair, omitting empty pairs. Read from the
+// board_stats table, which triggers on boards keep exact (see migration 000007); a cell emptied
+// again stays behind as a zero row and is filtered out here.
 func (r *Repository) Stats(ctx context.Context) ([]LevelStat, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT disc_count, level, count(*)
-		 FROM boards
-		 GROUP BY disc_count, level
+		`SELECT disc_count, level, count
+		 FROM board_stats
+		 WHERE count > 0
 		 ORDER BY disc_count, level`,
 	)
 	if err != nil {

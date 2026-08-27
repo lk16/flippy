@@ -36,11 +36,14 @@ stored in Postgres, and browsed via a web frontend.
 ## Stack
 
 - Go (version in `go.mod`); deps: pgx, go-redis, coder/websocket, testify, godotenv
-- Postgres — single `boards` table (position, disc count, level, score;
+- Postgres — `boards` table (position, disc count, level, score;
   position is the 128-bit `player||opponent` big-endian pair, depth and
   confidence follow from disc count + level, see
-  `internal/edax.SearchParams`); migrations via golang-migrate
-  (`migrations/`), one-shot operator SQL in `scripts/`
+  `internal/edax.SearchParams`), plus `board_stats`: positions per
+  (disc count, level), kept exact by triggers on `boards` in the same
+  transaction as the row change, serving `GET /api/stats` and the job
+  floor. Migrations via golang-migrate (`migrations/`), one-shot operator
+  SQL in `scripts/`
 - Redis — job claims, worker heartbeats, priority queue, ephemeral
   analysis results, the shared job candidate buffer workers pop from
   (`job:buffer`, entries tagged with the tier that buffered them, kept
@@ -53,13 +56,9 @@ stored in Postgres, and browsed via a web frontend.
   opens the partially-learned sweep, from the cursor in `job:cursor`,
   which wraps when that segment runs out; both scans skip what is
   already buffered, since neither ordering knows it queued a position
-  before), and the
-  `book_stats` hash (serves `GET /api/stats`
-  and derives the job floor; updated incrementally on every save, with a
-  slow full resync from the DB to correct drift). Everything in Redis is
-  derived or ephemeral: `POST /api/redis/rebuild` (worker token) flushes
-  it all and rebuilds `book_stats`, for a rollout that changes value
-  encodings
+  before). Everything in Redis is derived or ephemeral:
+  `POST /api/redis/flush` (worker token) drops it all, for a rollout that
+  changes value encodings; nothing needs rebuilding afterwards
 - edax — external binary; `EDAX_PATH` in `.env` (see `.env.sample`)
 - Frontend — Go `html/template` + vanilla JS/CSS in `static/`, no build step
 - Scripts: `local.sh` (dev stack: compose Postgres/Redis, migrate, seed,

@@ -152,26 +152,21 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 		// A savable priority position still gets an empty-evaluation row so the unlearned scan finds it
 		// later (AddPositions never downgrades an existing row).
 		if isPriority && isSavableDiscCount(discCount) {
-			if inserted, err := s.repo.AddPositionsInserted(r.Context(), []othello.NormalizedPosition{normalized}); err != nil {
+			if err := s.repo.AddPositions(r.Context(), []othello.NormalizedPosition{normalized}); err != nil {
 				log.Printf("failed to schedule priority position for learning: %v", err)
-			} else {
-				s.bookStatsRecordInsert(r.Context(), discCount, inserted)
 			}
 		}
 	case isPriority:
 		if isSavableDiscCount(discCount) {
-			if outcome, saveErr := s.repo.SaveEvaluationOutcome(r.Context(), normalized, eval); saveErr != nil {
+			if saveErr := s.repo.SaveEvaluation(r.Context(), normalized, eval); saveErr != nil {
 				if errors.Is(saveErr, db.ErrPositionNotFound) {
 					// Position has no row yet; add one and retry.
-					if inserted, addErr := s.repo.AddPositionsInserted(r.Context(), []othello.NormalizedPosition{normalized}); addErr != nil {
+					if addErr := s.repo.AddPositions(r.Context(), []othello.NormalizedPosition{normalized}); addErr != nil {
 						log.Printf("failed to add priority position: %v", addErr)
-					} else if outcome2, saveErr2 := s.repo.SaveEvaluationOutcome(r.Context(), normalized, eval); saveErr2 != nil {
-						s.bookStatsRecordInsert(r.Context(), discCount, inserted)
-						log.Printf("failed to save priority evaluation after AddPositions: %v", saveErr2)
+					} else if retryErr := s.repo.SaveEvaluation(r.Context(), normalized, eval); retryErr != nil {
+						log.Printf("failed to save priority evaluation after AddPositions: %v", retryErr)
 					} else {
 						savedToDB = true
-						s.bookStatsRecordInsert(r.Context(), discCount, inserted)
-						s.bookStatsRecordSave(r.Context(), discCount, outcome2, req.Level)
 					}
 				} else {
 					writeError(w, http.StatusInternalServerError, saveErr)
@@ -179,14 +174,12 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 				}
 			} else {
 				savedToDB = true
-				s.bookStatsRecordSave(r.Context(), discCount, outcome, req.Level)
 			}
 		}
 		// Too many discs: the ephemeral cache is the only record.
 	default:
 		// ErrPositionNotFound is a real bug here: every candidate position already has a row.
-		outcome, err := s.repo.SaveEvaluationOutcome(r.Context(), normalized, eval)
-		if err != nil {
+		if err := s.repo.SaveEvaluation(r.Context(), normalized, eval); err != nil {
 			if errors.Is(err, db.ErrPositionNotFound) {
 				writeError(w, http.StatusNotFound, err)
 				return
@@ -195,7 +188,6 @@ func (s *Server) handleSubmitJobResult(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		savedToDB = true
-		s.bookStatsRecordSave(r.Context(), discCount, outcome, req.Level)
 	}
 
 	if savedToDB {
@@ -258,10 +250,10 @@ func (s *Server) handleReleaseJob(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// handleRebuildRedis handles POST /api/redis/rebuild: flushes every Redis value and rebuilds the
-// derived ones, for a rollout that changed how values are encoded.
-func (s *Server) handleRebuildRedis(w http.ResponseWriter, r *http.Request) {
-	if err := s.flushAndRebuildRedis(r.Context()); err != nil {
+// handleFlushRedis handles POST /api/redis/flush: drops every Redis value, for a rollout that
+// changed how values are encoded. Everything Redis holds is derived or ephemeral, so it repopulates.
+func (s *Server) handleFlushRedis(w http.ResponseWriter, r *http.Request) {
+	if err := s.flushRedis(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -394,15 +386,8 @@ func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleStats handles GET /api/stats: returns position counts per (disc count, depth, confidence)
-// cell, served from the periodically rebuilt book_stats hash (see RunBookStatsRefresh). If the hash
-// is missing (Redis flushed, first boot race), the DB is queried directly.
+// cell, from the board_stats counts every write to the boards table keeps current.
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
-	entries, ok, err := s.getBookStats(r.Context())
-	if err == nil && ok {
-		writeJSON(w, http.StatusOK, entries)
-		return
-	}
-
 	stats, err := s.repo.Stats(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -445,7 +430,7 @@ const (
 // statBucket classifies a stats cell: unlearned when the position was never searched, learned when
 // its search reaches the disc count's target or better -- including one that ran the game out, which
 // no deeper search can improve on -- and partial in between. Decided from (depth, confidence) alone:
-// neither /api/stats nor the book_stats hash carries the level that produced them.
+// /api/stats does not carry the level that produced them.
 func statBucket(discCount, depth, confidence int) string {
 	if depth == 0 {
 		return statBucketUnlearned

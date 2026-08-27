@@ -486,8 +486,6 @@ func TestHandleStats_Empty(t *testing.T) {
 	require.JSONEq(t, `[]`, w.Body.String())
 }
 
-// TestHandleStats_ReturnsCounts covers the DB fallback: with no book_stats hash in Redis (first
-// boot, Redis flushed), the stats are queried directly.
 func TestHandleStats_ReturnsCounts(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
@@ -502,18 +500,37 @@ func TestHandleStats_ReturnsCounts(t *testing.T) {
 	require.Contains(t, entries, classifiedStat(12, 0, 0, 1))
 }
 
-// TestHandleStats_ServesFromBookStatsHash proves the endpoint reads the rebuilt hash rather than the
-// DB: a position added after the rebuild is not reported.
-func TestHandleStats_ServesFromBookStatsHash(t *testing.T) {
+// TestHandleStats_ReportsASubmittedResultImmediately pins what the counts are for: a job result
+// changes the table the endpoint reads in the same transaction, so nothing has to be resynced first.
+func TestHandleStats_ReportsASubmittedResultImmediately(t *testing.T) {
 	s := testServer(t)
 	ctx := context.Background()
 
-	position12 := testPosition(t, 12)
-	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position12}))
-	require.NoError(t, s.rebuildBookStats(ctx))
+	position := testPosition(t, 12)
+	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position}))
 
-	position13 := testPosition(t, 13)
-	require.NoError(t, s.repo.AddPositions(ctx, []othello.NormalizedPosition{position13}))
+	level := TargetLevel(12)
+	w := doRequest(t, s, http.MethodPost, "/api/jobs/result", jobResultRequest{
+		WorkerID: "w1", Position: position.String(), Level: level, Score: 2,
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	w = doRequest(t, s, http.MethodGet, "/api/stats", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	depth, confidence := edax.SearchParams(12, level)
+	var entries []statEntry
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &entries))
+	require.Equal(t, []statEntry{classifiedStat(12, depth, confidence, 1)}, entries)
+}
+
+// TestHandleStats_ReportsAPositionAddedByExploring is the other write path into the book: a
+// priority position promoted to an unlearned row is counted as soon as it is inserted.
+func TestHandleStats_ReportsAPositionAddedByExploring(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	require.True(t, s.promoteToBook(ctx, testPosition(t, 12).String()))
 
 	w := doRequest(t, s, http.MethodGet, "/api/stats", nil)
 	require.Equal(t, http.StatusOK, w.Code)
@@ -581,7 +598,7 @@ func TestHandleListWorkers_ReturnsActiveWorkers(t *testing.T) {
 }
 
 // TestStatBucket covers the three groups the stats page shows, decided from (depth, confidence)
-// alone -- the level that produced them is not carried by /api/stats or the book_stats hash.
+// alone -- the level that produced them is not carried by /api/stats.
 func TestStatBucket(t *testing.T) {
 	targetDepth, targetConfidence := edax.SearchParams(12, TargetLevel(12))
 
