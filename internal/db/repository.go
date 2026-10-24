@@ -220,36 +220,34 @@ func (r *Repository) ListUnlearned(ctx context.Context, q UnlearnedQuery) ([]Pos
 	return results, nil
 }
 
-// LearnableQuery bounds a ListPartiallyLearned scan: positions in [MinDiscs, MaxDiscs] below their
-// target level, which is LeafLevel at LeafDiscs and DeeperLevel above it. MinDiscs may be raised
-// above LeafDiscs without changing which count is leaf. After resumes a scan, and Limit caps the
+// LearnableQuery bounds a ListPartiallyLearned scan: positions in [MinDiscs, MaxDiscs] below the
+// target level their own disc count asks for, which TargetLevels holds one of per disc count,
+// indexed by that count and covering 0..MaxSavableDiscs. After resumes a scan, and Limit caps the
 // rows.
 type LearnableQuery struct {
-	MinDiscs    int
-	MaxDiscs    int
-	LeafDiscs   int
-	LeafLevel   int
-	DeeperLevel int
-	After       LearnableCursor
-	Limit       int
+	MinDiscs     int
+	MaxDiscs     int
+	TargetLevels []int
+	After        LearnableCursor
+	Limit        int
 }
 
 // ListPartiallyLearned returns up to q.Limit searched-but-below-target positions matching q, by
 // disc count, then level, then position. Ordering by level orders by the search it stands for:
 // (depth, confidence) never decreases as level rises within a disc count (see
-// TestSearchParamsRiseWithLevel). Filtering in SQL keeps learned LeafDiscs rows from starving the
-// rest.
+// TestSearchParamsRiseWithLevel). Filtering in SQL keeps rows already at their disc count's target
+// from starving the rest.
 func (r *Repository) ListPartiallyLearned(ctx context.Context, q LearnableQuery) ([]PositionEvaluation, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT position, level, score
 		 FROM boards
 		 WHERE disc_count BETWEEN $1 AND $2
 		   AND level > 0
-		   AND level < CASE WHEN disc_count = $3 THEN $4::smallint ELSE $5::smallint END
-		   AND (disc_count, level, position) > ($6::smallint, $7::smallint, $8::bytea)
+		   AND level < ($3::smallint[])[disc_count + 1]
+		   AND (disc_count, level, position) > ($4::smallint, $5::smallint, $6::bytea)
 		 ORDER BY disc_count, level, position
-		 LIMIT $9`,
-		q.MinDiscs, q.MaxDiscs, q.LeafDiscs, q.LeafLevel, q.DeeperLevel,
+		 LIMIT $7`,
+		q.MinDiscs, q.MaxDiscs, q.TargetLevels,
 		q.After.DiscCount, q.After.Level, q.After.Position.Position().Bytes(),
 		q.Limit,
 	)

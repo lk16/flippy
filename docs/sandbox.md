@@ -35,8 +35,15 @@ Same deal for Rust/cargo (used by wasm/edax-eval, the only Rust crate in this
 repo): set these before any cargo/rustup commands:
 
     export PATH="$PATH:$(echo /home/*/.cargo/bin | tr ' ' ':')"
-    export CARGO_HOME="$(echo /home/*/.cargo)"    # host crate cache
-    export RUSTUP_HOME="$(echo /home/*/.rustup)"  # host toolchains + targets
+    # The host .cargo is mounted read-only, and cargo unpacks a .crate into
+    # CARGO_HOME/registry/src the first time it builds it -- pointing CARGO_HOME
+    # straight at the host copy dies with "Read-only file system (os error 30)"
+    # on the first crate the host never unpacked (hit with adler2 via flate2).
+    # Copy it once into a writable home instead; it is ~260MB and the .crate
+    # cache and registry index come along, so cargo still needs no network:
+    #     cp -a /home/luuk/.cargo "$HOME/.cargo" && chmod -R u+w "$HOME/.cargo"
+    export CARGO_HOME="$HOME/.cargo"              # writable copy of the host crate cache
+    export RUSTUP_HOME="$(echo /home/*/.rustup)"  # host toolchains + targets (read-only is fine)
 
 PATH is the one variable `/etc/sandbox-persistent.sh` cannot carry across
 Bash tool calls: Claude Code's shell snapshot sets PATH *after* sourcing

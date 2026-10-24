@@ -285,16 +285,20 @@ func TestRepository_SaveEvaluation_NoOpWhenNotBetter(t *testing.T) {
 	require.Equal(t, first, got)
 }
 
-// testLearnableQuery returns the query these tests share — 12-disc leaves needing level 24, up to
-// 30 discs — varying only the fields a given case is about.
+// testLearnableQuery returns the query these tests share — 12-disc leaves needing level 24, every
+// deeper count deeperLevel, up to 30 discs — varying only the fields a given case is about.
 func testLearnableQuery(minDiscs, deeperLevel, limit int) LearnableQuery {
+	targets := make([]int, 31)
+	for discCount := range targets {
+		targets[discCount] = deeperLevel
+	}
+	targets[12] = 24
+
 	return LearnableQuery{
-		MinDiscs:    minDiscs,
-		MaxDiscs:    30,
-		LeafDiscs:   12,
-		LeafLevel:   24,
-		DeeperLevel: deeperLevel,
-		Limit:       limit,
+		MinDiscs:     minDiscs,
+		MaxDiscs:     30,
+		TargetLevels: targets,
+		Limit:        limit,
 	}
 }
 
@@ -541,6 +545,26 @@ func TestRepository_ListPartiallyLearned_MinDiscsAboveLeafDiscsKeepsLeafThreshol
 	results, err := repo.ListPartiallyLearned(context.Background(), testLearnableQuery(13, 16, 10))
 	require.NoError(t, err)
 	require.Empty(t, results)
+}
+
+// TestRepository_ListPartiallyLearned_TargetsArePerDiscCount covers the sweep's cutoff being each
+// row's own target: disc counts above the leaf do not share one, so a row at target for its count
+// is finished even while a neighbouring count still asks for more.
+func TestRepository_ListPartiallyLearned_TargetsArePerDiscCount(t *testing.T) {
+	repo := testRepository(t)
+
+	position13, position14 := testPosition(t, 13), testPosition(t, 14)
+	addPartiallyLearned(t, repo, []othello.NormalizedPosition{position13, position14}, 20)
+
+	query := testLearnableQuery(13, 0, 10)
+	query.TargetLevels[13] = 24
+	query.TargetLevels[14] = 20
+
+	// position14 is at its own target; only sharing 13's higher one would return it.
+	results, err := repo.ListPartiallyLearned(context.Background(), query)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, position13, results[0].Position)
 }
 
 func TestRepository_ListPartiallyLearned_FiltersByDiscCountRange(t *testing.T) {

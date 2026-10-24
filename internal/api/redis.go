@@ -409,6 +409,13 @@ func (s *Server) refillFromPartiallyLearned(
 		return 0, err
 	}
 
+	// Learnable work below the cursor appeared after the sweep passed it -- a row searched at
+	// UnlearnedLevel, say. Rescanning from the start hands it out now instead of a wrap away, and
+	// costs little: every row the scan steps over is genuinely below its own target.
+	if floor < cursor.DiscCount {
+		cursor = db.LearnableCursor{}
+	}
+
 	buffered, wrapped, sawCandidates := 0, false, false
 	budget := refillPageBudget(want)
 	var next db.LearnableCursor
@@ -576,14 +583,17 @@ func (s *Server) bufferCandidates(
 func (s *Server) listPartiallyLearnedFrom(
 	ctx context.Context, minDiscs int, cursor db.LearnableCursor, limit int,
 ) ([]db.PositionEvaluation, error) {
+	targets := make([]int, book.MaxSavableDiscs+1)
+	for discCount := range targets {
+		targets[discCount] = TargetLevel(discCount)
+	}
+
 	candidates, err := s.repo.ListPartiallyLearned(ctx, db.LearnableQuery{
-		MinDiscs:    minDiscs,
-		MaxDiscs:    book.MaxSavableDiscs,
-		LeafDiscs:   book.LeafDiscs,
-		LeafLevel:   TargetLevel(book.LeafDiscs),
-		DeeperLevel: TargetLevel(book.LeafDiscs + 1),
-		After:       cursor,
-		Limit:       limit,
+		MinDiscs:     minDiscs,
+		MaxDiscs:     book.MaxSavableDiscs,
+		TargetLevels: targets,
+		After:        cursor,
+		Limit:        limit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list candidate positions: %w", err)
