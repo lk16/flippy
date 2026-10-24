@@ -945,6 +945,38 @@ func TestServer_RefillJobBuffer_AdvancesCursorThenWraps(t *testing.T) {
 	require.Equal(t, len(positions), buffered)
 }
 
+// TestServer_RefillJobBuffer_RewindsToCandidatesBelowTheCursor covers a row that falls below its
+// target while the sweep is past its disc count -- one just searched at UnlearnedLevel, say. The
+// sweep still has deeper work ahead of it, so it never wraps on its own, and without a rewind the
+// shallow row would wait behind every deeper row in the book.
+func TestServer_RefillJobBuffer_RewindsToCandidatesBelowTheCursor(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+
+	mid, deep := testPartiallyLearnedPosition(t, s, 14), testPartiallyLearnedPosition(t, s, 20)
+	shallow := testPartiallyLearnedPosition(t, s, 13)
+
+	// The sweep has buffered and handed out everything up to mid, with deep still ahead of it.
+	require.NoError(t, s.redis.Set(ctx, jobCursorKey, encodeJobCursor(db.LearnableCursor{
+		DiscCount: 14, Level: UnlearnedLevel(14), Position: mid,
+	}), 0).Err())
+
+	buffered, err := s.refillJobBuffer(ctx, jobBufferSize)
+	require.NoError(t, err)
+	require.Equal(t, 3, buffered)
+	require.Equal(t, []string{
+		encodeJobCandidate(tierPartiallyLearned, shallow),
+		encodeJobCandidate(tierPartiallyLearned, mid),
+		encodeJobCandidate(tierPartiallyLearned, deep),
+	}, bufferedPositions(t, s))
+
+	job, ok, err := s.claimJob(ctx, "worker-1")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, shallow, job.Position)
+	require.Equal(t, TargetLevel(13), job.Level)
+}
+
 // TestServer_RefillJobBuffer_SkipsPositionsStillInTheBuffer covers what keeps a top-up from queueing
 // the same position twice: the unlearned scan restarts at the top of the book on every refill, and
 // the entries an earlier refill left behind are still waiting there.

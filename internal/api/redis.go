@@ -409,6 +409,13 @@ func (s *Server) refillFromPartiallyLearned(
 		return 0, err
 	}
 
+	// Learnable work below the cursor appeared after the sweep passed it -- a row searched at
+	// UnlearnedLevel, say. Rescanning from the start hands it out now instead of a wrap away, and
+	// costs little: every row the scan steps over is genuinely below its own target.
+	if floor < cursor.DiscCount {
+		cursor = db.LearnableCursor{}
+	}
+
 	buffered, wrapped, sawCandidates := 0, false, false
 	budget := refillPageBudget(want)
 	var next db.LearnableCursor
